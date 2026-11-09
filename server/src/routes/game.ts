@@ -49,6 +49,24 @@ export function gameRoutes(ctx: Ctx) {
     res.json({ valid: true, user: publicUser(u), role: u.role, permissions: permissionsFor(u.role), game: row.game_slug });
   });
 
+  // In-game admin actions reported by a game server (authenticated by X-Game-Server-Key).
+  r.post('/game/audit', async (req, res) => {
+    const key = req.get('x-game-server-key') ?? '';
+    if (!ctx.config.gameServerKey || !safeEqual(key, ctx.config.gameServerKey)) throw new HttpError(401, 'Invalid game server key');
+    const b = parse(z.object({
+      actorUserId: z.number().int().positive(),
+      action: z.string().regex(/^ingame\.[a-z.\-_]{1,48}$/),
+      targetUserId: z.number().int().positive().optional(),
+      targetLabel: z.string().max(64).optional(),
+      details: z.record(z.string(), z.unknown()).optional(),
+    }), req.body);
+    const actor = await ctx.db<UserRow>('users').where({ id: b.actorUserId }).first();
+    if (!actor) throw new HttpError(404, 'Unknown actor');
+    const category = /kick/.test(b.action) ? 'moderation' : 'game';
+    await audit(ctx.db, req, { action: b.action, category, targetType: b.targetUserId ? 'user' : 'room', targetId: b.targetUserId ?? (b.details?.room as string | undefined), targetLabel: b.targetLabel, details: b.details }, actor);
+    res.json({ ok: true });
+  });
+
   r.post('/game/weather', requirePermission('weather.change'), async (req, res) => {
     const body = parse(z.object({ weather: z.enum(WEATHER), session: z.string().max(64).optional() }), req.body);
     await audit(ctx.db, req, { action: 'game.weather.change', category: 'game', targetType: 'session', targetId: body.session ?? 'all', details: body });

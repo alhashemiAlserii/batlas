@@ -102,7 +102,7 @@ export function csrfProtect(ctx: Ctx): RequestHandler {
     if (SAFE.has(req.method)) return next();
     // Bearer / server-key auth carries no ambient browser credentials, and custom headers
     // can't be sent cross-site without a CORS preflight (which we never allow).
-    if (req.get('authorization') || req.get('x-game-server-key') || req.path === '/game/verify') return next();
+    if (req.get('authorization') || req.get('x-game-server-key') || req.path === '/game/verify' || req.path === '/game/audit') return next();
     const names = cookieNames(ctx.config.cookieSecure);
     const cookieTok = req.cookies?.[names.csrf];
     const headerTok = req.get('x-csrf-token');

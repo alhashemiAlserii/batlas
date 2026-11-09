@@ -1,0 +1,12 @@
+{
+  "_comment": "Random flight events. weight = relative chance per roll; phases = when it may fire; checkEverySeconds/chancePerCheck control frequency.",
+  "checkEverySeconds": 10,
+  "chancePerCheck": 0.55,
+  "events": [
+    { "id": "turbulence", "weight": 4, "phases": ["climb", "cruise", "approach"], "duration": [6, 11], "intensity": [0.6, 1.1], "cooldown": 15, "message": "Turbulence! Hold on to something." },
+    { "id": "air_pocket", "weight": 2, "phases": ["cruise"], "duration": [1.2, 1.8], "intensity": [2.2, 3.0], "cooldown": 25, "message": "Air pocket! Everything floats for a second..." },
+    { "id": "complaint", "weight": 3, "phases": ["climb", "cruise", "approach"], "cooldown": 20, "message": "A passenger is complaining loudly. Go and sort it out!" },
+    { "id": "engine_warning", "weight": 1.5, "phases": ["cruise"], "timeout": 45, "cooldown": 60, "fix": "panel", "message": "ENGINE 2 WARNING: reset it at the maintenance panel in the cargo hold." },
+    { "id": "cabin_pressure", "weight": 1, "phases": ["cruise"], "timeout": 40, "cooldown": 80, "fix": "panel", "message": "CABIN PRESSURE WARNING (simulation): masks down! Fix it at the maintenance panel." }
+  ]
+}

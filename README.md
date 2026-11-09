@@ -1,4 +1,4 @@
-# Batlas — Studio Website & Platform (Stages 1–2)
+# Batlas — Studio Website, Platform & Sky Crew (Stages 1–3)
 
 The official Batlas website, shared player accounts, rank system and Developer dashboard.
 One account works across every Batlas game; game servers (starting with the co-op airplane
@@ -11,7 +11,7 @@ cd server
 npm install
 cp .env.example .env            # set GAME_SERVER_KEY to a long random value
 npm run migrate                 # creates data/studio.sqlite
-npm run create-developer -- --username abood --email you@example.com
+npm run create-developer -- --username abood   # --email is optional
                                 # generated password -> data/developer-credentials.txt (chmod 600)
 npm start                       # http://localhost:3000
 npm test                        # vitest + supertest
@@ -138,13 +138,78 @@ Games are stored in the database, so publishing or editing a game in the dashboa
 - Use Postgres for multi-server deployments; keep `GAME_SERVER_KEY` secret.
 - Uploaded images live in `server/uploads` (back these up, or move to object storage later).
 
+## Accounts without email (school iPads)
+
+Email is **optional** everywhere (`EMAIL_ENABLED=false` by default):
+
+- Register with **username + password** only; email sits behind "Add email (optional)". Log in by username (or email if one was added).
+- Nothing requires verification. With email off, `/api/auth/verify-email/*` and `/api/auth/password/*` answer `404 email_disabled`, and `/forgot-password` says "Ask a Batlas admin".
+- **Staff password reset:** in `/admin` or `/studio-console` → Users → **Reset password**. Developers can reset anyone below them. Admins can reset Trusted and Player accounts, but not Admins or the Developer. The server issues a one-time temporary password (`xxxx-xxxx-xxxx`, shown once). It signs the user out everywhere and forces a password change at the next login. Every reset is written to the audit log (`player.password_reset`).
+- Set `EMAIL_ENABLED=true` (plus a real mailer) later to switch the email verification and reset links back on.
+
+## Sky Crew (Stage 3: playable early build)
+
+Play at **`/play/sky-crew`**. The game page `/games/sky-crew` stays *Upcoming* and shows a **▶ Play early build** button. Everything is vendored and works offline: Three.js r187 and cannon-es 0.20 live in `web/public/play/vendor/`, all art is procedural low-poly, and nothing loads from a CDN.
+
+**Loop:** load the 8 bags from the cart up the cargo stairs into the hold. The 10 passengers walk up the front stairs to their seats on their own; just keep the front door open. Close the doors, take the captain's seat and throttle up. Departing closes any open door (with a penalty) and removes the stairs. Bags still outside and passengers not yet aboard are left behind. Fly about 17 km to **Coral Point (CRP)** and land. During the flight, serve requests from the galley (water, snack, blanket), calm complaints, and fix engine and cabin-pressure warnings at the maintenance panel in the hold. Turbulence shakes the cabin, and loose bags fly around. Bags slide aft when you climb. The results screen scores bags, passengers, service, fixes, landing quality, happiness and time (0–5★).
+
+**Controls:**
+- **Walking:** WASD to move, mouse to look (click to lock the pointer, or drag), Shift to sprint, Space to jump, **E** to interact (pick up or place, doors, galley, panel, serve, pilot seat), **Q** to throw, **V** for first or third person, **Esc** to pause, **F2** for staff tools.
+- **Pilot:** R/F for throttle, W/S for pitch, A/D to bank (or steer on the ground), X to leave the seat. If nobody is in the seat, the autopilot holds the plane level, so the pilot can go help in the cabin.
+- **Touch (phones and iPads):** left stick to move, drag on the right side to look, plus E, jump and camera buttons. Seated pilots also get THR+ and THR− buttons. A 💦 button appears with the Wave Cannon.
+
+**Files:** `web/public/play/sky-crew/`:
+- `index.html` and `game.css`
+- `events.json`: random events with weight, phases, duration, timeout and cooldown. Edit it to tune the game without touching code.
+- `js/world.js`: aircraft with colliders, airports and scenery
+- `js/sim.js`: luggage physics, passengers and personalities, events, phases and scoring
+- `js/flight.js`: arcade flight model
+- `js/characters.js`: low-poly people, name tags and request bubbles
+- `js/net.js`: co-op client
+- `js/ui.js`: HUD and staff overlay
+- `js/main.js`: input, character controller, cameras and glue
+
+The design notes are in `docs/sky-crew-design.md`.
+
+### Co-op
+
+- **Game server:** `server/src/game-server/` runs a WebSocket server at `/ws/sky-crew` on the same port. It is enabled when `GAME_SERVER_KEY` is set in `server/.env`.
+- **Sign-in:** the browser gets a 2-minute single-use token from `POST /api/game/token` (website session plus CSRF). The game server checks that token with `POST /api/game/verify` using `X-Game-Server-Key`. **Name, rank and permissions come only from that check.** Anything the client claims is ignored.
+- **Rooms:** rooms use 5-letter codes and hold up to 8 players.
+- **Roles:**
+  - The room creator is the **host** and runs the simulation (luggage physics, passengers, events), sending world snapshots about 10×/s.
+  - The seated **pilot** owns the aircraft state at 15 Hz.
+  - Other players send actions (grab, drop, serve, door, fix) to the host.
+  - If the host leaves, the longest-connected player takes over.
+- **Display:** names and rank badges float over heads in the rank colours: Developer gold, Admin blue, Trusted green, Player white.
+- **Guests (not signed in):** can play solo. Co-op and staff tools need a Batlas account (username only).
+- **How to test co-op:** sign in with two different accounts in two browsers, or one normal and one private window. Open `/play/sky-crew`. In one, click **Create co-op room** and read the code at the top right. In the other, type that code and click **Join**. You can also use `/play/sky-crew?room=CODE`.
+
+### In-game staff tools (F2 or the 🛠 Staff button, in a co-op room)
+
+The overlay shows only the tools your rank allows. **The game server re-checks every command against the central permission map, and `canActOn` decides who can act on whom.** Every command is written to the site audit log as `ingame.*` (kicks under *moderation*).
+
+| Rank | Tools |
+|---|---|
+| Trusted | spawn approved items (suitcase, duffel, water, snack, blanket) |
+| Admin | + kick players (never the Developer, never equal or higher ranks), weather clear/storm, emergency scenarios (engine failure, severe turbulence, cabin pressure, emergency landing) start/stop |
+| Developer | everything + fun items (beach ball, giant duck, traffic cone), teleport self/players, NPC control (sit/dance/panic/calm), **Wave Cannon**: a fictional splash cannon that knocks loose luggage away |
+
 ## Browser testing
 
 - Automated API tests: `cd server && npm test`.
-- Safari: `e2e/webkit-check.mjs` drives Playwright **WebKit** (Safari's engine) on desktop and an iPhone 15 profile: every public page, the contact form, sign-up → email-verify link from the outbox → avatar upload → change password → forgot/reset password (and reuse rejected), the Developer dashboard tabs and the mobile menu; it also flags console errors and horizontal overflow. This is WebKit on Linux, not real Safari on Apple hardware, so a final check on a real iPhone/Mac is still recommended.
+- Safari: `e2e/webkit-check.mjs` runs Playwright **WebKit** (Safari's engine) on desktop and on an iPhone 15 profile. It covers:
+  - every public page and the contact form (email optional)
+  - sign-up with username and password only, then avatar upload and password change
+  - login by username and the "Ask a Batlas admin" hint
+  - a staff temporary-password reset, then the forced password change
+  - the Developer dashboard tabs and the mobile menu
+
+  It also flags console errors and horizontal overflow.
+- Game: `e2e/sky-crew.mjs [chromium|webkit|coop|all]` runs in Chromium and WebKit, on desktop and on mobile (Pixel 7 and iPad). It loads the game, checks for console errors, walks, picks up a bag, carries it up the stairs into the hold, takes the pilot seat, takes off, lands at CRP and reaches the results screen. It also serves a passenger, fixes an engine warning, and tests the touch joystick. The co-op part joins two signed-in clients (Developer and Player) to one room and checks that they see each other, that positions, world and held items sync, and that staff tools are gated. Run it with `ln -s <playwright node_modules> e2e/node_modules`. Screenshots go to `docs/screenshots/stage3/`. This is WebKit on Linux, not real Safari on Apple hardware, so a final check on a real iPhone/Mac is still recommended.
 
 ## Next stages
 
 1. ~~Stage 2 — Content~~ ✅ news, contact inbox, email verification, password reset/change, avatars, version history, stats.
-2. **Stage 3 — Browser airplane game (Sky Crew) v0:** a Three.js game served at `/play/sky-crew`, signed in through `/api/game/token`; a small authoritative WebSocket game server that checks every player with `/api/game/verify`; single-plane co-op room with basic flight, cabin walk-around, luggage physics and turbulence; in-game rank badges and an admin overlay wired to the existing weather/emergency/spawn/kick endpoints.
+2. ~~Stage 3 — Sky Crew v0~~ ✅ (see above). Original plan: a Three.js game served at `/play/sky-crew`, signed in through `/api/game/token`; a small authoritative WebSocket game server that checks every player with `/api/game/verify`; single-plane co-op room with basic flight, cabin walk-around, luggage physics and turbulence; in-game rank badges and an admin overlay wired to the existing weather/emergency/spawn/kick endpoints.
 3. **Stage 4 — Account hardening & launch prep:** real email provider, optional 2FA for staff, "log out everywhere" / session list, Postgres, hosting + domain + HTTPS, backups and monitoring, real-device Safari testing.

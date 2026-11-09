@@ -39,7 +39,14 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
           imgSrc: ["'self'", 'data:', 'https:'],
           mediaSrc: ["'self'", 'https:'],
           frameSrc: ['https://www.youtube-nocookie.com', 'https://www.youtube.com', 'https://player.vimeo.com'],
-          connectSrc: ["'self'"],
+          // 'self' covers ws(s) of the same host in modern browsers; list it explicitly for older Safari.
+          connectSrc: [
+            "'self'",
+            (req) => {
+              const host = String((req as { headers: { host?: string } }).headers.host ?? '');
+              return /^[a-z0-9.\-]+(:\d{1,5})?$/i.test(host) ? `${config.cookieSecure ? 'wss' : 'ws'}://${host}` : "'self'";
+            },
+          ],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
           formAction: ["'self'"],
@@ -112,6 +119,8 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.get('/forgot-password', page('forgot.html'));
   app.get('/reset-password', page('reset.html'));
   app.get('/verify-email', page('verify.html'));
+  app.get('/play/sky-crew', page('play/sky-crew/index.html'));
+  app.get('/play/sky-crew/', (_req, res) => res.redirect(301, '/play/sky-crew'));
 
   app.get('/admin', gated('admin.panel', 'admin.html', false));
   app.get('/admin/app.js', gated('admin.panel', 'admin.js', true));

@@ -19,6 +19,7 @@ try {
   const media = trailer(g.trailerUrl) || (g.coverImage ? h('img', { src: g.coverImage, alt: g.title }) : h('div', { class: 'media-placeholder' }, h('img', { src: '/img/batlas-mark.png', alt: '' })));
   const actions = h('div', { class: 'inline' });
   if (g.status === 'published' && safeUrl(g.playUrl)) actions.append(h('a', { class: 'btn primary', href: safeUrl(g.playUrl) }, '▶ Play in browser'));
+  if (g.status === 'upcoming' && safeUrl(g.playUrl)) actions.append(h('a', { class: 'btn primary', href: safeUrl(g.playUrl) }, '▶ Play early build'));
   const dl = safeUrl(g.latestVersion?.downloadUrl) || safeUrl(g.downloadUrl);
   if (g.status === 'published' && dl) actions.append(h('a', { class: 'btn', href: dl, rel: 'noopener' }, g.latestVersion ? `⬇ Download v${g.latestVersion.version}` : '⬇ Download'));
   if (g.status === 'upcoming') actions.append(h('span', { class: 'pill upcoming' }, 'Coming soon'));
