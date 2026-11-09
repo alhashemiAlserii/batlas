@@ -1,0 +1,118 @@
+// Shared helpers for every page. No inline scripts: CSP is script-src 'self'.
+
+/** Safe element builder: strings become text nodes, never HTML. */
+export function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (k === 'dataset') Object.assign(el.dataset, v);
+    else el.setAttribute(k, v === true ? '' : String(v));
+  }
+  for (const c of children.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+
+export const $ = (sel, root = document) => root.querySelector(sel);
+
+function readCookie(name) {
+  return document.cookie.split('; ').find((c) => c.startsWith(name + '='))?.split('=').slice(1).join('=');
+}
+async function csrfToken() {
+  let t = readCookie('__Host-csrf') || readCookie('csrf');
+  if (!t) t = (await (await fetch('/api/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+  return decodeURIComponent(t);
+}
+
+export async function api(method, url, body) {
+  const opts = { method, credentials: 'same-origin', headers: {} };
+  if (method !== 'GET') opts.headers['x-csrf-token'] = await csrfToken();
+  if (body instanceof FormData) opts.body = body;
+  else if (body !== undefined) {
+    opts.headers['content-type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, opts);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+export const RANK_LABEL = { DEVELOPER: 'DEVELOPER', ADMIN: 'ADMIN', TRUSTED: 'TRUSTED', PLAYER: 'PLAYER' };
+export function rankBadge(role) {
+  const r = RANK_LABEL[role] ? role : 'PLAYER';
+  return h('span', { class: `rank rank-${r.toLowerCase()}`, title: `${r} rank` }, RANK_LABEL[r]);
+}
+export function userChip(u, link = true) {
+  const role = (u.role || 'PLAYER').toLowerCase();
+  const name = h('span', { class: `name-${role}` }, u.displayName || u.username);
+  return h('span', { class: 'user-chip' }, link ? h('a', { href: `/u/${encodeURIComponent(u.username)}` }, name) : name, rankBadge(u.role));
+}
+
+let meP;
+export function getMe() {
+  meP ??= Promise.all([api('GET', '/api/me'), api('GET', '/api/me/permissions')]).then(([m, p]) => ({ user: m.user, role: p.role, permissions: new Set(p.permissions) }));
+  return meP;
+}
+
+export function showError(container, err) {
+  container.replaceChildren(h('div', { class: 'alert error', role: 'alert' }, err.message || String(err)));
+}
+export function showOk(container, msg) {
+  container.replaceChildren(h('div', { class: 'alert ok', role: 'status' }, msg));
+}
+
+export function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+async function renderChrome() {
+  const header = $('#site-header');
+  const footer = $('#site-footer');
+  let studio = 'Batlas';
+  try { studio = (await api('GET', '/api/site')).studioName; } catch {}
+  const path = location.pathname;
+  const link = (href, label) => h('a', { href, class: path === href || (href !== '/' && path.startsWith(href)) ? 'active' : '' }, label);
+  if (header) {
+    const right = h('div', { class: 'nav-right' });
+    const links = h('div', { class: 'nav-links' }, link('/', 'Home'), link('/games', 'Games'), link('/#news', 'News'), link('/contact', 'Contact'));
+    const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
+      h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` }, h('img', { class: 'brand-mark', src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 }), h('span', { class: 'sr-only', 'data-studio-name': '' }, studio),
+        null),
+      h('button', { class: 'menu-btn', 'aria-label': 'Menu', onclick: () => nav.classList.toggle('open') }, '☰'),
+      links, right);
+    header.replaceChildren(nav);
+    try {
+      const me = await getMe();
+      if (me.user) {
+        if (me.permissions.has('admin.panel')) links.append(link('/admin', 'Admin'));
+        right.append(
+          h('a', { href: '/profile' }, userChip(me.user, false)),
+          h('button', { class: 'btn small', onclick: async () => { await api('POST', '/api/auth/logout'); location.href = '/'; } }, 'Log out'),
+        );
+      } else {
+        right.append(h('a', { class: 'btn small', href: '/login' }, 'Log in'), h('a', { class: 'btn small primary', href: '/register' }, 'Create account'));
+      }
+    } catch {}
+  }
+  document.querySelectorAll('main [data-studio-name]').forEach((e) => { e.textContent = studio; });
+  if (footer) {
+    footer.replaceChildren(h('div', { class: 'inner' },
+      h('span', {}, `© ${new Date().getFullYear()} `, studio, '. All rights reserved.'),
+      h('span', {}, h('a', { href: '/games' }, 'Games'), ' · ', h('a', { href: '/contact' }, 'Contact'))));
+  }
+}
+
+renderChrome();

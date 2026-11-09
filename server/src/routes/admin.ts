@@ -1,0 +1,151 @@
+import { Router, type Request } from 'express';
+import { z } from 'zod';
+import type { Ctx, UserRow } from '../lib/types.js';
+import { adminUser } from '../lib/types.js';
+import { parse, HttpError } from '../lib/http.js';
+import { requirePermission } from '../lib/session.js';
+import { canActOn, hasPermission, isRole, permissionToAssign, ROLES, type Role } from '../lib/permissions.js';
+import { audit } from '../lib/audit.js';
+import { verifyPassword } from '../lib/crypto.js';
+
+const reasonSchema = z.object({ reason: z.string().trim().max(500).optional() });
+const roleSchema = z.object({
+  role: z.enum(ROLES),
+  confirmPassword: z.string().max(200).optional(),
+});
+
+async function loadTarget(ctx: Ctx, req: Request): Promise<UserRow> {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Invalid user id');
+  const t = await ctx.db<UserRow>('users').where({ id }).first();
+  if (!t) throw new HttpError(404, 'User not found');
+  return t;
+}
+
+/** Runs canActOn and audit-logs denied attempts so abuse is visible. */
+async function guard(ctx: Ctx, req: Request, target: UserRow, action: string) {
+  const actor = req.user!;
+  const g = canActOn({ id: actor.id, role: actor.role }, { id: target.id, role: target.role });
+  if (!g.ok) {
+    await audit(ctx.db, req, {
+      action: `${action}.denied`,
+      category: action.startsWith('role') ? 'roles' : 'moderation',
+      targetType: 'user',
+      targetId: target.id,
+      targetLabel: target.username,
+      details: { reason: g.reason, targetRole: target.role },
+    });
+    throw new HttpError(403, g.reason, 'protected');
+  }
+}
+
+export const MODERATION_ACTIONS = ['player.ban', 'player.unban', 'player.kick'];
+
+export function adminRoutes(ctx: Ctx) {
+  const r = Router();
+
+  r.get('/admin/users', requirePermission('players.view'), async (req, res) => {
+    const q = String(req.query.q ?? '').trim().toLowerCase().slice(0, 64);
+    const role = String(req.query.role ?? '');
+    let query = ctx.db<UserRow>('users').orderBy('id', 'asc').limit(200);
+    if (q) {
+      const like = `%${q.replace(/[%_\\]/g, (c) => '\\' + c)}%`;
+      query = query.where((b) => b.whereRaw("username_lower LIKE ? ESCAPE '\\'", [like]).orWhereRaw("email_lower LIKE ? ESCAPE '\\'", [like]));
+    }
+    if (isRole(role)) query = query.andWhere({ role });
+    const users = await query;
+    const online = await ctx.db('sessions').where('expires_at', '>', new Date().toISOString()).countDistinct({ n: 'user_id' }).first();
+    res.json({ users: users.map(adminUser), total: users.length, activeSessions: Number(online?.n ?? 0) });
+  });
+
+  r.post('/admin/users/:id/ban', requirePermission('players.ban'), async (req, res) => {
+    const { reason } = parse(reasonSchema, req.body ?? {});
+    const target = await loadTarget(ctx, req);
+    await guard(ctx, req, target, 'player.ban');
+    await ctx.db.transaction(async (trx) => {
+      await trx('users').where({ id: target.id }).update({ banned: true, ban_reason: reason ?? null, banned_at: new Date().toISOString() });
+      await trx('sessions').where({ user_id: target.id }).delete(); // log them out everywhere
+      await trx('game_tokens').where({ user_id: target.id }).delete();
+    });
+    await audit(ctx.db, req, { action: 'player.ban', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { reason: reason ?? null } });
+    res.json({ ok: true, user: adminUser((await ctx.db<UserRow>('users').where({ id: target.id }).first())!) });
+  });
+
+  r.post('/admin/users/:id/unban', requirePermission('players.ban'), async (req, res) => {
+    const target = await loadTarget(ctx, req);
+    await guard(ctx, req, target, 'player.unban');
+    await ctx.db('users').where({ id: target.id }).update({ banned: false, ban_reason: null, banned_at: null });
+    await audit(ctx.db, req, { action: 'player.unban', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username });
+    res.json({ ok: true });
+  });
+
+  // Stage 1: a kick is recorded as a moderation action and ends the player's game tokens.
+  // Stage 4 will also disconnect them from live game servers.
+  r.post('/admin/users/:id/kick', requirePermission('players.kick'), async (req, res) => {
+    const { reason } = parse(reasonSchema, req.body ?? {});
+    const target = await loadTarget(ctx, req);
+    await guard(ctx, req, target, 'player.kick');
+    await ctx.db('game_tokens').where({ user_id: target.id }).delete();
+    await audit(ctx.db, req, { action: 'player.kick', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { reason: reason ?? null } });
+    res.json({ ok: true });
+  });
+
+  r.put('/admin/users/:id/role', async (req, res) => {
+    const actor = req.user;
+    if (!actor) throw new HttpError(401, 'Login required');
+    const anyGrant = (['roles.grant.trusted', 'roles.grant.admin', 'roles.grant.developer'] as const).some((p) => hasPermission(actor.role, p));
+    if (!anyGrant) throw new HttpError(403, 'You do not have permission to do that.', 'forbidden');
+
+    const body = parse(roleSchema, req.body);
+    const target = await loadTarget(ctx, req);
+    await guard(ctx, req, target, 'role.change');
+
+    const newRole = body.role as Role;
+    const needNew = permissionToAssign(newRole);
+    const needOld = permissionToAssign(target.role);
+    for (const need of [needNew, needOld]) {
+      if (need && !hasPermission(actor.role, need)) {
+        await audit(ctx.db, req, { action: 'role.change.denied', category: 'roles', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { from: target.role, to: newRole, missing: need } });
+        throw new HttpError(403, `Only a rank with "${need}" can make that change.`, 'forbidden');
+      }
+    }
+    if (newRole === 'DEVELOPER') {
+      // Granting ownership-level access needs the Developer to re-confirm their password.
+      const ok = body.confirmPassword ? await verifyPassword(actor.password_hash, body.confirmPassword) : false;
+      if (!ok) throw new HttpError(403, 'Re-enter your password to grant Developer status.', 'reauth_required');
+    }
+    if (newRole === target.role) return res.json({ ok: true, unchanged: true });
+    await ctx.db('users').where({ id: target.id }).update({ role: newRole });
+    await audit(ctx.db, req, { action: 'role.change', category: 'roles', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { from: target.role, to: newRole } });
+    res.json({ ok: true, user: adminUser((await ctx.db<UserRow>('users').where({ id: target.id }).first())!) });
+  });
+
+  r.get('/admin/moderation', requirePermission('moderation.view'), async (req, res) => {
+    const rows = await ctx.db('audit_logs').where({ category: 'moderation' }).orderBy('id', 'desc').limit(200);
+    res.json({ entries: rows.map(fmt) });
+  });
+
+  r.get('/admin/audit', requirePermission('audit.view'), async (req, res) => {
+    const category = String(req.query.category ?? '');
+    let q = ctx.db('audit_logs').orderBy('id', 'desc').limit(500);
+    if (category) q = q.where({ category });
+    res.json({ entries: (await q).map(fmt) });
+  });
+
+  return r;
+}
+
+function fmt(r: any) {
+  return {
+    id: r.id,
+    actor: r.actor_username,
+    actorRole: r.actor_role,
+    action: r.action,
+    category: r.category,
+    targetType: r.target_type,
+    targetId: r.target_id,
+    target: r.target_label,
+    details: r.details ? JSON.parse(r.details) : null,
+    createdAt: r.created_at,
+  };
+}
