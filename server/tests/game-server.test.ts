@@ -219,3 +219,98 @@ describe('in-game admin permissions', () => {
     expect(r.status).toBe(401);
   });
 });
+
+describe('crew roles (Stage 4)', () => {
+  it('validates roles, keeps pilot/co-pilot unique and shares picks in room info', async () => {
+    const a = await player('PLAYER'), b = await player('PLAYER');
+    await room(a, b);
+    a.c.send({ t: 'crew', role: 'pilot' });
+    let info = await b.c.wait((m: any) => m.t === 'room' && m.players.some((p: any) => p.crew === 'pilot'));
+    expect(info.players.find((p: any) => p.cid === cidOf(a)).crew).toBe('pilot');
+    b.c.send({ t: 'crew', role: 'pilot' });
+    expect((await b.c.wait((m: any) => m.t === 'error')).code).toBe('crew_taken');
+    b.c.send({ t: 'crew', role: 'captain-of-everything' });
+    expect((await b.c.wait((m: any) => m.t === 'error')).code).toBe('bad_crew');
+    b.c.send({ t: 'crew', role: 'copilot' });
+    info = await a.c.wait((m: any) => m.t === 'room' && m.players.some((p: any) => p.crew === 'copilot'));
+    expect(info.players.map((p: any) => p.crew).sort()).toEqual(['copilot', 'pilot']);
+    // leaving frees the role; host migrates to the remaining player
+    a.c.close();
+    info = await b.c.wait((m: any) => m.t === 'room' && m.players.length === 1);
+    expect(info.hostCid).toBe(cidOf(b));
+    b.c.close();
+  });
+});
+
+describe('Developer room access (Stage 4)', () => {
+  it('Developer joins full and locked rooms; Admin and Player are refused', async () => {
+    const host = await player('PLAYER');
+    const fillers = [];
+    for (let i = 0; i < 7; i++) fillers.push(await player('PLAYER'));
+    const code = await room(host, ...fillers); // 8/8
+    const adm = await player('ADMIN'), pl = await player('PLAYER'), dev = await player('DEVELOPER');
+    adm.c.send({ t: 'join', code });
+    expect((await adm.c.wait((m: any) => m.t === 'error')).code).toBe('room_full');
+    pl.c.send({ t: 'join', code });
+    expect((await pl.c.wait((m: any) => m.t === 'error')).code).toBe('room_full');
+    dev.c.send({ t: 'join', code });
+    const inFull = await dev.c.wait((m: any) => m.t === 'room' && m.you);
+    expect(inFull.players).toHaveLength(9);
+    // host locks; a second room shows the same rules for locked rooms
+    const h2 = await player('PLAYER');
+    h2.c.send({ t: 'create' });
+    const r2 = await h2.c.wait((m: any) => m.t === 'room' && m.you);
+    h2.c.send({ t: 'lock', on: true });
+    await h2.c.wait((m: any) => m.t === 'room' && m.locked === true);
+    adm.c.send({ t: 'join', code: r2.code });
+    expect((await adm.c.wait((m: any) => m.t === 'error')).code).toBe('room_locked');
+    pl.c.send({ t: 'join', code: r2.code });
+    expect((await pl.c.wait((m: any) => m.t === 'error')).code).toBe('room_locked');
+    dev.c.send({ t: 'join', code: r2.code });
+    expect((await dev.c.wait((m: any) => m.t === 'room' && m.you && m.code === r2.code)).locked).toBe(true);
+    // a non-host cannot lock
+    dev.c.send({ t: 'lock', on: false });
+    expect((await dev.c.wait((m: any) => m.t === 'error')).code).toBe('not_host');
+    // every Developer join is audit-logged with what was bypassed
+    await new Promise((r) => setTimeout(r, 150));
+    const logs = await db('audit_logs').where({ action: 'ingame.dev.join' }).select('details');
+    const det = logs.map((l: any) => JSON.parse(l.details));
+    expect(det.some((d: any) => d.bypass.includes('full'))).toBe(true);
+    expect(det.some((d: any) => d.bypass.includes('locked'))).toBe(true);
+    for (const p of [host, ...fillers, adm, pl, dev, h2]) p.c.close();
+  });
+
+  it('live room list is Developer-only; hidden join is invisible; Developer cannot be kicked', async () => {
+    const host = await player('PLAYER'), adm = await player('ADMIN'), dev = await player('DEVELOPER'), pl = await player('PLAYER');
+    const code = await room(host, adm);
+    adm.c.send({ t: 'rooms' });
+    expect((await adm.c.wait((m: any) => m.t === 'error')).code).toBe('forbidden');
+    pl.c.send({ t: 'rooms', role: 'DEVELOPER' }); // claims in the message are ignored
+    expect((await pl.c.wait((m: any) => m.t === 'error')).code).toBe('forbidden');
+    dev.c.send({ t: 'rooms' });
+    const list = await dev.c.wait((m: any) => m.t === 'rooms');
+    const mine = list.rooms.find((r: any) => r.code === code);
+    expect(mine).toMatchObject({ host: host.username, count: 2, max: 8, locked: false });
+    // players can't join hidden
+    pl.c.send({ t: 'join', code, hidden: true });
+    expect((await pl.c.wait((m: any) => m.t === 'error')).code).toBe('forbidden');
+    host.c.msgs.length = 0;
+    dev.c.send({ t: 'join', code, hidden: true });
+    const self = await dev.c.wait((m: any) => m.t === 'room' && m.you);
+    expect(self.hidden).toBe(true);
+    expect(self.players.some((p: any) => p.username === dev.username)).toBe(true);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(host.c.msgs.some((m: any) => m.t === 'joined')).toBe(false);
+    host.c.send({ t: 'crew', role: 'cabin' });
+    const seen = await host.c.wait((m: any) => m.t === 'room');
+    expect(seen.players.map((p: any) => p.username)).not.toContain(dev.username);
+    dev.c.send({ t: 'st', s: { p: [0, 0, 0], ry: 0 } });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(host.c.msgs.some((m: any) => m.t === 'st' && m.cid === cidOf(dev))).toBe(false);
+    // admin tries to kick the Developer: refused
+    const res = await admin(adm, 'kick', { cid: cidOf(dev), reason: 'test' });
+    expect(res.t).toBe('admin_denied');
+    expect(dev.c.closed).toBeNull();
+    for (const p of [host, adm, dev, pl]) p.c.close();
+  });
+});

@@ -33,7 +33,7 @@ export class Net extends EventTarget {
   }
 
   onMsg(m) {
-    if (m.t === 'room') { this.room = { code: m.code, hostCid: m.hostCid, pilotCid: m.pilotCid, weather: m.weather, players: m.players }; }
+    if (m.t === 'room') { this.room = { code: m.code, hostCid: m.hostCid, pilotCid: m.pilotCid, weather: m.weather, players: m.players, locked: !!m.locked, hidden: m.you ? !!m.hidden : this.room?.hidden || false }; }
     if (m.t === 'room_left') this.room = null;
     this.dispatchEvent(new CustomEvent(m.t, { detail: m }));
     this.dispatchEvent(new CustomEvent('any', { detail: m }));
@@ -41,7 +41,8 @@ export class Net extends EventTarget {
 
   send(msg) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(msg)); }
   create() { this.send({ t: 'create' }); return this.waitFor('room'); }
-  join(code) { this.send({ t: 'join', code }); return this.waitFor('room', 'error'); }
+  join(code, { hidden = false } = {}) { this.send({ t: 'join', code, hidden }); return this.waitFor('room', 'error'); }
+  rooms() { this.send({ t: 'rooms' }); return this.waitFor('rooms', 'error'); }
   leave() { this.send({ t: 'leave' }); this.room = null; }
   admin(cmd, args) { this.send({ t: 'admin', cmd, args }); return this.waitFor('admin_ok', 'admin_denied'); }
   waitFor(okType, errType) {

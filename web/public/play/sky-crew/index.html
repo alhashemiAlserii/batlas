@@ -24,10 +24,28 @@
       <div class="fcol"><span class="flabel">ALT</span><b id="fAlt">0</b><small>ft</small></div>
       <div class="fcol"><span class="flabel">V/S</span><b id="fVs">0</b><small>m/s</small></div>
       <div class="fcol"><span class="flabel">THR</span><div class="bar"><i id="fThr"></i></div></div>
-      <div class="fcol"><span class="flabel">CRP</span><b id="fDist">0</b><small>km</small></div>
+      <div class="fcol"><span class="flabel" id="fDest">CRP</span><b id="fDist">0</b><small>km</small></div>
       <div class="fcol"><span class="flabel">DIR</span><b id="fArrow">↑</b></div>
+      <div class="fcol"><span class="flabel">GEAR</span><b id="fGear" class="gear-dn">DN</b></div>
       <div id="fWarn"></div>
-      <div id="fHelp">W/S pitch · A/D bank &amp; steer · R/F throttle · X leave seat · V camera</div>
+      <div id="fHelp">W/S pitch · A/D bank &amp; steer · R/F throttle · G gear · B seatbelt · N announce · X leave seat · V camera</div>
+    </div>
+    <div id="gpath" class="hidden" aria-label="Landing guide">
+      <div class="gp-title">LANDING GUIDE <span id="gpDest"></span></div>
+      <div class="papi"><i></i><i></i><i></i><i></i></div>
+      <div class="gp-row"><div class="gp-scale"><b id="gpV"></b></div><div class="gp-txt" id="gpTxt"></div></div>
+      <div class="gp-lat"><b id="gpL"></b></div>
+      <div id="gpGear" class="gp-gear hidden">GEAR UP! Press G</div>
+    </div>
+    <div id="cpPanel" class="hidden">
+      <div class="cp-title">FIRST OFFICER PANEL</div>
+      <div class="cp-btns">
+        <button id="cpLights" type="button">💡 Lights <small>L</small></button>
+        <button id="cpBelt" type="button">🔔 Seatbelt <small>B</small></button>
+        <button id="cpPA" type="button">📢 Announce <small>N</small></button>
+        <button id="cpGear" type="button">⚙ Gear <small>G</small></button>
+        <button id="cpLeave" type="button">Leave seat <small>X</small></button>
+      </div>
     </div>
     <div class="topbtns">
       <button id="btnAdmin" class="hbtn hidden" type="button" title="Staff tools (F2)">🛠 Staff</button>
@@ -45,6 +63,7 @@
     <div id="tFlight" class="hidden">
       <button id="tThrUp" type="button">THR+</button>
       <button id="tThrDn" type="button">THR−</button>
+      <button id="tGear" type="button">Gear</button>
       <button id="tLeave" type="button">Leave seat</button>
     </div>
   </div>
@@ -52,11 +71,19 @@
   <div id="menu" class="overlay">
     <div class="card">
       <div class="brand"><img src="/img/batlas-mark.png" alt="" width="56" height="56"><div><div class="studio">BATLAS</div><h1>Sky Crew</h1></div></div>
-      <p class="tag">Early build v0 · Load the bags, board the passengers, keep everyone calm and land at Coral Point.</p>
+      <p class="tag">Early build v0.4 · Load the bags, board the passengers, keep everyone calm and land at your destination.</p>
+      <label class="routepick">Destination
+        <select id="routeSel" aria-label="Destination"></select>
+      </label>
+      <div id="routeBlurb" class="muted small"></div>
+      <label class="routepick">Contract
+        <select id="contractSel" aria-label="Contract"><option value="standard">Standard: normal fares</option><option value="premium">Premium: VIPs + fragile cargo (×1.6 pay, ×2 fines)</option></select>
+      </label>
       <div id="meLine" class="meline">Checking sign-in…</div>
       <div class="actions">
         <button id="bSolo" class="primary" type="button">Play solo</button>
         <button id="bCreate" type="button" disabled>Create co-op room</button>
+        <button id="bSettings" type="button">⚙ Settings</button>
         <div class="joinrow"><input id="joinCode" maxlength="5" placeholder="ROOM CODE" autocomplete="off" autocapitalize="characters" aria-label="Room code"><button id="bJoin" type="button" disabled>Join</button></div>
       </div>
       <div id="menuErr" class="err hidden"></div>
@@ -64,8 +91,10 @@
         <ul>
           <li><b>WASD</b> move · <b>Mouse</b> look · <b>Shift</b> sprint · <b>Space</b> jump</li>
           <li><b>E</b> interact: pick up / place bags, use doors, galley, panel, serve passengers, take the pilot seat</li>
+          <li><b>E</b> on a passenger (empty hands) picks them up, <b>Q</b> throws them. Out of an open door in flight = parachute + refund + fine!</li>
           <li><b>Q</b> throw what you hold · <b>V</b> first / third person · <b>Esc</b> pause · <b>F2</b> staff tools</li>
-          <li>Pilot: <b>R/F</b> throttle · <b>W/S</b> pitch · <b>A/D</b> bank &amp; steer · <b>X</b> leave the seat</li>
+          <li>Pilot: <b>R/F</b> throttle · <b>W/S</b> pitch · <b>A/D</b> bank &amp; steer · <b>G</b> gear · <b>X</b> leave the seat</li>
+          <li>Co-pilot seat: <b>L</b> cabin lights · <b>B</b> seatbelt sign · <b>N</b> announcement · <b>G</b> landing gear</li>
           <li>Touch: left stick to move, drag right side to look, buttons for interact / jump / camera</li>
         </ul>
       </details>
@@ -80,6 +109,7 @@
       <div class="actions">
         <button id="bResume" class="primary" type="button">Resume</button>
         <button id="bCam" type="button">Toggle third person</button>
+        <button id="bSettingsP" type="button">⚙ Settings</button>
         <button id="bRestart" type="button">Restart flight</button>
         <button id="bQuit" type="button">Quit to menu</button>
       </div>
@@ -89,13 +119,45 @@
   <div id="results" class="overlay hidden">
     <div class="card">
       <h2 id="resTitle">Flight complete</h2>
+      <div id="resSub" class="muted small"></div>
       <div id="resStars" class="stars"></div>
       <table id="resTable"></table>
-      <div class="total">Total <b id="resTotal">0</b></div>
+      <div class="total">Payout <b id="resTotal">₵0</b></div>
       <div class="actions">
         <button id="bAgain" class="primary" type="button">Fly again</button>
         <button id="bResMenu" type="button">Menu</button>
       </div>
+    </div>
+  </div>
+
+  <div id="lobby" class="overlay hidden">
+    <div class="card">
+      <h2>Crew room <span id="lobCode" class="code"></span></h2>
+      <p class="muted small">Share the code with friends (up to 8). Pick a crew job; everyone can still help with everything.</p>
+      <div class="crewpick">
+        <button type="button" data-crew="pilot">✈ Pilot<small>Fly the plane</small></button>
+        <button type="button" data-crew="copilot">🧭 Co-pilot<small>Lights, seatbelt, gear, announcements</small></button>
+        <button type="button" data-crew="cabin">☕ Cabin crew<small>Board, serve and calm passengers</small></button>
+        <button type="button" data-crew="cargo">🧳 Cargo<small>Load bags, doors, repairs</small></button>
+      </div>
+      <label class="routepick">Destination <select id="lobRoute" aria-label="Destination"></select></label>
+      <label class="routepick">Contract <select id="lobContract" aria-label="Contract"><option value="standard">Standard</option><option value="premium">Premium (×1.6 pay, ×2 fines)</option></select></label>
+      <div id="lobRouteNote" class="muted small"></div>
+      <div id="lobPlayers" class="lobplayers"></div>
+      <div class="actions"><button id="bBoard" class="primary" type="button">Board the plane</button><button id="bLock" type="button">🔓 Room open (click to lock)</button><button id="bLobLeave" type="button">Leave room</button></div>
+    </div>
+  </div>
+
+  <div id="settings" class="overlay hidden">
+    <div class="card small">
+      <h2>Settings</h2>
+      <label class="setrow">Graphics quality
+        <select id="setQuality"><option value="auto">Auto</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+      <div id="setQualityNote" class="muted small"></div>
+      <label class="setrow">Master volume <input id="volMaster" type="range" min="0" max="1" step="0.05"></label>
+      <label class="setrow">Music <input id="volMusic" type="range" min="0" max="1" step="0.05"></label>
+      <label class="setrow">Effects <input id="volSfx" type="range" min="0" max="1" step="0.05"></label>
+      <div class="actions"><button id="bSetClose" class="primary" type="button">Done</button></div>
     </div>
   </div>
 

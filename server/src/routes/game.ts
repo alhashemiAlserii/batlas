@@ -100,5 +100,61 @@ export function gameRoutes(ctx: Ctx) {
     });
   }
 
+  // ---------------- Sky Crew flight results (Stage 4) ----------------
+  // Results are reported by the player's own browser (honour system, like most web games without
+  // an authoritative server-side simulation). Values are clamped and rate-limited to keep the
+  // leaderboard sane; staff can delete a user's flights by banning them (banned users are hidden).
+  const ROUTES = ['CRP', 'DNB', 'PNR', 'HBF'] as const;
+  const LANDINGS = ['butter', 'good', 'hard', 'crash', 'none'] as const;
+  const lastPost = new Map<number, number>();
+  const FLIGHT_COOLDOWN_MS = 30_000;
+  r.post('/game/sky-crew/flights', requireAuth, async (req, res) => {
+    if (req.authVia !== 'session') throw new HttpError(403, 'Flights must be reported with a website session');
+    const b = parse(z.object({
+      score: z.number().int().min(-100000).max(100000), // total payout in credits
+      stars: z.number().int().min(0).max(5),
+      landing: z.enum(LANDINGS),
+      route: z.enum(ROUTES),
+      crashed: z.boolean(),
+      duration: z.number().int().min(10).max(7200),
+      coop: z.boolean().optional(),
+    }), req.body);
+    const uid = req.user!.id, now = Date.now();
+    if (now - (lastPost.get(uid) ?? 0) < FLIGHT_COOLDOWN_MS) throw new HttpError(429, 'Flight already recorded. Try again in a moment.', 'rate_limited');
+    lastPost.set(uid, now);
+    const [id] = await ctx.db('game_flights').insert({ user_id: uid, game_slug: 'sky-crew', score: b.score, stars: b.stars, landing: b.landing, route: b.route, crashed: b.crashed, duration: b.duration, coop: !!b.coop, created_at: new Date().toISOString() });
+    res.status(201).json({ ok: true, id: typeof id === 'object' ? (id as any).id : id, stats: await flightStats(uid) });
+  });
+
+  async function flightStats(userId: number) {
+    const q = () => ctx.db('game_flights').where({ user_id: userId, game_slug: 'sky-crew' });
+    const agg: any = await q().count({ n: '*' }).max({ best: 'score' }).first();
+    const landings: any = await q().whereIn('landing', ['butter', 'good', 'hard']).count({ n: '*' }).first();
+    const butter: any = await q().where({ landing: 'butter' }).count({ n: '*' }).first();
+    const crashes: any = await q().where({ crashed: true }).count({ n: '*' }).first();
+    return { flights: Number(agg?.n ?? 0), bestScore: agg?.best == null ? null : Number(agg.best), landings: Number(landings?.n ?? 0), butterLandings: Number(butter?.n ?? 0), crashes: Number(crashes?.n ?? 0) };
+  }
+
+  r.get('/games/sky-crew/leaderboard', async (_req, res) => {
+    const rows = await ctx.db('game_flights as f')
+      .join('users as u', 'u.id', 'f.user_id')
+      .where('f.game_slug', 'sky-crew').andWhere('u.banned', false)
+      .groupBy('f.user_id', 'u.username', 'u.display_name', 'u.role', 'u.avatar_url')
+      .select('u.username', 'u.display_name', 'u.role', 'u.avatar_url')
+      .max({ best: 'f.score' }).count({ flights: '*' })
+      .orderBy('best', 'desc').limit(10);
+    res.json({
+      leaderboard: rows.map((x: any, i: number) => ({ rank: i + 1, username: x.username, displayName: x.display_name || x.username, role: x.role, avatarUrl: x.avatar_url || null, bestScore: Number(x.best), flights: Number(x.flights) })),
+      note: 'Scores are reported by players\' browsers.',
+    });
+  });
+
+  r.get('/users/:username/game-stats', async (req, res) => {
+    const name = String(req.params.username).toLowerCase().slice(0, 32);
+    const u = await ctx.db<UserRow>('users').where({ username_lower: name }).first();
+    if (!u || u.banned) throw new HttpError(404, 'Not found');
+    res.json({ skyCrew: await flightStats(u.id) });
+  });
+
   return r;
 }

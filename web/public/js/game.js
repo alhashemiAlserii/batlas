@@ -1,4 +1,4 @@
-import { api, h, fmtDay } from './common.js';
+import { api, h, fmtDay, rankBadge } from './common.js';
 const slug = decodeURIComponent(location.pathname.split('/')[2] || '');
 const root = document.getElementById('game');
 
@@ -43,6 +43,24 @@ try {
       h('div', { class: 'version' }, h('strong', {}, `v${v.version}`), h('span', { class: 'small muted' }, ' · ', fmtDay(v.releasedAt)), v.changelog ? h('div', { class: 'changelog small' }, v.changelog) : null)))) : null,
     g.screenshots.length ? h('section', {}, h('h2', {}, 'Screenshots'), h('div', { class: 'shots' }, g.screenshots.filter(safeUrl).map((s) => h('a', { href: s, target: '_blank', rel: 'noopener' }, h('img', { src: s, alt: 'Screenshot', loading: 'lazy' }))))) : null,
   ].filter(Boolean));
+  if (g.slug === 'sky-crew') root.append(await leaderboard());
 } catch (e) {
   root.replaceChildren(h('div', { class: 'card center-box' }, h('h1', {}, 'Game not found'), h('a', { class: 'btn', href: '/games' }, 'Back to games')));
+}
+
+async function leaderboard() {
+  const sec = h('section', { class: 'leaderboard' }, h('div', { class: 'section-head' }, h('h2', {}, 'Leaderboard'), h('span', { class: 'small muted' }, 'Best single-flight payout per pilot (airline credits)')));
+  try {
+    const { leaderboard: rows } = await api('GET', '/api/games/sky-crew/leaderboard');
+    if (!rows.length) { sec.append(h('p', { class: 'muted' }, 'No flights recorded yet. Sign in, fly a route and get paid to be first!')); return sec; }
+    sec.append(h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Player'), h('th', {}, 'Best payout'), h('th', {}, 'Flights'))),
+      h('tbody', {}, rows.map((r) => h('tr', {},
+        h('td', {}, String(r.rank)),
+        h('td', {}, h('a', { href: `/u/${encodeURIComponent(r.username)}`, class: `name-${r.role.toLowerCase()}` }, r.displayName), ' ', rankBadge(r.role)),
+        h('td', {}, h('strong', {}, `₵${Number(r.bestScore).toLocaleString('en-US')}`)),
+        h('td', {}, String(r.flights))))))));
+    sec.append(h('p', { class: 'small muted' }, 'Scores are reported by the game in your browser.'));
+  } catch { sec.append(h('p', { class: 'muted' }, 'Leaderboard unavailable right now.')); }
+  return sec;
 }

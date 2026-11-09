@@ -17,6 +17,14 @@ else {
         user.banned ? h('div', { class: 'alert error' }, 'This account is banned.') : null,
         h('p', { class: 'desc' }, user.bio || (mine ? 'You have not written a bio yet.' : ''))),
     );
+    try {
+      const { skyCrew: st } = await api('GET', `/api/users/${encodeURIComponent(username)}/game-stats`);
+      const stat = (n, l) => h('div', { class: 'stat' }, h('div', { class: 'n' }, String(n)), h('div', { class: 'l' }, l));
+      root.append(h('section', { class: 'game-stats' },
+        h('div', { class: 'section-head' }, h('h2', {}, 'Sky Crew stats'), h('a', { class: 'small', href: '/games/sky-crew' }, 'Leaderboard →')),
+        st.flights ? h('div', { class: 'stat-grid' }, stat(st.flights, 'Flights'), stat(st.bestScore == null ? '—' : `₵${st.bestScore.toLocaleString('en-US')}`, 'Best payout'), stat(st.landings, 'Safe landings'), stat(st.butterLandings, 'Butter landings'), stat(st.crashes, 'Crashes'))
+          : h('p', { class: 'muted' }, mine ? 'No flights yet. ' : 'No flights yet.', mine ? h('a', { href: '/play/sky-crew' }, 'Play Sky Crew') : null)));
+    } catch { /* stats are optional */ }
     if (mine) {
       const msg = h('div', { 'aria-live': 'polite' });
       const form = h('form', { class: 'card', novalidate: true },

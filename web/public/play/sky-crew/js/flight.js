@@ -1,5 +1,5 @@
 // Arcade flight model. Units: metres, seconds. World frame: y up, heading 0 = -z.
-import { GEAR_H, ORIGIN, DEST } from './world.js';
+import { GEAR_H, ORIGIN, DEST, ROUTES, OBSTACLES } from './world.js';
 
 export const KT = 1.94384; // m/s -> knots
 export const FT = 3.28084;
@@ -7,7 +7,7 @@ const VR = 68; // rotate speed (~132 kt)
 const STALL = 52;
 
 export function newFlight() {
-  return { x: ORIGIN.x, y: GEAR_H, z: ORIGIN.z, yaw: 0, pitch: 0, bank: 0, speed: 0, throttle: 0, onGround: true, vs: 0, engineFail: false, crashed: false, touchdown: null, airborneOnce: false, stall: false };
+  return { x: ORIGIN.x, y: GEAR_H, z: ORIGIN.z, yaw: 0, pitch: 0, bank: 0, speed: 0, throttle: 0, onGround: true, vs: 0, gearDown: true, engineFail: false, crashed: false, touchdown: null, airborneOnce: false, stall: false };
 }
 
 export function onRunway(ap, x, z) {
@@ -22,7 +22,7 @@ export function stepFlight(f, inp, dt, turb = 0) {
   if (f.crashed) { f.speed = Math.max(0, f.speed - 20 * dt); return; }
   f.throttle = Math.min(1, Math.max(0, f.throttle + (inp.throttleDelta || 0) * 0.45 * dt));
   const thrust = f.throttle * (f.engineFail ? 4.5 : 9.0);
-  const drag = 0.000625 * f.speed * f.speed + (f.onGround ? 0.25 : 0);
+  const drag = (0.000625 + (f.gearDown ? 0.00012 : 0)) * f.speed * f.speed + (f.onGround ? 0.25 : 0);
   const brake = f.onGround && f.throttle < 0.2 && f.speed > 0 ? (f.airborneOnce ? 5 : 3.2) : 0;
   f.speed = Math.max(0, f.speed + (thrust - drag - brake - (f.onGround ? 0 : Math.sin(f.pitch) * 9.8 * 0.6)) * dt);
 
@@ -51,18 +51,25 @@ export function stepFlight(f, inp, dt, turb = 0) {
     f.vs = climb;
     f.y += climb * dt;
   }
+  // terrain: hills and mountains are cones
+  if (!f.onGround) for (const o of OBSTACLES) {
+    const d = Math.hypot(f.x - o.x, f.z - o.z);
+    if (d < o.r && f.y < o.h * (1 - d / o.r) + 3) { f.crashed = true; f.onGround = true; f.touchdown = { vs: f.vs, rwy: null, hard: true, crash: true, terrain: true, at: Date.now() }; f.speed *= 0.2; return; }
+  }
   const horiz = f.speed * Math.cos(f.pitch);
   f.x += -Math.sin(f.yaw) * horiz * dt;
   f.z += -Math.cos(f.yaw) * horiz * dt;
 
   if (!f.onGround && f.y <= GEAR_H) {
     // touchdown
-    const rwy = onRunway(DEST, f.x, f.z) ? 'CRP' : onRunway(ORIGIN, f.x, f.z) ? 'HBF' : null;
+    const ap = [DEST, ORIGIN, ...Object.values(ROUTES)].find((a) => onRunway(a, f.x, f.z));
+    const rwy = ap ? ap.code : null;
     const vs = f.vs;
     f.y = GEAR_H; f.onGround = true;
     const hard = vs < -6 || Math.abs(f.bank) > 0.3;
-    const crash = vs < -12 || !rwy && f.speed > 30 || Math.abs(f.bank) > 0.55;
-    f.touchdown = { vs, rwy, hard, crash, at: Date.now() };
+    const belly = !f.gearDown;
+    const crash = belly || vs < -12 || !rwy && f.speed > 30 || Math.abs(f.bank) > 0.55;
+    f.touchdown = { vs, rwy, hard, crash, belly, at: Date.now() };
     if (crash) f.crashed = true;
     f.pitch = 0; f.bank = 0;
   }
@@ -76,4 +83,16 @@ export function relBearing(f, ap) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return d;
+}
+
+/** Glide-path guidance for the active destination: 3° slope to the runway threshold. */
+export function glidePath(f, ap = DEST) {
+  const thrZ = ap.z + 60; // runways are flown toward -z, threshold at the +z end
+  const along = f.z - thrZ; // metres before the threshold
+  const lateral = f.x - ap.x;
+  const h = f.y - GEAR_H;
+  const angle = along > 1 ? (Math.atan2(h, along) * 180) / Math.PI : 0;
+  const ideal = along * Math.tan((3 * Math.PI) / 180);
+  const papi = angle > 3.7 ? 4 : angle > 3.2 ? 3 : angle > 2.8 ? 2 : angle > 2.3 ? 1 : 0; // white lights (2 = on slope)
+  return { along, lateral, h, angle, ideal, dev: h - ideal, papi, active: along > -200 && along < 12000 && Math.abs(lateral) < 4000 };
 }

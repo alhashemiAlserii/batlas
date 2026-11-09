@@ -4,12 +4,14 @@ import fs from 'node:fs';
 import * as m001 from './migrations/001_init.js';
 import * as m002 from './migrations/002_stage2.js';
 import * as m003 from './migrations/003_optional_email.js';
+import * as m004 from './migrations/004_game_flights.js';
 
 /** Migrations are registered in code so they run the same under tsx, tests and builds. */
 const MIGRATIONS: Record<string, { up: (k: Knex) => Promise<void>; down: (k: Knex) => Promise<void>; config?: { transaction?: boolean } }> = {
   '001_init': m001,
   '002_stage2': m002,
   '003_optional_email': m003,
+  '004_game_flights': m004,
 };
 
 const migrationSource: Knex.MigrationSource<string> = {

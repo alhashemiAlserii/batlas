@@ -7,7 +7,7 @@ const app = document.getElementById('app');
 const me = await getMe();
 const p = me.permissions;
 const view = h('div');
-const tabsDef = [['stats', 'Stats'], ['games', 'Games'], ['news', 'News'], ['inbox', 'Inbox'], ['users', 'Players & ranks'], ['audit', 'Audit log'], ['tools', 'Developer tools']];
+const tabsDef = [['stats', 'Stats'], ['games', 'Games'], ['news', 'News'], ['inbox', 'Inbox'], ['users', 'Players & ranks'], ['audit', 'Audit log'], ['rooms', 'Live rooms'], ['tools', 'Developer tools']];
 const tabs = h('div', { class: 'tabs', role: 'tablist' }, ...tabsDef.map(([k, l]) => h('button', { dataset: { k }, role: 'tab', onclick: () => show(k) }, l)));
 app.replaceChildren(
   h('div', { class: 'card panel-dev' }, h('div', { class: 'panel-head' }, h('h1', {}, 'Developer dashboard'), rankBadge(me.role)),
@@ -24,6 +24,7 @@ function show(k) {
   if (k === 'stats') view.replaceChildren(statsPanel());
   if (k === 'news') view.replaceChildren(newsPanel());
   if (k === 'inbox') view.replaceChildren(inboxPanel());
+  if (k === 'rooms') view.replaceChildren(roomsPanel());
 }
 
 function toolsPanel() {
@@ -246,3 +247,46 @@ window.addEventListener('hashchange', () => {
   const k = location.hash.slice(1);
   if (tabsDef.some(([t]) => t === k)) show(k);
 });
+
+// Live Sky Crew rooms. The list comes from the game server, which checks the Developer rank it got
+// from the website for this socket's game token (this page cannot grant itself anything).
+function roomsPanel() {
+  const msg = h('div', { 'aria-live': 'polite' });
+  const hidden = h('input', { type: 'checkbox', id: 'joinHidden' });
+  const tbody = h('tbody');
+  let ws = null;
+  async function load() {
+    msg.replaceChildren('Loading…');
+    try {
+      if (!ws || ws.readyState > 1) {
+        const { token } = await api('POST', '/api/game/token', { game: 'sky-crew' });
+        ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/sky-crew`);
+        await new Promise((res, rej) => {
+          ws.onopen = () => ws.send(JSON.stringify({ t: 'auth', token }));
+          ws.onerror = () => rej(new Error('Game server unreachable'));
+          ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.t === 'welcome') res(); if (m.t === 'error') rej(new Error(m.message)); };
+          setTimeout(() => rej(new Error('Game server did not answer')), 8000);
+        });
+      }
+      const rooms = await new Promise((res, rej) => {
+        ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.t === 'rooms') res(m.rooms); if (m.t === 'error') rej(new Error(m.message)); };
+        ws.send(JSON.stringify({ t: 'rooms' }));
+        setTimeout(() => rej(new Error('No answer')), 8000);
+      });
+      tbody.replaceChildren(...(rooms.length ? rooms.map((r) => h('tr', {},
+        h('td', {}, h('strong', {}, r.code), r.locked ? ' 🔒' : ''),
+        h('td', {}, r.host || '—'),
+        h('td', {}, `${r.count}/${r.max}`, h('div', { class: 'small muted' }, r.players.map((p) => `${p.username}${p.hidden ? ' (hidden)' : ''}`).join(', '))),
+        h('td', {}, r.route || '—'),
+        h('td', {}, r.phase || 'lobby'),
+        h('td', {}, h('button', { class: 'btn small primary', onclick: () => { location.href = `/play/sky-crew?devjoin=${encodeURIComponent(r.code)}${hidden.checked ? '&hidden=1' : ''}`; } }, 'Join')))) : [h('tr', {}, h('td', { colspan: 6, class: 'muted' }, 'No live rooms right now.'))]));
+      msg.replaceChildren(`${rooms.length} live room${rooms.length === 1 ? '' : 's'} · ${new Date().toLocaleTimeString()}`);
+    } catch (e) { showError(msg, e); }
+  }
+  load();
+  return h('section', { class: 'card panel-dev', id: 'liveRooms' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Live rooms (Sky Crew)'), h('button', { class: 'btn small', onclick: load }, 'Refresh')),
+    h('p', { class: 'small muted' }, 'Every co-op room on the game server. As Developer you can join any room, even full or locked ones. Each join is written to the audit log.'),
+    h('label', { class: 'inline small' }, hidden, ' Join hidden (invisible spectator)'), msg,
+    h('div', { class: 'table-wrap section-head' }, h('table', {}, h('thead', {}, h('tr', {}, ...['Room', 'Host', 'Players', 'Route', 'Status', ''].map((c) => h('th', {}, c)))), tbody)));
+}

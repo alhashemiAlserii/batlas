@@ -28,7 +28,9 @@ export const SPAWNABLE: Record<ItemTier, string[]> = {
 export const WEATHERS = ['clear', 'storm'] as const;
 export const SCENARIOS = ['engine_failure', 'turbulence', 'cabin_pressure', 'emergency_landing'] as const;
 export const TELEPORT_SPOTS = ['cockpit', 'cabin', 'cargo', 'apron'] as const;
-export const NPC_ACTIONS = ['sit', 'dance', 'panic', 'calm'] as const;
+export const NPC_ACTIONS = ['sit', 'dance', 'panic', 'calm', 'respawn'] as const;
+export const CREW_ROLES = ['pilot', 'copilot', 'cabin', 'cargo'] as const;
+const UNIQUE_CREW = new Set(['pilot', 'copilot']); // one captain and one first officer per room
 
 interface Client {
   cid: string;
@@ -36,6 +38,9 @@ interface Client {
   user: VerifiedUser | null;
   room: Room | null;
   state: Record<string, unknown> | null;
+  crew: (typeof CREW_ROLES)[number] | null;
+  hidden: boolean; // Developer invisible spectate
+  joinedAt: number;
   bucket: { tokens: number; last: number };
   authed: Promise<void> | null;
 }
@@ -47,6 +52,9 @@ interface Room {
   clients: Map<string, Client>;
   weather: (typeof WEATHERS)[number];
   createdAt: number;
+  locked: boolean; // host closed the room to new players
+  route: string | null; // last values seen in the host's world snapshot (for the staff room list)
+  phase: string | null;
 }
 
 type Send = (c: Client, msg: unknown) => void;
@@ -83,8 +91,12 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   const send: Send = (c, msg) => {
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, state: c.state });
-  const roomInfo = (r: Room) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, players: [...r.clients.values()].map(publicPlayer) });
+  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state });
+  // Hidden Developers are left out of everyone else's player list.
+  const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, locked: r.locked, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
+  const broadcastRoom = (r: Room, except?: Client) => { for (const c of r.clients.values()) if (c !== except) send(c, roomInfo(r, c)); };
+  /** Developer rank, as verified by the website for this connection's game token (never client claims). */
+  const isDev = (c: Client) => !!c.user && c.user.role === 'DEVELOPER';
   const broadcast = (r: Room, msg: unknown, except?: Client) => {
     const data = JSON.stringify(msg);
     for (const c of r.clients.values()) if (c !== except && c.ws.readyState === WebSocket.OPEN) c.ws.send(data);
@@ -103,8 +115,11 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     const r = c.room;
     if (!r) return;
     r.clients.delete(c.cid);
+    const wasHidden = c.hidden;
     c.room = null;
     c.state = null;
+    c.crew = null;
+    c.hidden = false;
     if (r.clients.size === 0) {
       rooms.delete(r.code);
       log(`room ${r.code} closed`);
@@ -112,21 +127,42 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     }
     if (r.pilotCid === c.cid) r.pilotCid = null;
     if (r.hostCid === c.cid) {
-      r.hostCid = r.clients.keys().next().value!; // promote the longest-connected remaining player
+      // promote the longest-connected remaining (visible) player; Map order = join order
+      const next = [...r.clients.values()].find((o) => !o.hidden) ?? r.clients.values().next().value!;
+      r.hostCid = next.cid;
       log(`room ${r.code} host -> ${r.hostCid}`);
     }
-    broadcast(r, { t: 'left', cid: c.cid, reason });
-    broadcast(r, roomInfo(r));
+    if (!wasHidden) broadcast(r, { t: 'left', cid: c.cid, reason });
+    broadcastRoom(r);
   }
 
-  function joinRoom(c: Client, r: Room) {
+  function joinRoom(c: Client, r: Room, opts: { hidden?: boolean; created?: boolean } = {}) {
+    const dev = isDev(c);
+    const visible = [...r.clients.values()].filter((o) => !o.hidden).length;
+    const bypass: string[] = [];
+    if (!opts.created && visible >= MAX_PLAYERS) { if (!dev) return send(c, { t: 'error', code: 'room_full', message: 'That room is full.' }); bypass.push('full'); }
+    if (!opts.created && r.locked) { if (!dev) return send(c, { t: 'error', code: 'room_locked', message: 'That room is locked by its host.' }); bypass.push('locked'); }
     if (c.room) leaveRoom(c);
-    if (r.clients.size >= MAX_PLAYERS) return send(c, { t: 'error', code: 'room_full', message: 'That room is full.' });
+    c.hidden = dev && !!opts.hidden && !opts.created;
+    c.joinedAt = Date.now();
     r.clients.set(c.cid, c);
     c.room = r;
-    send(c, { ...roomInfo(r), you: c.cid });
-    broadcast(r, { t: 'joined', player: publicPlayer(c) }, c);
-    broadcast(r, roomInfo(r), c);
+    send(c, { ...roomInfo(r, c), you: c.cid, hidden: c.hidden });
+    if (!c.hidden) broadcast(r, { t: 'joined', player: publicPlayer(c) }, c);
+    broadcastRoom(r, c);
+    if (dev && !opts.created) void audit(c, 'dev.join', { hidden: c.hidden, bypass, players: visible });
+  }
+  /** Developer-only overview of every live room. */
+  function roomList() {
+    return [...rooms.values()].map((r) => {
+      const host = r.clients.get(r.hostCid);
+      const ps = [...r.clients.values()];
+      return {
+        code: r.code, host: host?.user?.username ?? null, locked: r.locked, route: r.route, phase: r.phase, weather: r.weather, createdAt: new Date(r.createdAt).toISOString(),
+        count: ps.filter((p) => !p.hidden).length, max: MAX_PLAYERS,
+        players: ps.map((p) => ({ username: p.user!.username, role: p.user!.role, crew: p.crew, hidden: p.hidden, host: p.cid === r.hostCid })),
+      };
+    });
   }
 
   async function audit(c: Client, cmd: string, details: Record<string, unknown>, target?: Client) {
@@ -164,6 +200,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'kick': {
         if (!can(c, 'players.kick')) return 'Your rank cannot kick players.';
         if (!target) return 'Player not found in this room.';
+        if (isDev(target)) { await audit(c, 'kick.denied', { reason: 'developer' }, target); return 'The Developer is protected and cannot be kicked.'; }
         const g = canActOn({ id: c.user!.userId, role: c.user!.role }, { id: target.user!.userId, role: target.user!.role });
         if (!g.ok) {
           await audit(c, 'kick.denied', { reason: g.reason }, target);
@@ -275,16 +312,27 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'ping':
         return send(c, { t: 'pong', at: m.at });
       case 'create': {
-        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', createdAt: Date.now() };
+        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', createdAt: Date.now(), locked: false, route: null, phase: null };
         rooms.set(room.code, room);
         log(`room ${room.code} created by ${c.user.username}`);
-        return joinRoom(c, room);
+        return joinRoom(c, room, { created: true });
       }
       case 'join': {
         const code = String(m.code ?? '').toUpperCase().trim();
         const room = rooms.get(code);
         if (!room) return send(c, { t: 'error', code: 'no_room', message: 'No room with that code.' });
-        return joinRoom(c, room);
+        if (m.hidden && !isDev(c)) return send(c, { t: 'error', code: 'forbidden', message: 'Only the Developer can join hidden.' });
+        return joinRoom(c, room, { hidden: !!m.hidden });
+      }
+      case 'rooms': {
+        // Live room list: Developer only, decided by the rank the website verified for this socket.
+        if (!isDev(c)) { void audit(c, 'rooms.denied', {}); return send(c, { t: 'error', code: 'forbidden', message: 'Only the Developer can see every room.' }); }
+        return send(c, { t: 'rooms', rooms: roomList() });
+      }
+      case 'lock': {
+        if (!r || r.hostCid !== c.cid) return send(c, { t: 'error', code: 'not_host', message: 'Only the host can lock the room.' });
+        r.locked = !!m.on;
+        return broadcastRoom(r);
       }
       case 'leave':
         leaveRoom(c);
@@ -294,26 +342,37 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         const s = sanitizeState(m.s);
         if (!s) return;
         c.state = s;
+        if (c.hidden) return; // invisible spectator: nobody sees them move
         return broadcast(r, { t: 'st', cid: c.cid, s }, c);
       }
       case 'world':
         if (!r || r.hostCid !== c.cid) return; // only the host's simulation counts
         if (raw.length > 48 * 1024) return;
+        if (m.w && typeof m.w === 'object') { r.route = typeof m.w.route === 'string' ? m.w.route.slice(0, 8) : r.route; r.phase = typeof m.w.ph === 'string' ? m.w.ph.slice(0, 16) : r.phase; }
         return broadcast(r, { t: 'world', w: m.w }, c);
       case 'pilot': {
-        if (!r) return;
+        if (!r || c.hidden) return;
         if (m.on) {
           if (r.pilotCid && r.pilotCid !== c.cid) return send(c, { t: 'error', code: 'seat_taken', message: 'Someone else is flying.' });
           r.pilotCid = c.cid;
         } else if (r.pilotCid === c.cid) r.pilotCid = null;
-        return broadcast(r, roomInfo(r));
+        return broadcastRoom(r);
+      }
+      case 'crew': {
+        // lobby role pick: pilot / copilot / cabin / cargo (null = no preference)
+        if (!r || c.hidden) return;
+        const role = m.role == null ? null : String(m.role);
+        if (role !== null && !(CREW_ROLES as readonly string[]).includes(role)) return send(c, { t: 'error', code: 'bad_crew', message: 'Unknown crew role.' });
+        if (role && UNIQUE_CREW.has(role) && [...r.clients.values()].some((o) => o !== c && o.crew === role)) return send(c, { t: 'error', code: 'crew_taken', message: `Someone already picked ${role === 'pilot' ? 'Pilot' : 'Co-pilot'}.` });
+        c.crew = role as Client['crew'];
+        return broadcastRoom(r);
       }
       case 'plane':
         if (!r || r.pilotCid !== c.cid) return; // only the seated pilot controls the aircraft
         return broadcast(r, { t: 'plane', s: m.s }, c);
       case 'act': {
         // gameplay requests (grab/drop/serve/door/fix) go to the host who owns the simulation
-        if (!r) return;
+        if (!r || c.hidden) return; // spectators don't touch the world
         const host = r.clients.get(r.hostCid);
         if (host && host !== c) send(host, { t: 'act', cid: c.cid, a: m.a });
         return;
@@ -337,7 +396,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   }
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, bucket: { tokens: 120, last: Date.now() }, authed: null };
+    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4003, 'auth_timeout'); }, 10_000);
     ws.on('message', (data) => {

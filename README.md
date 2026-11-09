@@ -195,6 +195,53 @@ The overlay shows only the tools your rank allows. **The game server re-checks e
 | Admin | + kick players (never the Developer, never equal or higher ranks), weather clear/storm, emergency scenarios (engine failure, severe turbulence, cabin pressure, emergency landing) start/stop |
 | Developer | everything + fun items (beach ball, giant duck, traffic cone), teleport self/players, NPC control (sit/dance/panic/calm), **Wave Cannon**: a fictional splash cannon that knocks loose luggage away |
 
+## Sky Crew v0.4 (Stage 4)
+
+- **Look:** a new low-poly airliner, built from merged vertex-coloured batches so each part is one draw call. It has:
+  - a rounded fuselage with a tapered nose and tail cone, and a cockpit windshield
+  - swept wings with engines and winglets, and the Batlas wave livery on the tail
+  - a cabin with shaped seats, overhead bins, a curved ceiling, window frames, patterned carpet and a galley
+  - low-poly passengers with hair variations and walk/sit/panic/flail animations
+
+  Around the plane: hemisphere light, a sun with soft shadows that follows the plane, a sky gradient, fog, clouds, airports with terminal, tower, hangar, vehicles and approach lights, and an ocean.
+- **Quality:** Settings → Graphics: Auto / Low / Medium / High. Auto picks Medium on iPads and phones (1024 shadow map, no MSAA) and High on desktops. Low turns shadows off and uses pixel ratio 1.
+- **Sound:** all sound is generated with WebAudio; there are no audio files. It includes:
+  - engine hum and whine that follow the throttle, the takeoff roar, and a touchdown thump or crash
+  - cabin air and rain/thunder ambience
+  - a chime for announcements and the seatbelt sign, plus gear, doors, pickup/drop and UI clicks
+  - a looping pad and arpeggio in the menus
+
+  Master, music and effects sliders are in Settings. Audio unlocks on the first tap or key press, as iOS requires.
+- **Routes:** Coral Point (CRP, tropical lagoon), Dune Bay (DNB, desert, a short hop) and Pine Ridge (PNR, mountains, a long flight). Each has its own scenery, and fog, sky and sea colours that blend in on approach. Hills and peaks count as terrain for crashes, but direct routes and final approaches are kept clear.
+- **Crew roles (co-op lobby):** Pilot, Co-pilot, Cabin crew and Cargo. The server allows only one Pilot and one Co-pilot. Each job gets its own task list in the HUD.
+  - The co-pilot seat (right seat, E) controls the cabin lights (L), the seatbelt sign (B), announcements (N) and the landing gear (G).
+  - The pilot can use the same keys. The galley PA handset also makes announcements.
+- **Pre-flight checklist:** bags loaded, passengers seated, doors closed, seatbelt sign on, welcome announcement, and gear down with lights on. Completing all of it earns an insurance discount.
+- **Landing guide:** within 10 km of the destination, a panel shows four PAPI lights (2 white + 2 red means on the 3° slope), a vertical deviation dot, a lateral centreline dot and a GEAR warning. Landing with the gear up is a belly landing.
+- **Passenger chaos:**
+  - With empty hands, press E on a passenger to pick them up. They flail, get angry, and nearby passengers panic.
+  - E puts them down; Q throws them. A thrown passenger lands, complains, and walks back to their seat.
+  - Doors can now be opened in flight, which makes everyone panic. A passenger who goes out of an open door while airborne pops a cartoon parachute and floats away. They are counted as lost: you pay a refund plus a safety fine, and the rating is capped at 2★.
+  - The Developer can respawn lost passengers (F2 → Passengers → Respawn).
+  - All of this is host-authoritative. Guests predict their own pickups and throws.
+- **Payout instead of score:** after the flight the airline gets paid in credits (₵). The breakdown shows:
+  - Earnings: fares per passenger delivered (scaled by route length), cargo fees for intact bags, and service tips per passenger. Food, drink and a smooth ride (mood ≥ 60): 2 of 3 is good service, 3 of 3 is excellent.
+  - Bonuses: repairs, landing quality and on-time delivery.
+  - Charges: vouchers for ignored requests, damaged-luggage claims (thrown bags, loose bags, hard landings), refunds for passengers left at the gate, parachute refunds and fines, door fines, crash or belly-landing bills.
+  - A **Premium contract** pays ×1.6 but doubles the fines.
+
+  The leaderboard ranks the best single-flight payout.
+- **Stats:** each signed-in player's browser reports its own result when the payout screen appears (`POST /api/game/sky-crew/flights`, session + CSRF, clamped values, at most 1 per 30 s). Profiles show flights, best payout, safe landings, butter landings and crashes (`GET /api/users/:username/game-stats`). The game page shows the top 10 (`GET /api/games/sky-crew/leaderboard`, banned users hidden). **This is an honour system:** the browser reports the numbers, so a determined player could fake a payout.
+- **Host hand-over:** world snapshots now carry the full flight state: score, event timers, passenger timers, cabin systems, route and contract. If the host leaves, the next player continues the same flight without a reset. Passenger looks come from the room seed, so every client sees the same people.
+- **Rooms:** the host can lock the lobby (🔓/🔒).
+- **Developer access to rooms:** the game server checks the verified rank on the socket's game token; it never trusts anything the client says.
+  - Only the Developer can list every live room (code, host, players, route, status), from the Developer dashboard → **Live rooms** or in-game F2 → Live rooms.
+  - The Developer can join any room, including full (past the 8-player cap) and locked rooms.
+  - An optional **hidden** join makes the Developer an invisible spectator: left out of other players' lists, no movement broadcast, no world actions.
+  - The Developer cannot be kicked.
+  - Every Developer join is audit-logged as `ingame.dev.join`, with what was bypassed.
+  - Admins and Players keep the normal full/locked rules.
+
 ## Browser testing
 
 - Automated API tests: `cd server && npm test`.
@@ -206,10 +253,11 @@ The overlay shows only the tools your rank allows. **The game server re-checks e
   - the Developer dashboard tabs and the mobile menu
 
   It also flags console errors and horizontal overflow.
-- Game: `e2e/sky-crew.mjs [chromium|webkit|coop|all]` runs in Chromium and WebKit, on desktop and on mobile (Pixel 7 and iPad). It loads the game, checks for console errors, walks, picks up a bag, carries it up the stairs into the hold, takes the pilot seat, takes off, lands at CRP and reaches the results screen. It also serves a passenger, fixes an engine warning, and tests the touch joystick. The co-op part joins two signed-in clients (Developer and Player) to one room and checks that they see each other, that positions, world and held items sync, and that staff tools are gated. Run it with `ln -s <playwright node_modules> e2e/node_modules`. Screenshots go to `docs/screenshots/stage3/`. This is WebKit on Linux, not real Safari on Apple hardware, so a final check on a real iPhone/Mac is still recommended.
+- Game: `e2e/sky-crew.mjs [chromium|webkit|coop|all]` runs in Chromium and WebKit, on desktop and on mobile (Pixel 7 and iPad). It loads the game, checks for console errors, walks, picks up a bag, carries it up the stairs into the hold, takes the pilot seat, takes off, lands at CRP and reaches the results screen. It also serves a passenger, fixes an engine warning, and tests the touch joystick. The co-op part joins two signed-in clients (Developer and Player) to one room and checks that they see each other, that positions, world and held items sync, and that staff tools are gated. Run it with `ln -s <playwright node_modules> e2e/node_modules`. Stage 4 adds checks for the payout screen, settings, routes, the co-pilot checklist, gear, the landing guide, passenger carry/throw/parachute, crew roles, locked rooms, seeded passenger looks, host hand-over, saved stats and the leaderboard, and Developer live-room hidden join. Screenshots go to `docs/screenshots/stage4/` (Stage 3 shots are kept in `docs/screenshots/stage3/`). This is WebKit on Linux, not real Safari on Apple hardware, so a final check on a real iPhone/Mac is still recommended.
 
 ## Next stages
 
 1. ~~Stage 2 — Content~~ ✅ news, contact inbox, email verification, password reset/change, avatars, version history, stats.
 2. ~~Stage 3 — Sky Crew v0~~ ✅ (see above). Original plan: a Three.js game served at `/play/sky-crew`, signed in through `/api/game/token`; a small authoritative WebSocket game server that checks every player with `/api/game/verify`; single-plane co-op room with basic flight, cabin walk-around, luggage physics and turbulence; in-game rank badges and an admin overlay wired to the existing weather/emergency/spawn/kick endpoints.
-3. **Stage 4 — Account hardening & launch prep:** real email provider, optional 2FA for staff, "log out everywhere" / session list, Postgres, hosting + domain + HTTPS, backups and monitoring, real-device Safari testing.
+3. ~~Stage 4 — Sky Crew v0.4~~ ✅ (see above).
+4. **Stage 5 — Account hardening & launch prep:** real email provider, optional 2FA for staff, "log out everywhere" / session list, Postgres, hosting + domain + HTTPS, backups and monitoring, real-device Safari testing.

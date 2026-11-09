@@ -93,3 +93,43 @@ body.touch #obj { max-width: 220px; font-size: 12px; }
 .spinner { width: 42px; height: 42px; border: 4px solid rgba(255,255,255,.2); border-top-color: var(--teal); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) { h1 { font-size: 28px; } .card { padding: 16px; } #toasts { top: 50px; width: 92vw; font-size: 13px; } }
+
+/* ---- Stage 4 ---- */
+select { font: inherit; color: var(--text); background: rgba(0,0,0,.35); border: 1px solid rgba(120,160,255,.45); border-radius: 10px; padding: 8px 10px; }
+select option { color: #000; }
+.routepick, .setrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-weight: 600; }
+.routepick select { flex: 1; max-width: 300px; }
+.setrow input[type=range] { width: 55%; }
+.code { letter-spacing: .2em; color: var(--teal); }
+.crewpick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+.crewpick button { display: grid; gap: 2px; text-align: left; font-weight: 700; }
+.crewpick button small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.crewpick button.mine { background: linear-gradient(135deg, var(--blue), var(--teal)); }
+.crewpick button.mine small { color: #e9fbff; }
+.crewpick button.taken { opacity: .5; }
+.lobplayers { margin-top: 10px; display: grid; gap: 4px; font-size: 14px; max-height: 160px; overflow: auto; }
+.lobplayers .pl { display: flex; gap: 6px; align-items: center; }
+.lobplayers .crew { margin-left: auto; color: var(--teal); font-size: 12px; }
+#gpath { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 170px; background: rgba(2,10,30,.72); border: 1px solid rgba(25,211,197,.45); border-radius: 12px; padding: 8px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.gp-title { letter-spacing: .12em; color: var(--teal); font-weight: 700; font-size: 11px; }
+.papi { display: flex; gap: 6px; justify-content: center; margin: 8px 0; }
+.papi i { width: 16px; height: 16px; border-radius: 50%; background: #ff3b3b; box-shadow: 0 0 8px #ff3b3b; }
+.papi i.w { background: #fff; box-shadow: 0 0 8px #fff; }
+.gp-row { display: flex; gap: 8px; align-items: center; }
+.gp-scale { position: relative; width: 14px; height: 70px; border: 1px solid var(--teal); border-radius: 4px; background: linear-gradient(180deg, transparent 48%, rgba(25,211,197,.6) 48%, rgba(25,211,197,.6) 52%, transparent 52%); }
+.gp-scale b, .gp-lat b { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--gold); }
+.gp-scale b { left: 1px; top: 30px; }
+.gp-txt { flex: 1; }
+.gp-lat { position: relative; height: 14px; margin-top: 8px; border: 1px solid var(--teal); border-radius: 4px; background: linear-gradient(90deg, transparent 48%, rgba(25,211,197,.6) 48%, rgba(25,211,197,.6) 52%, transparent 52%); }
+.gp-lat b { top: 1px; left: 50%; margin-left: -5px; }
+.gp-gear { margin-top: 6px; color: #ff6b6b; font-weight: 800; text-align: center; animation: blink 0.8s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+.gear-dn { color: #3ddc84; } .gear-up { color: #ffb347; }
+#cpPanel { position: absolute; left: 50%; bottom: 128px; transform: translateX(-50%); background: rgba(2,10,30,.78); border: 1px solid rgba(25,211,197,.45); border-radius: 14px; padding: 8px 12px; pointer-events: auto; max-width: 96vw; }
+.cp-title { letter-spacing: .12em; color: var(--teal); font-weight: 700; font-size: 11px; text-align: center; margin-bottom: 6px; }
+.cp-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cp-btns button { padding: 8px 12px; } .cp-btns small { color: var(--muted); margin-left: 4px; }
+.cp-btns button.on { border-color: var(--teal); background: rgba(25,211,197,.3); }
+body.touch #gpath { top: 150px; transform: none; right: 10px; width: 150px; }
+body.touch #cpPanel { bottom: 180px; }
+@media (max-width: 640px) { .crewpick { grid-template-columns: 1fr; } }
