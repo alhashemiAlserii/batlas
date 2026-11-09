@@ -8,7 +8,7 @@ import { setup, getCsrf, cookieCsrf, PW } from './helpers.js';
 let env: Awaited<ReturnType<typeof setup>>;
 let dev: any, admin: any, trusted: any, player: any;
 beforeAll(async () => {
-  env = await setup();
+  env = await setup({ emailEnabled: true }); // email features are opt-in (EMAIL_ENABLED=true)
   dev = await env.user('DEVELOPER');
   admin = await env.user('ADMIN');
   trusted = await env.user('TRUSTED');
@@ -177,7 +177,7 @@ describe('password reset', () => {
   });
 
   it('forgot-password is rate limited', async () => {
-    const e = await setup({ rateLimit: { windowMs: 60000, max: 2 } });
+    const e = await setup({ rateLimit: { windowMs: 60000, max: 2 }, emailEnabled: true });
     const a = request.agent(e.app);
     const csrf = await getCsrf(a);
     const codes = [];

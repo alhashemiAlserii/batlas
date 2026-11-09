@@ -110,6 +110,7 @@ async function renderChrome() {
     try {
       const me = await getMe();
       if (me.user) {
+        if (me.user.mustChangePassword && location.pathname !== '/settings') { location.href = '/settings?force=1'; return; }
         if (me.permissions.has('admin.panel')) links.append(link('/admin', 'Admin'));
         right.append(
           h('a', { href: '/profile' }, userChip(me.user, false)),

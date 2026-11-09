@@ -7,8 +7,8 @@ export interface UserRow {
   id: number;
   username: string;
   username_lower: string;
-  email: string;
-  email_lower: string;
+  email: string | null;
+  email_lower: string | null;
   password_hash: string;
   role: Role;
   display_name: string | null;
@@ -21,6 +21,7 @@ export interface UserRow {
   email_verified_at: string | null;
   avatar_url: string | null;
   password_changed_at: string | null;
+  must_change_password: number | boolean;
 }
 
 export interface Ctx {
@@ -53,13 +54,13 @@ export function publicUser(u: UserRow) {
 }
 
 export function selfUser(u: UserRow) {
-  return { ...publicUser(u), email: u.email, emailVerified: !!u.email_verified_at };
+  return { ...publicUser(u), email: u.email ?? '', emailVerified: !!u.email_verified_at, mustChangePassword: !!u.must_change_password };
 }
 
 export function adminUser(u: UserRow) {
   return {
     ...publicUser(u),
-    email: u.email,
+    email: u.email ?? '',
     emailVerified: !!u.email_verified_at,
     banned: !!u.banned,
     banReason: u.ban_reason,

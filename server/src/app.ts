@@ -6,7 +6,7 @@ import type { Knex } from 'knex';
 import { loadConfig, WEB_ROOT, type AppConfig } from './config.js';
 import type { Ctx } from './lib/types.js';
 import { errorHandler, HttpError } from './lib/http.js';
-import { csrfProtect, loadUser, issueCsrf } from './lib/session.js';
+import { csrfProtect, loadUser, issueCsrf, enforcePasswordChange } from './lib/session.js';
 import { hasPermission, type Permission } from './lib/permissions.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
@@ -59,8 +59,9 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   // ---------- API ----------
   const api = express.Router();
   api.use(csrfProtect(ctx));
+  api.use(enforcePasswordChange);
   api.get('/health', (_req, res) => res.json({ ok: true }));
-  api.get('/site', (_req, res) => res.json({ studioName: config.studioName }));
+  api.get('/site', (_req, res) => res.json({ studioName: config.studioName, emailEnabled: config.emailEnabled }));
   api.use(authRoutes(ctx));
   api.use(meRoutes(ctx));
   api.use(adminRoutes(ctx));

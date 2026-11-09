@@ -34,6 +34,13 @@ export function usersPanel(me, perms, { roles = false } = {}) {
       if (u.banned) actions.append(h('button', { class: 'btn small', onclick: () => act(() => api('POST', `/api/admin/users/${u.id}/unban`), `${u.username} unbanned.`) }, 'Unban'));
       else actions.append(h('button', { class: 'btn small danger', onclick: () => { const r = prompt(`Ban ${u.username}? Reason:`); if (r !== null) act(() => api('POST', `/api/admin/users/${u.id}/ban`, { reason: r || undefined }), `${u.username} banned.`); } }, 'Ban'));
     }
+    if (actionable && perms.has('players.reset_password')) actions.append(h('button', { class: 'btn small', onclick: async () => {
+      if (!confirm(`Give ${u.username} a temporary password? They will be signed out and must choose a new password when they log in.`)) return;
+      try {
+        const r = await api('POST', `/api/admin/users/${u.id}/temp-password`);
+        msg.replaceChildren(h('div', { class: 'alert ok', role: 'status' }, `Temporary password for ${u.username}: `, h('code', { class: 'temp-pw' }, r.temporaryPassword), ' — give it to them privately. It is shown only once.'));
+      } catch (e) { showError(msg, e); }
+    } }, 'Reset password'));
     if (roles && actionable) {
       const assignable = ['PLAYER', 'TRUSTED', 'ADMIN', 'DEVELOPER'].filter((r) => r === 'PLAYER' || perms.has(`roles.grant.${r.toLowerCase()}`));
       const sel = h('select', { 'aria-label': `Rank for ${u.username}` }, ...assignable.map((r) => h('option', { value: r, selected: r === u.role }, r)));
@@ -52,7 +59,7 @@ export function usersPanel(me, perms, { roles = false } = {}) {
     if (!actions.childElementCount) actions.append(h('span', { class: 'muted small' }, u.role === 'DEVELOPER' ? 'Protected' : '—'));
     return h('tr', {},
       h('td', {}, userChip(u)),
-      h('td', { class: 'small' }, u.email),
+      h('td', { class: 'small' }, u.email || h('span', { class: 'muted' }, '—')),
       h('td', {}, u.banned ? h('span', { class: 'pill', title: u.banReason || '' }, 'Banned') : h('span', { class: 'pill published' }, 'Active')),
       h('td', { class: 'small muted' }, fmtDate(u.lastLoginAt) || 'never'),
       h('td', {}, actions));

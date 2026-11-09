@@ -232,7 +232,7 @@ function inboxPanel() {
     counts.textContent = `${d.counts.new ?? 0} unread · ${d.counts.read ?? 0} read · ${d.counts.archived ?? 0} archived`;
     list.replaceChildren(...(d.messages.length ? d.messages.map((m) => h('div', { class: `card msg-item ${m.status}` },
       h('div', { class: 'panel-head' }, h('h3', {}, m.subject), m.status === 'new' ? h('span', { class: 'pill pinned' }, 'New') : h('span', { class: 'pill' }, m.status)),
-      h('p', { class: 'small muted' }, m.name, ' · ', h('a', { href: `mailto:${encodeURIComponent(m.email).replace('%40', '@')}` }, m.email), ' · ', fmtDate(m.createdAt)),
+      h('p', { class: 'small muted' }, m.name, ' · ', m.email ? h('a', { href: `mailto:${encodeURIComponent(m.email).replace('%40', '@')}` }, m.email) : 'no email given', ' · ', fmtDate(m.createdAt)),
       h('div', { class: 'msg-body' }, m.message),
       h('div', { class: 'row-actions' },
         m.status !== 'read' ? h('button', { class: 'btn small', onclick: () => setStatus(m.id, 'read') }, 'Mark read') : h('button', { class: 'btn small', onclick: () => setStatus(m.id, 'new') }, 'Mark unread'),

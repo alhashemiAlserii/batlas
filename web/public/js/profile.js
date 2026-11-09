@@ -23,7 +23,7 @@ else {
         h('h2', {}, 'Edit profile'),
         h('div', { class: 'field' }, h('label', { for: 'dn' }, 'Display name'), h('input', { id: 'dn', name: 'displayName', maxlength: 40, value: user.displayName })),
         h('div', { class: 'field' }, h('label', { for: 'bio' }, 'Bio'), (() => { const t = h('textarea', { id: 'bio', name: 'bio', maxlength: 500 }); t.value = user.bio; return t; })()),
-        h('p', { class: 'small muted' }, 'Email: ', me.user.email, ' (private) · ', h('a', { href: '/settings' }, 'Avatar, password & email settings')),
+        h('p', { class: 'small muted' }, me.user.email ? ['Email: ', me.user.email, ' (private) · '] : 'No email (optional) · ', h('a', { href: '/settings' }, 'Avatar, password & email settings')),
         msg, h('button', { class: 'btn primary' }, 'Save'));
       form.addEventListener('submit', async (e) => {
         e.preventDefault();

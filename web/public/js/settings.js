@@ -4,10 +4,21 @@ const me = await getMe();
 if (!me.user) location.href = '/login?next=/settings';
 else {
   const u = me.user;
-  // verification
+  // optional email (+ verification only if the site has email turned on)
+  let site = { emailEnabled: false };
+  try { site = await api('GET', '/api/site'); } catch {}
   const vMsg = h('div', { 'aria-live': 'polite' });
-  const verify = h('section', { class: 'card' }, h('h2', {}, 'Email'), h('p', {}, u.email, ' ', u.emailVerified ? h('span', { class: 'pill published' }, 'Verified') : h('span', { class: 'pill upcoming' }, 'Not verified')),
-    u.emailVerified ? null : h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/auth/verify-email/request', {}); showOk(vMsg, 'Verification link sent. Check your inbox.'); } catch (e) { showError(vMsg, e); } } }, 'Send verification link'), vMsg);
+  const emailIn = h('input', { id: 'em', name: 'email', type: 'email', autocomplete: 'email', placeholder: 'you@example.com (optional)' }); emailIn.value = u.email || '';
+  const emailPw = h('input', { id: 'em-pw', type: 'password', autocomplete: 'current-password' });
+  const verify = h('section', { class: 'card' }, h('h2', {}, 'Email (optional)'),
+    h('p', { class: 'small muted' }, 'You don\'t need an email to play. If you forget your password, ask a Batlas admin for a temporary one.'),
+    u.email ? h('p', {}, u.email, ' ', site.emailEnabled ? (u.emailVerified ? h('span', { class: 'pill published' }, 'Verified') : h('span', { class: 'pill upcoming' }, 'Not verified')) : null) : h('p', { class: 'muted' }, 'No email added.'),
+    h('div', { class: 'field' }, h('label', { for: 'em' }, u.email ? 'Change email (leave empty to remove)' : 'Add an email'), emailIn),
+    h('div', { class: 'field' }, h('label', { for: 'em-pw' }, 'Current password'), emailPw),
+    h('div', { class: 'inline' },
+      h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/me/email', { email: emailIn.value, currentPassword: emailPw.value }); showOk(vMsg, 'Saved.'); setTimeout(() => location.reload(), 600); } catch (e) { showError(vMsg, e); } } }, 'Save email'),
+      site.emailEnabled && u.email && !u.emailVerified ? h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/auth/verify-email/request', {}); showOk(vMsg, 'Verification link sent.'); } catch (e) { showError(vMsg, e); } } }, 'Send verification link') : null),
+    vMsg);
 
   // avatar
   const aMsg = h('div', { 'aria-live': 'polite' });
@@ -33,11 +44,20 @@ else {
   pf.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (pf.newPassword.value !== pf.np2.value) return showError(pMsg, new Error('The new passwords do not match.'));
-    try { await api('POST', '/api/me/password', { currentPassword: pf.currentPassword.value, newPassword: pf.newPassword.value }); pf.reset(); showOk(pMsg, 'Password changed. Other devices were signed out.'); }
+    try {
+      await api('POST', '/api/me/password', { currentPassword: pf.currentPassword.value, newPassword: pf.newPassword.value });
+      pf.reset();
+      showOk(pMsg, 'Password changed. Other devices were signed out.');
+      if (forced) setTimeout(() => { location.href = '/profile'; }, 900);
+    }
     catch (err) { showError(pMsg, err); }
   });
 
-  root.replaceChildren(
+  const forced = !!u.mustChangePassword;
+  if (forced) {
+    pf.querySelector('label[for=cp]').textContent = 'Temporary password (the one staff gave you)';
+    root.replaceChildren(h('div', { class: 'alert error', role: 'alert' }, 'A Batlas staff member reset your password. Choose your own new password to continue.'), pf);
+  } else root.replaceChildren(
     h('p', { class: 'muted' }, 'Signed in as ', h('strong', {}, u.username), ' ', rankBadge(u.role), ' · ', h('a', { href: '/profile' }, 'Edit profile')),
     h('div', { class: 'settings-grid' }, av, h('div', { class: 'settings-grid' }, verify, pf)));
 }

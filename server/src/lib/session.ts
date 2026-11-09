@@ -128,3 +128,17 @@ export function requirePermission(...perms: Permission[]): RequestHandler {
     next();
   };
 }
+
+/**
+ * After a staff password reset the user must pick a new password before doing anything else.
+ * Enforced on the server: only reading public pages/data, logging out and changing the password work.
+ */
+const FORCED_ALLOW = new Set(['POST /me/password', 'POST /auth/logout']);
+export const enforcePasswordChange: RequestHandler = (req, _res, next) => {
+  if (!req.user?.must_change_password) return next();
+  const key = `${req.method} ${req.path}`;
+  if (FORCED_ALLOW.has(key)) return next();
+  const restricted = /^\/(admin|dev|game)(\/|$)/.test(req.path);
+  if (SAFE.has(req.method) && !restricted) return next();
+  next(new HttpError(403, 'Please choose a new password first.', 'password_change_required'));
+};

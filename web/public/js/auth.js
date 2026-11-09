@@ -10,8 +10,9 @@ f.addEventListener('submit', async (e) => {
   btn.disabled = true;
   const data = Object.fromEntries(new FormData(f));
   try {
-    await api('POST', isRegister ? '/api/auth/register' : '/api/auth/login', data);
-    location.href = dest;
+    if (!data.email) delete data.email;
+    const r = await api('POST', isRegister ? '/api/auth/register' : '/api/auth/login', data);
+    location.href = r.user?.mustChangePassword ? '/settings?force=1' : dest;
   } catch (err) {
     showError(msg, err);
     btn.disabled = false;

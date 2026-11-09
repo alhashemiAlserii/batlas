@@ -10,13 +10,14 @@ import { audit } from '../lib/audit.js';
 import { sendVerificationEmail } from './account.js';
 
 export { usernameSchema, passwordSchema } from '../lib/schemas.js';
-import { usernameSchema, passwordSchema } from '../lib/schemas.js';
+import { usernameSchema, passwordSchema, optionalEmail } from '../lib/schemas.js';
 
 // .strict() is NOT used on purpose: unknown fields such as `role` are silently dropped,
 // so a client can never pick its own rank.
 const registerSchema = z.object({
   username: usernameSchema,
-  email: z.string().trim().toLowerCase().email().max(254),
+  // Optional: many players (e.g. on school iPads) have no usable email.
+  email: optionalEmail,
   password: passwordSchema,
 });
 const loginSchema = z.object({
@@ -40,17 +41,13 @@ export function authRoutes(ctx: Ctx) {
 
   r.post('/auth/register', limiter, async (req, res) => {
     const body = parse(registerSchema, req.body);
-    const exists = await ctx
-      .db('users')
-      .where({ username_lower: body.username.toLowerCase() })
-      .orWhere({ email_lower: body.email.toLowerCase() })
-      .first();
-    if (exists) throw new HttpError(409, 'That username or email is already registered.', 'conflict');
+    if (await ctx.db('users').where({ username_lower: body.username.toLowerCase() }).first()) throw new HttpError(409, 'That username is taken.', 'conflict');
+    if (body.email && (await ctx.db('users').where({ email_lower: body.email }).first())) throw new HttpError(409, 'That email is already used by another account.', 'conflict');
     const [id] = await ctx.db('users').insert({
       username: body.username,
       username_lower: body.username.toLowerCase(),
-      email: body.email,
-      email_lower: body.email.toLowerCase(),
+      email: body.email ?? null,
+      email_lower: body.email ?? null,
       password_hash: await hashPassword(body.password),
       role: 'PLAYER', // always. Ranks are only granted by authorised staff or the CLI.
       display_name: body.username,
@@ -59,7 +56,7 @@ export function authRoutes(ctx: Ctx) {
     const user = (await ctx.db<UserRow>('users').where({ id }).first())!;
     await createSession(ctx, req, res, user);
     try {
-      await sendVerificationEmail(ctx, user);
+      if (ctx.config.emailEnabled && user.email) await sendVerificationEmail(ctx, user);
     } catch (e) {
       console.error('verification email failed', e);
     }
@@ -72,7 +69,7 @@ export function authRoutes(ctx: Ctx) {
     const l = body.login.toLowerCase();
     const user = await ctx.db<UserRow>('users').where({ username_lower: l }).orWhere({ email_lower: l }).first();
     const ok = user ? await verifyPassword(user.password_hash, body.password) : await dummyVerify(body.password);
-    if (!user || !ok) throw new HttpError(401, 'Incorrect username/email or password.', 'bad_credentials');
+    if (!user || !ok) throw new HttpError(401, 'Incorrect username or password.', 'bad_credentials');
     if (user.banned) {
       await audit(ctx.db, req, { action: 'auth.login_blocked_banned', category: 'auth', targetType: 'user', targetId: user.id, targetLabel: user.username }, user);
       throw new HttpError(403, 'This account is banned.' + (user.ban_reason ? ` Reason: ${user.ban_reason}` : ''), 'banned');

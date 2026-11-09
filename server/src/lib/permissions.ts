@@ -24,6 +24,7 @@ export const PERMISSIONS = [
   'players.kick',
   'moderation.view',
   'players.view',
+  'players.reset_password', // staff-issued one-time temporary password
   // world / game control
   'weather.change',
   'environment.control',
@@ -57,6 +58,7 @@ const ADMIN_PERMS: Permission[] = [
   'players.ban',
   'players.kick',
   'players.view',
+  'players.reset_password',
   'moderation.view',
   'weather.change',
   'emergency.trigger',

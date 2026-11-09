@@ -163,3 +163,4 @@ select{-webkit-appearance:none;appearance:none;padding-right:34px;background-ima
 .media-placeholder{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(400px 200px at 50% 40%,rgba(30,107,255,.25),transparent)}
 .media-placeholder img{width:40%;height:auto;object-fit:contain}
 .about{margin-top:28px}
+.optional-email summary{cursor:pointer;color:var(--accent);font-weight:600;margin-bottom:8px}

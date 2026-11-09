@@ -15,6 +15,8 @@ export interface AppConfig {
   rateLimit: { windowMs: number; max: number };
   studioName: string;
   publicUrl: string;
+  /** Email-based features (verification, forgot-password). Off by default: email is optional. */
+  emailEnabled: boolean;
   outboxDir: string;
   contactRateLimit: { windowMs: number; max: number };
 }
@@ -32,6 +34,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     rateLimit: { windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT ?? 20) },
     studioName: process.env.STUDIO_NAME ?? 'Batlas',
     publicUrl: (process.env.PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? 3000}`).replace(/\/$/, ''),
+    emailEnabled: process.env.EMAIL_ENABLED === 'true',
     outboxDir: process.env.OUTBOX_DIR ?? path.join(SERVER_ROOT, 'data', 'outbox'),
     contactRateLimit: { windowMs: 60 * 60 * 1000, max: Number(process.env.CONTACT_RATE_LIMIT ?? 5) },
     ...overrides,

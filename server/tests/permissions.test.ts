@@ -28,7 +28,7 @@ describe('permission map', () => {
     const t = await get(trusted);
     expect(t.permissions).toEqual(['admin.panel', 'items.spawn.approved']);
     const a = await get(admin);
-    expect(a.permissions.sort()).toEqual(['admin.commands', 'admin.panel', 'emergency.manage', 'emergency.trigger', 'items.spawn.approved', 'moderation.view', 'players.ban', 'players.kick', 'players.view', 'weather.change'].sort());
+    expect(a.permissions.sort()).toEqual(['admin.commands', 'admin.panel', 'emergency.manage', 'emergency.trigger', 'items.spawn.approved', 'moderation.view', 'players.ban', 'players.kick', 'players.reset_password', 'players.view', 'weather.change'].sort());
     for (const forbidden of ['items.spawn.any', 'items.spawn.developer', 'roles.grant.developer', 'roles.grant.admin', 'dev.menu', 'games.manage', 'audit.view']) {
       expect(a.permissions).not.toContain(forbidden);
     }

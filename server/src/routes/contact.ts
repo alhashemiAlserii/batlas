@@ -5,10 +5,11 @@ import type { Ctx } from '../lib/types.js';
 import { parse, HttpError } from '../lib/http.js';
 import { requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
+import { optionalEmail } from '../lib/schemas.js';
 
 const contactSchema = z.object({
   name: z.string().trim().min(1, 'required').max(80),
-  email: z.string().trim().email().max(254),
+  email: optionalEmail, // optional: players on school devices may not have one
   subject: z.string().trim().min(1, 'required').max(160),
   message: z.string().trim().min(10, 'must be at least 10 characters').max(5000),
   website: z.string().max(500).optional(), // honeypot: real people never see or fill this
@@ -30,7 +31,7 @@ export function contactRoutes(ctx: Ctx) {
     if (b.website && b.website.trim() !== '') return res.status(201).json({ ok: true });
     await ctx.db('contact_messages').insert({
       name: b.name,
-      email: b.email,
+      email: b.email ?? '',
       subject: b.subject,
       message: b.message,
       status: 'new',

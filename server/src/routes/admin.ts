@@ -6,7 +6,8 @@ import { parse, HttpError } from '../lib/http.js';
 import { requirePermission } from '../lib/session.js';
 import { canActOn, hasPermission, isRole, permissionToAssign, ROLES, type Role } from '../lib/permissions.js';
 import { audit } from '../lib/audit.js';
-import { verifyPassword } from '../lib/crypto.js';
+import { verifyPassword, hashPassword } from '../lib/crypto.js';
+import crypto from 'node:crypto';
 
 const reasonSchema = z.object({ reason: z.string().trim().max(500).optional() });
 const roleSchema = z.object({
@@ -39,7 +40,7 @@ async function guard(ctx: Ctx, req: Request, target: UserRow, action: string) {
   }
 }
 
-export const MODERATION_ACTIONS = ['player.ban', 'player.unban', 'player.kick'];
+export const MODERATION_ACTIONS = ['player.ban', 'player.unban', 'player.kick', 'player.password_reset'];
 
 export function adminRoutes(ctx: Ctx) {
   const r = Router();
@@ -88,6 +89,24 @@ export function adminRoutes(ctx: Ctx) {
     await ctx.db('game_tokens').where({ user_id: target.id }).delete();
     await audit(ctx.db, req, { action: 'player.kick', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { reason: reason ?? null } });
     res.json({ ok: true });
+  });
+
+  // Staff password reset (email is optional, so this replaces "forgot password" for most players).
+  // Issues a one-time temporary password, signs the player out everywhere and forces a new
+  // password at next login. canActOn: Admins only for Players/Trusted; nobody can reset a Developer.
+  r.post('/admin/users/:id/temp-password', requirePermission('players.reset_password'), async (req, res) => {
+    const target = await loadTarget(ctx, req);
+    await guard(ctx, req, target, 'player.password_reset');
+    const temp = tempPassword();
+    await ctx.db.transaction(async (trx) => {
+      await trx('users').where({ id: target.id }).update({ password_hash: await hashPassword(temp), must_change_password: true, password_changed_at: new Date().toISOString() });
+      await trx('sessions').where({ user_id: target.id }).delete();
+      await trx('game_tokens').where({ user_id: target.id }).delete();
+      await trx('auth_tokens').where({ user_id: target.id }).whereNull('used_at').update({ used_at: new Date().toISOString() });
+    });
+    // The password itself is never logged.
+    await audit(ctx.db, req, { action: 'player.password_reset', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username });
+    res.json({ ok: true, temporaryPassword: temp, note: 'Give this to the player privately. It works once; they must choose a new password after logging in.' });
   });
 
   r.put('/admin/users/:id/role', async (req, res) => {
@@ -148,4 +167,12 @@ function fmt(r: any) {
     details: r.details ? JSON.parse(r.details) : null,
     createdAt: r.created_at,
   };
+}
+
+/** 12 chars from an unambiguous alphabet (no 0/O/1/l/I), grouped for reading aloud: abcd-efgh-jkmn */
+function tempPassword() {
+  const A = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(12);
+  const chars = [...bytes].map((b) => A[b % A.length]).join('');
+  return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
 }
