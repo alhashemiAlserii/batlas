@@ -14,6 +14,9 @@ export interface AppConfig {
   trustProxy: boolean;
   rateLimit: { windowMs: number; max: number };
   studioName: string;
+  publicUrl: string;
+  outboxDir: string;
+  contactRateLimit: { windowMs: number; max: number };
 }
 
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -28,6 +31,9 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     trustProxy: process.env.TRUST_PROXY === 'true',
     rateLimit: { windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT ?? 20) },
     studioName: process.env.STUDIO_NAME ?? 'Batlas',
+    publicUrl: (process.env.PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? 3000}`).replace(/\/$/, ''),
+    outboxDir: process.env.OUTBOX_DIR ?? path.join(SERVER_ROOT, 'data', 'outbox'),
+    contactRateLimit: { windowMs: 60 * 60 * 1000, max: Number(process.env.CONTACT_RATE_LIMIT ?? 5) },
     ...overrides,
   };
 }

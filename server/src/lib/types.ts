@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import type { Role } from './permissions.js';
 import type { AppConfig } from '../config.js';
+import type { Mailer } from './mailer.js';
 
 export interface UserRow {
   id: number;
@@ -17,11 +18,15 @@ export interface UserRow {
   banned_at: string | null;
   created_at: string;
   last_login_at: string | null;
+  email_verified_at: string | null;
+  avatar_url: string | null;
+  password_changed_at: string | null;
 }
 
 export interface Ctx {
   db: Knex;
   config: AppConfig;
+  mailer: Mailer;
 }
 
 declare global {
@@ -42,18 +47,20 @@ export function publicUser(u: UserRow) {
     displayName: u.display_name ?? u.username,
     role: u.role,
     bio: u.bio ?? '',
+    avatarUrl: u.avatar_url ?? '',
     createdAt: u.created_at,
   };
 }
 
 export function selfUser(u: UserRow) {
-  return { ...publicUser(u), email: u.email };
+  return { ...publicUser(u), email: u.email, emailVerified: !!u.email_verified_at };
 }
 
 export function adminUser(u: UserRow) {
   return {
     ...publicUser(u),
     email: u.email,
+    emailVerified: !!u.email_verified_at,
     banned: !!u.banned,
     banReason: u.ban_reason,
     bannedAt: u.banned_at,

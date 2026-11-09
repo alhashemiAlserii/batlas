@@ -7,6 +7,7 @@ import { createApp } from '../src/app.js';
 import { hashPassword } from '../src/lib/crypto.js';
 import type { Role } from '../src/lib/permissions.js';
 import type { AppConfig } from '../src/config.js';
+import { MemoryMailer } from '../src/lib/mailer.js';
 
 export const PW = 'correct-horse-battery';
 
@@ -14,7 +15,8 @@ export async function setup(overrides: Partial<AppConfig> = {}) {
   const db = createDb(':memory:');
   await migrate(db);
   const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-up-'));
-  const { app } = createApp(db, { cookieSecure: false, rateLimit: { windowMs: 60000, max: 1000 }, gameServerKey: 'test-game-server-key-123', uploadDir, ...overrides });
+  const mailer = new MemoryMailer();
+  const { app } = createApp(db, { cookieSecure: false, rateLimit: { windowMs: 60000, max: 1000 }, contactRateLimit: { windowMs: 60000, max: 1000 }, gameServerKey: 'test-game-server-key-123', uploadDir, publicUrl: 'http://test.local', ...overrides }, { mailer });
   let n = 0;
   const hashed = await hashPassword(PW);
 
@@ -28,7 +30,7 @@ export async function setup(overrides: Partial<AppConfig> = {}) {
     if (res.status !== 200) throw new Error('login failed ' + res.status + JSON.stringify(res.body));
     return { id: Number(id), username, agent, csrf: cookieCsrf(res) ?? csrf };
   }
-  return { db, app, user, close: () => db.destroy() };
+  return { db, app, user, mailer, uploadDir, close: () => db.destroy() };
 }
 
 export function cookieCsrf(res: request.Response): string | undefined {

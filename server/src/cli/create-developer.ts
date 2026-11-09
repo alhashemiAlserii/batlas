@@ -15,7 +15,7 @@ import { createDb, migrate } from '../db/index.js';
 import { loadConfig, SERVER_ROOT } from '../config.js';
 import { hashPassword, randomToken } from '../lib/crypto.js';
 import { audit } from '../lib/audit.js';
-import { usernameSchema, passwordSchema } from '../routes/auth.js';
+import { usernameSchema, passwordSchema } from '../lib/schemas.js';
 
 const { values } = parseArgs({
   options: {

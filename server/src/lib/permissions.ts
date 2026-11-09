@@ -40,6 +40,9 @@ export const PERMISSIONS = [
   'settings.modify',
   'games.manage',
   'audit.view',
+  'news.manage', // create/edit/publish/pin announcements (Developer only by default)
+  'inbox.view', // contact-form messages
+  'stats.view', // player statistics
   // roles
   'roles.grant.trusted',
   'roles.grant.admin',

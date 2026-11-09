@@ -4,3 +4,4 @@ server/uploads/
 server/dist/
 *.sqlite*
 .env
+e2e/node_modules/

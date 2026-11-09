@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import type { Request } from 'express';
 
-export type AuditCategory = 'moderation' | 'roles' | 'game' | 'games' | 'auth' | 'admin';
+export type AuditCategory = 'moderation' | 'roles' | 'game' | 'games' | 'news' | 'auth' | 'admin';
 
 export interface AuditEntry {
   action: string;

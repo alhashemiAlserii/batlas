@@ -13,13 +13,18 @@ import { meRoutes } from './routes/me.js';
 import { adminRoutes } from './routes/admin.js';
 import { gamesRoutes } from './routes/games.js';
 import { gameRoutes } from './routes/game.js';
+import { accountRoutes } from './routes/account.js';
+import { newsRoutes } from './routes/news.js';
+import { contactRoutes } from './routes/contact.js';
+import { statsRoutes } from './routes/stats.js';
+import { FileMailer, type Mailer } from './lib/mailer.js';
 
 /** Unlisted route for the Developer dashboard. Not linked anywhere public; protected server-side regardless. */
 export const DEV_DASHBOARD_PATH = '/studio-console';
 
-export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}) {
+export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, deps: { mailer?: Mailer } = {}) {
   const config = loadConfig(configOverrides);
-  const ctx: Ctx = { db, config };
+  const ctx: Ctx = { db, config, mailer: deps.mailer ?? new FileMailer(config.outboxDir) };
   const app = express();
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', 1);
@@ -61,6 +66,10 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}) {
   api.use(adminRoutes(ctx));
   api.use(gamesRoutes(ctx));
   api.use(gameRoutes(ctx));
+  api.use(accountRoutes(ctx));
+  api.use(newsRoutes(ctx));
+  api.use(contactRoutes(ctx));
+  api.use(statsRoutes(ctx));
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found')));
   api.use(errorHandler);
   app.use('/api', (req, res, next) => {
@@ -96,6 +105,12 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}) {
   app.get('/profile', page('profile.html'));
   app.get('/u/:username', page('profile.html'));
   app.get('/contact', page('contact.html'));
+  app.get('/news', page('news.html'));
+  app.get('/news/:slug', page('post.html'));
+  app.get('/settings', page('settings.html'));
+  app.get('/forgot-password', page('forgot.html'));
+  app.get('/reset-password', page('reset.html'));
+  app.get('/verify-email', page('verify.html'));
 
   app.get('/admin', gated('admin.panel', 'admin.html', false));
   app.get('/admin/app.js', gated('admin.panel', 'admin.js', true));

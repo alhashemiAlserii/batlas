@@ -7,14 +7,10 @@ import { parse, HttpError } from '../lib/http.js';
 import { hashPassword, verifyPassword, dummyVerify } from '../lib/crypto.js';
 import { createSession, destroySession, issueCsrf } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
+import { sendVerificationEmail } from './account.js';
 
-export const usernameSchema = z
-  .string()
-  .trim()
-  .min(3)
-  .max(20)
-  .regex(/^[A-Za-z0-9_]+$/, 'letters, numbers and underscore only');
-export const passwordSchema = z.string().min(10, 'must be at least 10 characters').max(200);
+export { usernameSchema, passwordSchema } from '../lib/schemas.js';
+import { usernameSchema, passwordSchema } from '../lib/schemas.js';
 
 // .strict() is NOT used on purpose: unknown fields such as `role` are silently dropped,
 // so a client can never pick its own rank.
@@ -62,6 +58,11 @@ export function authRoutes(ctx: Ctx) {
     });
     const user = (await ctx.db<UserRow>('users').where({ id }).first())!;
     await createSession(ctx, req, res, user);
+    try {
+      await sendVerificationEmail(ctx, user);
+    } catch (e) {
+      console.error('verification email failed', e);
+    }
     await audit(ctx.db, req, { action: 'auth.register', category: 'auth', targetType: 'user', targetId: user.id, targetLabel: user.username }, user);
     res.status(201).json({ user: selfUser(user) });
   });

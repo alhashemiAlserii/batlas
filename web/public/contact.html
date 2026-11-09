@@ -10,12 +10,25 @@
 <link rel="apple-touch-icon" href="/img/favicon-180.png">
 <link rel="stylesheet" href="/css/site.css">
 <script type="module" src="/js/common.js"></script>
+<script type="module" src="/js/contact.js"></script>
 
 </head>
 <body>
 <header id="site-header" class="site-header"></header>
 <main id="main">
-<h1>Contact</h1><div class="card narrow"><p>For press, business or support, email <a href="mailto:contact@example.com">contact@example.com</a> <span class="placeholder-tag">PLACEHOLDER</span>.</p><p class="muted small">A contact form with spam protection is planned for Stage 2.</p></div>
+<h1>Contact</h1>
+<div class="contact-grid">
+<form id="f" class="card" novalidate>
+  <div class="field"><label for="name">Your name</label><input id="name" name="name" maxlength="80" autocomplete="name" required></div>
+  <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required></div>
+  <div class="field"><label for="subject">Subject</label><input id="subject" name="subject" maxlength="160" required></div>
+  <div class="field"><label for="message">Message</label><textarea id="message" name="message" minlength="10" maxlength="5000" required></textarea></div>
+  <div class="hp" aria-hidden="true"><label for="website">Leave this field empty</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+  <div id="msg" aria-live="polite"></div>
+  <button class="btn primary">Send message</button>
+</form>
+<div class="card"><h2>Get in touch</h2><p class="muted">Questions about our games, bug reports, press or partnerships, send us a message and the team will get back to you.</p><p class="small muted">We only use your email to reply to you.</p></div>
+</div>
 </main>
 <footer id="site-footer" class="site-footer"></footer>
 </body>

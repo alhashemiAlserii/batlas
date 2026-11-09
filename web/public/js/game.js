@@ -1,4 +1,4 @@
-import { api, h } from './common.js';
+import { api, h, fmtDay } from './common.js';
 const slug = decodeURIComponent(location.pathname.split('/')[2] || '');
 const root = document.getElementById('game');
 
@@ -16,12 +16,13 @@ const safeUrl = (u) => (/^(https?:\/\/|\/)/i.test(u || '') ? u : null);
 try {
   const { game: g } = await api('GET', `/api/games/${encodeURIComponent(slug)}`);
   document.title = `${g.title} · Batlas`;
-  const media = trailer(g.trailerUrl) || (g.coverImage ? h('img', { src: g.coverImage, alt: g.title }) : h('div', { class: 'cover' }, '✈'));
+  const media = trailer(g.trailerUrl) || (g.coverImage ? h('img', { src: g.coverImage, alt: g.title }) : h('div', { class: 'media-placeholder' }, h('img', { src: '/img/batlas-mark.png', alt: '' })));
   const actions = h('div', { class: 'inline' });
   if (g.status === 'published' && safeUrl(g.playUrl)) actions.append(h('a', { class: 'btn primary', href: safeUrl(g.playUrl) }, '▶ Play in browser'));
-  if (g.status === 'published' && safeUrl(g.downloadUrl)) actions.append(h('a', { class: 'btn', href: safeUrl(g.downloadUrl), rel: 'noopener' }, '⬇ Download'));
+  const dl = safeUrl(g.latestVersion?.downloadUrl) || safeUrl(g.downloadUrl);
+  if (g.status === 'published' && dl) actions.append(h('a', { class: 'btn', href: dl, rel: 'noopener' }, g.latestVersion ? `⬇ Download v${g.latestVersion.version}` : '⬇ Download'));
   if (g.status === 'upcoming') actions.append(h('span', { class: 'pill upcoming' }, 'Coming soon'));
-  root.replaceChildren(
+  root.replaceChildren(...[
     h('div', { class: 'game-hero' },
       h('div', { class: 'media' }, media),
       h('div', {},
@@ -32,9 +33,15 @@ try {
         h('div', { class: 'kv small', },
           g.version ? [h('span', { class: 'muted' }, 'Version'), h('span', {}, g.version)] : null,
           g.platforms.length ? [h('span', { class: 'muted' }, 'Platforms'), h('span', {}, g.platforms.join(', '))] : null))),
-    h('section', {}, h('h2', {}, 'About'), h('p', { class: 'desc' }, g.description || 'More details soon.')),
+    h('section', { class: 'about' }, h('h2', {}, 'About'), h('p', { class: 'desc' }, g.description || 'More details soon.')),
+    g.latestVersion ? h('section', { class: 'card section-head-block' },
+      h('h2', {}, `What's new in v${g.latestVersion.version}`),
+      h('p', { class: 'small muted' }, 'Released ', fmtDay(g.latestVersion.releasedAt)),
+      h('div', { class: 'changelog' }, g.latestVersion.changelog || 'No changelog for this version.')) : null,
+    g.versions && g.versions.length > 1 ? h('section', {}, h('h2', {}, 'Version history'), h('div', { class: 'version-list' }, g.versions.slice(1).map((v) =>
+      h('div', { class: 'version' }, h('strong', {}, `v${v.version}`), h('span', { class: 'small muted' }, ' · ', fmtDay(v.releasedAt)), v.changelog ? h('div', { class: 'changelog small' }, v.changelog) : null)))) : null,
     g.screenshots.length ? h('section', {}, h('h2', {}, 'Screenshots'), h('div', { class: 'shots' }, g.screenshots.filter(safeUrl).map((s) => h('a', { href: s, target: '_blank', rel: 'noopener' }, h('img', { src: s, alt: 'Screenshot', loading: 'lazy' }))))) : null,
-  );
+  ].filter(Boolean));
 } catch (e) {
   root.replaceChildren(h('div', { class: 'card center-box' }, h('h1', {}, 'Game not found'), h('a', { class: 'btn', href: '/games' }, 'Back to games')));
 }

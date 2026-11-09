@@ -1,7 +1,8 @@
-import { api, h, getMe, rankBadge, showError, showOk, fmtDate } from './common.js';
+import { api, h, getMe, rankBadge, avatar, showError, showOk, fmtDate } from './common.js';
 const root = document.getElementById('profile');
 const parts = location.pathname.split('/');
-const me = await getMe();
+let me = { user: null, permissions: new Set() };
+try { me = await getMe(); } catch { /* network aborted; treat as logged out */ }
 let username = parts[1] === 'u' ? decodeURIComponent(parts[2] || '') : me.user?.username;
 if (!username) { location.href = '/login?next=/profile'; }
 else {
@@ -11,8 +12,8 @@ else {
     const role = user.role.toLowerCase();
     root.replaceChildren(
       h('div', { class: `card panel-${role === 'developer' ? 'dev' : role}` },
-        h('div', { class: 'panel-head' }, h('h1', { class: `name-${role}` }, user.displayName), rankBadge(user.role)),
-        h('p', { class: 'muted' }, '@', user.username, ' · joined ', fmtDate(user.createdAt)),
+        h('div', { class: 'profile-head' }, avatar(user, 'lg'), h('div', {}, h('div', { class: 'panel-head' }, h('h1', { class: `name-${role}` }, user.displayName), rankBadge(user.role)),
+        h('p', { class: 'muted' }, '@', user.username, ' · joined ', fmtDate(user.createdAt)))),
         user.banned ? h('div', { class: 'alert error' }, 'This account is banned.') : null,
         h('p', { class: 'desc' }, user.bio || (mine ? 'You have not written a bio yet.' : ''))),
     );
@@ -22,7 +23,7 @@ else {
         h('h2', {}, 'Edit profile'),
         h('div', { class: 'field' }, h('label', { for: 'dn' }, 'Display name'), h('input', { id: 'dn', name: 'displayName', maxlength: 40, value: user.displayName })),
         h('div', { class: 'field' }, h('label', { for: 'bio' }, 'Bio'), (() => { const t = h('textarea', { id: 'bio', name: 'bio', maxlength: 500 }); t.value = user.bio; return t; })()),
-        h('p', { class: 'small muted' }, 'Email: ', me.user.email, ' (private)'),
+        h('p', { class: 'small muted' }, 'Email: ', me.user.email, ' (private) · ', h('a', { href: '/settings' }, 'Avatar, password & email settings')),
         msg, h('button', { class: 'btn primary' }, 'Save'));
       form.addEventListener('submit', async (e) => {
         e.preventDefault();

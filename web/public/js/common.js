@@ -53,10 +53,17 @@ export function rankBadge(role) {
   const r = RANK_LABEL[role] ? role : 'PLAYER';
   return h('span', { class: `rank rank-${r.toLowerCase()}`, title: `${r} rank` }, RANK_LABEL[r]);
 }
+const safeImg = (u) => (typeof u === 'string' && /^\/uploads\//.test(u) ? u : '');
+export function avatar(u, size = 'sm') {
+  const role = (u.role || 'PLAYER').toLowerCase();
+  const src = safeImg(u.avatarUrl);
+  const initial = (u.displayName || u.username || '?').trim().charAt(0).toUpperCase();
+  return h('span', { class: `avatar avatar-${size} ring-${role}`, 'aria-hidden': 'true' }, src ? h('img', { src, alt: '', loading: 'lazy', width: 256, height: 256 }) : initial);
+}
 export function userChip(u, link = true) {
   const role = (u.role || 'PLAYER').toLowerCase();
   const name = h('span', { class: `name-${role}` }, u.displayName || u.username);
-  return h('span', { class: 'user-chip' }, link ? h('a', { href: `/u/${encodeURIComponent(u.username)}` }, name) : name, rankBadge(u.role));
+  return h('span', { class: 'user-chip' }, avatar(u), link ? h('a', { href: `/u/${encodeURIComponent(u.username)}` }, name) : name, rankBadge(u.role));
 }
 
 let meP;
@@ -70,6 +77,12 @@ export function showError(container, err) {
 }
 export function showOk(container, msg) {
   container.replaceChildren(h('div', { class: 'alert ok', role: 'status' }, msg));
+}
+
+export function fmtDay(s) {
+  if (!s) return '';
+  const d = new Date(String(s).length === 10 ? s + 'T00:00:00' : s);
+  return isNaN(d) ? s : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
 export function fmtDate(s) {
@@ -87,7 +100,7 @@ async function renderChrome() {
   const link = (href, label) => h('a', { href, class: path === href || (href !== '/' && path.startsWith(href)) ? 'active' : '' }, label);
   if (header) {
     const right = h('div', { class: 'nav-right' });
-    const links = h('div', { class: 'nav-links' }, link('/', 'Home'), link('/games', 'Games'), link('/#news', 'News'), link('/contact', 'Contact'));
+    const links = h('div', { class: 'nav-links' }, link('/', 'Home'), link('/games', 'Games'), link('/news', 'News'), link('/contact', 'Contact'));
     const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
       h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` }, h('img', { class: 'brand-mark', src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 }), h('span', { class: 'sr-only', 'data-studio-name': '' }, studio),
         null),
@@ -100,6 +113,7 @@ async function renderChrome() {
         if (me.permissions.has('admin.panel')) links.append(link('/admin', 'Admin'));
         right.append(
           h('a', { href: '/profile' }, userChip(me.user, false)),
+          h('a', { class: 'btn small', href: '/settings' }, 'Settings'),
           h('button', { class: 'btn small', onclick: async () => { await api('POST', '/api/auth/logout'); location.href = '/'; } }, 'Log out'),
         );
       } else {

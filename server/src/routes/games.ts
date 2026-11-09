@@ -71,7 +71,11 @@ export function gameOut(g: any, includeConfig = false) {
   };
 }
 
-const IMAGE_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }> = {
+export function versionOut(v: any) {
+  return { id: v.id, version: v.version, releasedAt: String(v.released_at).slice(0, 10), changelog: v.changelog ?? '', downloadUrl: v.download_url ?? '' };
+}
+
+export const IMAGE_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }> = {
   'image/png': { ext: '.png', magic: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
   'image/jpeg': { ext: '.jpg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
   'image/webp': { ext: '.webp', magic: (b) => b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP' },
@@ -96,7 +100,8 @@ export function gamesRoutes(ctx: Ctx) {
   r.get('/games/:slug', async (req, res) => {
     const g = await ctx.db('games').where({ slug: String(req.params.slug).toLowerCase() }).whereIn('status', ['published', 'upcoming']).first();
     if (!g) throw new HttpError(404, 'Game not found');
-    res.json({ game: gameOut(g) });
+    const versions = await ctx.db('game_versions').where({ game_id: g.id }).orderBy([{ column: 'released_at', order: 'desc' }, { column: 'id', order: 'desc' }]);
+    res.json({ game: { ...gameOut(g), versions: versions.map(versionOut), latestVersion: versions[0] ? versionOut(versions[0]) : null } });
   });
 
   // ---- developer only ----
@@ -139,6 +144,44 @@ export function gamesRoutes(ctx: Ctx) {
     await ctx.db('games').where({ id }).update({ status, updated_at: now, ...(status === 'published' && !g.published_at ? { published_at: now } : {}) });
     await audit(ctx.db, req, { action: 'game.status', category: 'games', targetType: 'game', targetId: id, targetLabel: g.slug, details: { from: g.status, to: status } });
     res.json({ game: gameOut(await ctx.db('games').where({ id }).first(), true) });
+  });
+
+  // ---- version history ----
+  const versionSchema = z.object({
+    version: z.string().trim().min(1).max(32).regex(/^[\w.+-]+$/, 'letters, numbers, dots, dashes'),
+    releasedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').refine((d) => !isNaN(Date.parse(d)), 'invalid date'),
+    changelog: z.string().max(20000).optional(),
+    downloadUrl: url,
+  });
+
+  r.get('/dev/games/:id/versions', dev, async (req, res) => {
+    const rows = await ctx.db('game_versions').where({ game_id: Number(req.params.id) }).orderBy([{ column: 'released_at', order: 'desc' }, { column: 'id', order: 'desc' }]);
+    res.json({ versions: rows.map(versionOut) });
+  });
+
+  r.post('/dev/games/:id/versions', dev, async (req, res) => {
+    const id = Number(req.params.id);
+    const g = await ctx.db('games').where({ id }).first();
+    if (!g) throw new HttpError(404, 'Game not found');
+    const b = parse(versionSchema, req.body);
+    if (await ctx.db('game_versions').where({ game_id: id, version: b.version }).first()) throw new HttpError(409, 'That version already exists for this game');
+    const [vid] = await ctx.db('game_versions').insert({ game_id: id, version: b.version, released_at: b.releasedAt, changelog: b.changelog ?? '', download_url: b.downloadUrl || null, created_at: new Date().toISOString() });
+    // Keep the game's "current version" in sync with the newest release.
+    const latest = await ctx.db('game_versions').where({ game_id: id }).orderBy([{ column: 'released_at', order: 'desc' }, { column: 'id', order: 'desc' }]).first();
+    await ctx.db('games').where({ id }).update({ version: latest.version, updated_at: new Date().toISOString() });
+    await audit(ctx.db, req, { action: 'game.version.add', category: 'games', targetType: 'game', targetId: id, targetLabel: g.slug, details: { version: b.version } });
+    res.status(201).json({ version: versionOut(await ctx.db('game_versions').where({ id: vid }).first()) });
+  });
+
+  r.delete('/dev/games/:id/versions/:vid', dev, async (req, res) => {
+    const id = Number(req.params.id);
+    const v = await ctx.db('game_versions').where({ id: Number(req.params.vid), game_id: id }).first();
+    if (!v) throw new HttpError(404, 'Version not found');
+    await ctx.db('game_versions').where({ id: v.id }).delete();
+    const latest = await ctx.db('game_versions').where({ game_id: id }).orderBy([{ column: 'released_at', order: 'desc' }, { column: 'id', order: 'desc' }]).first();
+    if (latest) await ctx.db('games').where({ id }).update({ version: latest.version });
+    await audit(ctx.db, req, { action: 'game.version.delete', category: 'games', targetType: 'game', targetId: id, details: { version: v.version } });
+    res.json({ ok: true });
   });
 
   r.post('/dev/uploads', dev, upload.single('file'), async (req, res) => {
