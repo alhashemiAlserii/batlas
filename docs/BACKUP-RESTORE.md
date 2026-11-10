@@ -68,7 +68,7 @@ Because of the facts above there are two realistic ways to do it. **Option A is 
 
 ### Option A (recommended): upgrade the existing database in place
 
-Change `batlas-db-2je9`'s compute plan from Free to the smallest paid plan (Basic 256 MB, $6/month at the time of writing) before 2026-12-10. No data moves, no new connection string, no downtime beyond Render's plan change, and it adds point-in-time recovery (3 days on the Hobby workspace) and logical exports. Still take a backup + drill right before.
+Change `batlas-db-2je9`'s compute plan from Free to the smallest paid plan (`0.1c-256mb`, 256 MB RAM, $6/month on render.com/pricing as of 2026-11-10) before 2026-12-10. No data moves, no new connection string, no downtime beyond Render's plan change, and it adds point-in-time recovery (3 days on the Hobby workspace) and logical exports. Still take a backup + drill right before.
 
 ### Option B: stay free, move to a new free database
 
