@@ -2,9 +2,13 @@ import { api, h, getMe, rankBadge, avatar, showError, showOk, fmtDate } from './
 const root = document.getElementById('profile');
 const parts = location.pathname.split('/');
 let me = { user: null, permissions: new Set() };
-try { me = await getMe(); } catch { /* network aborted; treat as logged out */ }
+let meFailed = false;
+// A failed /api/me (offline, or aborted because the user is already navigating away) is NOT "logged out":
+// redirecting to /login then would hijack the navigation the user just started.
+try { me = await getMe(); } catch { meFailed = true; }
 let username = parts[1] === 'u' ? decodeURIComponent(parts[2] || '') : me.user?.username;
-if (!username) { location.href = '/login?next=/profile'; }
+if (!username && meFailed) { root?.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Could not load your profile. Check your connection and reload.'))); }
+else if (!username) { location.href = '/login?next=/profile'; }
 else {
   try {
     const { user } = await api('GET', `/api/users/${encodeURIComponent(username)}`);
