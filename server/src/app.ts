@@ -29,6 +29,17 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', 1);
 
+  // Load-balancer health check (Render healthCheckPath): no cookies, no session lookup.
+  app.get('/healthz', async (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      await db.raw('select 1');
+      res.json({ ok: true });
+    } catch {
+      res.status(503).json({ ok: false });
+    }
+  });
+
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -59,7 +70,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
       crossOriginEmbedderPolicy: false,
     }),
   );
-  app.use(cookieParser());
+  app.use(cookieParser(config.sessionSecret ?? undefined));
   app.use(express.json({ limit: '200kb' }));
   app.use(loadUser(ctx));
 

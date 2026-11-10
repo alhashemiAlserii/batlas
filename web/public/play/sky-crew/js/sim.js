@@ -621,6 +621,7 @@ export class Sim {
       const [id, x, y, z, ry, state, req, mood, flags, flash, carrier] = a;
       const p = this.pax.find((q) => q.id === id); if (!p) continue;
       pseen.add(id);
+      if (state === 'lost') p.predictT = 0; // the host has resolved our throw: stop predicting, or a later respawn would be ignored for a while
       if (state === 'lost' && p.state !== 'lost') { p.state = 'lost'; if (p.mesh.parent === this.ship.plane && p.target) p.mesh.position.copy(p.target); this.startEjectFx(p); }
       if (state !== 'lost' && p.fx) { this.stopEjectFx(p); p.mesh.visible = true; }
       // guests predict their own carry: ignore the host until it agrees

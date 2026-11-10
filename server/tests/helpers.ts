@@ -2,7 +2,7 @@ import request from 'supertest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { createDb, migrate } from '../src/db/index.js';
+import { createDb, migrate, insertId } from '../src/db/index.js';
 import { createApp } from '../src/app.js';
 import { hashPassword } from '../src/lib/crypto.js';
 import type { Role } from '../src/lib/permissions.js';
@@ -11,9 +11,29 @@ import { MemoryMailer } from '../src/lib/mailer.js';
 
 export const PW = 'correct-horse-battery';
 
-export async function setup(overrides: Partial<AppConfig> = {}) {
-  const db = createDb(':memory:');
+/**
+ * Fresh, migrated test database. In-memory SQLite by default; with TEST_DATABASE_URL set, a
+ * throw-away schema in that Postgres (so parallel test files never share tables).
+ */
+export async function testDb() {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url) { const db = createDb(':memory:'); await migrate(db); return db; }
+  const schema = `t_${process.pid}_${Math.random().toString(36).slice(2, 10)}`;
+  const admin = createDb(url);
+  await admin.raw(`create schema "${schema}"`);
+  await admin.destroy();
+  const db = createDb(url, { schema });
   await migrate(db);
+  // drop the schema again when the test closes the connection
+  const destroy = db.destroy.bind(db);
+  try {
+    Object.defineProperty(db, 'destroy', { configurable: true, value: async () => { await db.raw(`drop schema "${schema}" cascade`).catch(() => {}); return destroy(); } });
+  } catch { /* leave the schema behind; the test database is throw-away */ }
+  return db;
+}
+
+export async function setup(overrides: Partial<AppConfig> = {}) {
+  const db = await testDb();
   const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-up-'));
   const mailer = new MemoryMailer();
   const { app } = createApp(db, { cookieSecure: false, rateLimit: { windowMs: 60000, max: 1000 }, contactRateLimit: { windowMs: 60000, max: 1000 }, gameServerKey: 'test-game-server-key-123', uploadDir, publicUrl: 'http://test.local', ...overrides }, { mailer });
@@ -23,7 +43,7 @@ export async function setup(overrides: Partial<AppConfig> = {}) {
   /** Creates a user directly in the DB (server-side) and returns a logged-in agent. */
   async function user(role: Role, name?: string) {
     const username = name ?? `${role.toLowerCase()}${++n}`;
-    const [id] = await db('users').insert({ username, username_lower: username.toLowerCase(), email: `${username}@test.dev`, email_lower: `${username}@test.dev`.toLowerCase(), password_hash: hashed, role, display_name: username, created_at: new Date().toISOString() });
+    const id = await insertId(db('users').insert({ username, username_lower: username.toLowerCase(), email: `${username}@test.dev`, email_lower: `${username}@test.dev`.toLowerCase(), password_hash: hashed, role, display_name: username, created_at: new Date().toISOString() }));
     const agent = request.agent(app);
     const csrf = await getCsrf(agent);
     const res = await agent.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: username, password: PW });

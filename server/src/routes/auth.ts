@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword, dummyVerify } from '../lib/crypto.js';
 import { createSession, destroySession, issueCsrf } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { sendVerificationEmail } from './account.js';
+import { insertId } from '../db/index.js';
 
 export { usernameSchema, passwordSchema } from '../lib/schemas.js';
 import { usernameSchema, passwordSchema, optionalEmail } from '../lib/schemas.js';
@@ -43,7 +44,7 @@ export function authRoutes(ctx: Ctx) {
     const body = parse(registerSchema, req.body);
     if (await ctx.db('users').where({ username_lower: body.username.toLowerCase() }).first()) throw new HttpError(409, 'That username is taken.', 'conflict');
     if (body.email && (await ctx.db('users').where({ email_lower: body.email }).first())) throw new HttpError(409, 'That email is already used by another account.', 'conflict');
-    const [id] = await ctx.db('users').insert({
+    const id = await insertId(ctx.db('users').insert({
       username: body.username,
       username_lower: body.username.toLowerCase(),
       email: body.email ?? null,
@@ -52,7 +53,7 @@ export function authRoutes(ctx: Ctx) {
       role: 'PLAYER', // always. Ranks are only granted by authorised staff or the CLI.
       display_name: body.username,
       created_at: new Date().toISOString(),
-    });
+    }));
     const user = (await ctx.db<UserRow>('users').where({ id }).first())!;
     await createSession(ctx, req, res, user);
     try {

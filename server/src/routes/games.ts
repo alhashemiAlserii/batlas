@@ -8,6 +8,7 @@ import { parse, HttpError } from '../lib/http.js';
 import { requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { randomToken } from '../lib/crypto.js';
+import { insertId } from '../db/index.js';
 
 const url = z
   .string()
@@ -117,7 +118,7 @@ export function gamesRoutes(ctx: Ctx) {
     if (await ctx.db('games').where({ slug: body.slug }).first()) throw new HttpError(409, 'A game with that slug already exists');
     const now = new Date().toISOString();
     const row = { ...toRow(body), status: body.status ?? 'draft', created_at: now, updated_at: now, published_at: body.status === 'published' ? now : null };
-    const [id] = await ctx.db('games').insert(row);
+    const id = await insertId(ctx.db('games').insert(row));
     await audit(ctx.db, req, { action: 'game.create', category: 'games', targetType: 'game', targetId: id, targetLabel: body.slug });
     res.status(201).json({ game: gameOut(await ctx.db('games').where({ id }).first(), true) });
   });
@@ -165,7 +166,7 @@ export function gamesRoutes(ctx: Ctx) {
     if (!g) throw new HttpError(404, 'Game not found');
     const b = parse(versionSchema, req.body);
     if (await ctx.db('game_versions').where({ game_id: id, version: b.version }).first()) throw new HttpError(409, 'That version already exists for this game');
-    const [vid] = await ctx.db('game_versions').insert({ game_id: id, version: b.version, released_at: b.releasedAt, changelog: b.changelog ?? '', download_url: b.downloadUrl || null, created_at: new Date().toISOString() });
+    const vid = await insertId(ctx.db('game_versions').insert({ game_id: id, version: b.version, released_at: b.releasedAt, changelog: b.changelog ?? '', download_url: b.downloadUrl || null, created_at: new Date().toISOString() }));
     // Keep the game's "current version" in sync with the newest release.
     const latest = await ctx.db('game_versions').where({ game_id: id }).orderBy([{ column: 'released_at', order: 'desc' }, { column: 'id', order: 'desc' }]).first();
     await ctx.db('games').where({ id }).update({ version: latest.version, updated_at: new Date().toISOString() });

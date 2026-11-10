@@ -1,0 +1,48 @@
+# Render Blueprint for Batlas (free plan). The website, API and the Sky Crew WebSocket game
+# server run in ONE Node process on $PORT (WebSocket upgrades on /ws/sky-crew, same port).
+#
+# When applying, Render asks for the two `sync: false` values:
+#   BOOTSTRAP_DEVELOPER_PASSWORD  one-time password for the first Developer "abood" (created only
+#                                 while no Developer exists; must be changed at first sign-in).
+#                                 Delete the variable after signing in.
+#   PUBLIC_URL                    may stay empty at first; later https://<service>.onrender.com.
+# Free-plan notes: the web service sleeps after ~15 min idle (cold start ~1 min); its disk is
+# ephemeral (uploaded avatars/images are lost on redeploy/restart); the free Postgres expires
+# 30 days after creation unless upgraded. Back it up with `npm run backup` (see README).
+services:
+  - type: web
+    name: batlas
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: cd server && npm ci
+    startCommand: cd server && npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: batlas-db
+          property: connectionString
+      - key: GAME_SERVER_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BOOTSTRAP_DEVELOPER_PASSWORD
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+
+databases:
+  - name: batlas-db
+    plan: free
+    region: frankfurt
+    databaseName: batlas
+    user: batlas
+    postgresMajorVersion: "18"

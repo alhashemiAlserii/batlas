@@ -5,3 +5,7 @@ server/dist/
 *.sqlite*
 .env
 e2e/node_modules
+server/backups/
+*.pem
+.env.*
+!.env.example

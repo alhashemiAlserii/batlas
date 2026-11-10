@@ -62,7 +62,7 @@ async function paxChaos(page, name) {
   await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, p2);
   await sleep(150); await page.keyboard.press('KeyE'); await sleep(300);
   const h2 = await page.evaluate(() => window.skyCrew.heldPax());
-  await page.evaluate((d) => { window.skyCrew.teleport(-0.9, 0, d.z - 0.35); window.skyCrew.look(Math.PI / 2, 0.1); }, d);
+  await page.evaluate((d) => { window.skyCrew.teleport(-0.9, 0, d.z - 0.95); window.skyCrew.look(Math.PI / 2, 0.1); }, d); // middle of the doorway
   await sleep(100); await page.keyboard.press('KeyQ');
   try {
     await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'lost', h2, { timeout: 8000 });
@@ -405,20 +405,32 @@ async function coop() {
     const hostView = (await A.p.evaluate(() => window.skyCrew.pax())).find((x) => x.id === pB.id);
     const bCid = await A.p.evaluate(() => [...window.skyCrew.state().remotes].length);
     hostView?.state === 'carried' && hostView.carriedBy && bCid ? ok('coop: guest picked up a passenger; host simulation shows them carried by the guest') : bad(`coop: host pax view ${JSON.stringify(hostView)}`);
-    await Bc.p.evaluate((d) => { window.skyCrew.teleport(-0.9, 0, d.z - 0.35); window.skyCrew.look(Math.PI / 2, 0.1); }, df);
-    await sleep(300); await Bc.p.keyboard.press('KeyQ');
+    // throw from the middle of the doorway (door spans z -12.6..-11.4; the door handle point sits 0.35 behind its edge).
+    // Throwing from the very edge made the result depend on how far the player capsule settled after the teleport.
+    // (In-flight turbulence randomly shoves walking players, which is what pushed the throw point past the door edge.)
+    await Bc.p.evaluate((d) => { window.skyCrew.teleport(-0.9, 0, d.z - 0.95); window.skyCrew.look(Math.PI / 2, 0.1); }, df);
+    await sleep(150);
+    const throwFrom = await Bc.p.evaluate(() => window.skyCrew.state().me);
+    await Bc.p.keyboard.press('KeyQ');
+    let stage = 'host sees lost';
+    const diag = async () => {
+      const one = async (pg) => pg.evaluate((id) => { const s = window.skyCrew.state(); const p = window.skyCrew.pax().find((x) => x.id === id); return { pax: p, phase: s.phase, flight: { y: Math.round(s.flight.y), onGround: s.flight.onGround, speed: Math.round(s.flight.speed) }, me: s.me ?? null, held: s.held, doors: s.doors }; }, pB.id).catch((e) => e.message);
+      return JSON.stringify({ throwFrom, host: await one(A.p), guest: await one(Bc.p) });
+    };
     try {
       await A.p.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'lost', pB.id, { timeout: 10000 });
+      stage = 'guest sees lost';
       await Bc.p.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'lost', pB.id, { timeout: 10000 });
       ok('coop: guest threw the passenger out of the open door; both clients see them parachute (lost)');
       await Bc.p.evaluate(() => window.skyCrew.debug.watchEject(true)); await sleep(1800);
       await Bc.p.screenshot({ path: `${OUT}/coop-passenger-parachute.png` });
       await Bc.p.evaluate(() => window.skyCrew.debug.watchEject(false));
       // Developer respawns the lost passenger from the staff tools
+      stage = 'respawn';
       const rr = await admin_(A.p, 'npc', { action: 'respawn' });
       await Bc.p.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'seated', pB.id, { timeout: 10000 });
       ok(`coop: Developer respawned the lost passenger (${rr}); guest sees them back in their seat`);
-    } catch (e) { bad(`coop: eject/respawn sync failed ${e.message}`); }
+    } catch (e) { bad(`coop: eject/respawn sync failed at "${stage}": ${e.message.split('\n')[0]} ${await diag()}`); }
     await Bc.p.evaluate((d) => { window.skyCrew.teleport(-0.6, 0, d.z - 0.35); window.skyCrew.lookAt(d.x, d.y, d.z); }, df);
     await sleep(200); await Bc.p.keyboard.press('KeyE'); await sleep(600);
   }

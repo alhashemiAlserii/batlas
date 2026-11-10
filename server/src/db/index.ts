@@ -1,6 +1,7 @@
 import knexFactory, { type Knex } from 'knex';
 import path from 'node:path';
 import fs from 'node:fs';
+import pg from 'pg';
 import * as m001 from './migrations/001_init.js';
 import * as m002 from './migrations/002_stage2.js';
 import * as m003 from './migrations/003_optional_email.js';
@@ -20,7 +21,45 @@ const migrationSource: Knex.MigrationSource<string> = {
   getMigration: async (m) => MIGRATIONS[m],
 };
 
-export function createDb(filename: string): Knex {
+/**
+ * Make Postgres hand back the same JS values SQLite does, so routes behave identically:
+ * timestamps as ISO-8601 strings, dates as 'YYYY-MM-DD', and COUNT()/bigint as numbers.
+ */
+let pgTypesSet = false;
+function pgTypesLikeSqlite() {
+  if (pgTypesSet) return;
+  pgTypesSet = true;
+  const iso = (v: string) => new Date(v).toISOString();
+  pg.types.setTypeParser(1184, iso); // timestamptz
+  pg.types.setTypeParser(1114, (v: string) => iso(v + 'Z')); // timestamp (stored as UTC)
+  pg.types.setTypeParser(1082, (v: string) => v); // date
+  pg.types.setTypeParser(20, (v: string) => Number(v)); // int8: counts and bigint ids stay well below 2^53
+}
+
+export const isPostgresUrl = (t: string) => /^postgres(ql)?:\/\//i.test(t);
+
+/**
+ * Opens the database. `target` is either a Postgres connection URL (production, e.g. Render's
+ * DATABASE_URL) or a SQLite file path / ':memory:' (local dev and the default test run).
+ * `schema` (Postgres only) isolates a test run in its own schema.
+ */
+export function createDb(target: string, opts: { schema?: string } = {}): Knex {
+  if (isPostgresUrl(target)) {
+    pgTypesLikeSqlite();
+    const url = new URL(target);
+    // TLS: Render's *internal* URL (host like "dpg-xxxx-a", no dots) needs none; its *external* URL
+    // (dpg-xxxx-a.frankfurt-postgres.render.com) and most hosted DBs require it. DATABASE_SSL=true|false overrides.
+    const mode = url.searchParams.get('sslmode') ?? '';
+    const localHost = /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?)$/.test(url.hostname) || !url.hostname.includes('.');
+    const wantSsl = process.env.DATABASE_SSL ? process.env.DATABASE_SSL === 'true' : mode ? mode !== 'disable' : !localHost;
+    return knexFactory({
+      client: 'pg',
+      connection: { connectionString: target, ssl: wantSsl ? { rejectUnauthorized: false } : false },
+      searchPath: opts.schema ? [opts.schema] : undefined,
+      pool: { min: 0, max: Number(process.env.DATABASE_POOL_MAX ?? 5) },
+    });
+  }
+  const filename = target;
   if (filename !== ':memory:') fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = knexFactory({
     client: 'better-sqlite3',
@@ -36,6 +75,13 @@ export function createDb(filename: string): Knex {
     },
   });
   return db;
+}
+
+/** Inserts one row and returns its numeric id on both SQLite and Postgres. */
+export async function insertId(q: Knex.QueryBuilder): Promise<number> {
+  const rows: any[] = await q.returning('id');
+  const v = rows[0];
+  return Number(v && typeof v === 'object' ? v.id : v);
 }
 
 export async function migrate(db: Knex): Promise<void> {

@@ -20,6 +20,7 @@ import { requireAuth, requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { randomToken, sha256, safeEqual } from '../lib/crypto.js';
 import { hasPermission, ITEM_TIERS, permissionsFor } from '../lib/permissions.js';
+import { insertId } from '../db/index.js';
 
 const GAME_TOKEN_TTL_MS = 10 * 60 * 1000;
 
@@ -122,7 +123,7 @@ export function gameRoutes(ctx: Ctx) {
     const uid = req.user!.id, now = Date.now();
     if (now - (lastPost.get(uid) ?? 0) < FLIGHT_COOLDOWN_MS) throw new HttpError(429, 'Flight already recorded. Try again in a moment.', 'rate_limited');
     lastPost.set(uid, now);
-    const [id] = await ctx.db('game_flights').insert({ user_id: uid, game_slug: 'sky-crew', score: b.score, stars: b.stars, landing: b.landing, route: b.route, crashed: b.crashed, duration: b.duration, coop: !!b.coop, created_at: new Date().toISOString() });
+    const id = await insertId(ctx.db('game_flights').insert({ user_id: uid, game_slug: 'sky-crew', score: b.score, stars: b.stars, landing: b.landing, route: b.route, crashed: b.crashed, duration: b.duration, coop: !!b.coop, created_at: new Date().toISOString() }));
     res.status(201).json({ ok: true, id: typeof id === 'object' ? (id as any).id : id, stats: await flightStats(uid) });
   });
 

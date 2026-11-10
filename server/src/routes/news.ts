@@ -4,6 +4,7 @@ import type { Ctx } from '../lib/types.js';
 import { parse, HttpError } from '../lib/http.js';
 import { requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
+import { insertId } from '../db/index.js';
 
 const imgUrl = z.string().trim().max(300).refine((v) => v === '' || /^https?:\/\//i.test(v) || v.startsWith('/'), 'must be an http(s) URL or site path');
 const postSchema = z.object({
@@ -76,7 +77,7 @@ export function newsRoutes(ctx: Ctx) {
     const b = parse(postSchema, req.body);
     if (await ctx.db('news_posts').where({ slug: b.slug }).first()) throw new HttpError(409, 'A post with that slug already exists');
     const now = new Date().toISOString();
-    const [id] = await ctx.db('news_posts').insert({ ...toRow(b), status: b.status ?? 'draft', author_id: req.user!.id, created_at: now, updated_at: now, published_at: b.status === 'published' ? now : null });
+    const id = await insertId(ctx.db('news_posts').insert({ ...toRow(b), status: b.status ?? 'draft', author_id: req.user!.id, created_at: now, updated_at: now, published_at: b.status === 'published' ? now : null }));
     await audit(ctx.db, req, { action: 'news.create', category: 'news', targetType: 'news', targetId: id, targetLabel: b.slug, details: { status: b.status ?? 'draft' } });
     res.status(201).json({ post: out(await base().where('n.id', id).first()) });
   });

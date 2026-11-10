@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
 import { WebSocket } from 'ws';
-import { createDb, migrate } from '../src/db/index.js';
+import { migrate, insertId } from '../src/db/index.js';
+import { testDb } from './helpers.js';
 import { createApp } from '../src/app.js';
 import { attachGameServer, WS_PATH } from '../src/game-server/server.js';
 import { httpSiteBridge } from '../src/game-server/bridge.js';
@@ -16,7 +17,7 @@ const PW = 'correct-horse-battery';
 let n = 0;
 
 beforeAll(async () => {
-  db = createDb(':memory:');
+  db = await testDb();
   await migrate(db);
   app = createApp(db, { cookieSecure: false, gameServerKey: KEY, rateLimit: { windowMs: 60000, max: 1000 } }, { mailer: new MemoryMailer() }).app;
   server = http.createServer(app);
@@ -29,7 +30,7 @@ afterAll(async () => { gs.close(); await new Promise((r) => server.close(r)); aw
 /** Creates a user, logs in via the website and fetches a game token. */
 async function tokenFor(role: Role, name?: string) {
   const username = name ?? `${role.toLowerCase()}_${++n}`;
-  const [id] = await db('users').insert({ username, username_lower: username.toLowerCase(), password_hash: await hashPassword(PW), role, display_name: username, created_at: new Date().toISOString() });
+  const id = await insertId(db('users').insert({ username, username_lower: username.toLowerCase(), password_hash: await hashPassword(PW), role, display_name: username, created_at: new Date().toISOString() }));
   const agent = request.agent(app);
   const csrf = (await agent.get('/api/csrf')).body.csrfToken;
   const login = await agent.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: username, password: PW });
