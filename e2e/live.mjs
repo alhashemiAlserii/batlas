@@ -29,7 +29,7 @@ async function bootGame(p) {
   await p.waitForFunction(() => window.skyCrew?.ready, null, { timeout: 60000 });
 }
 
-async function run(name, type, ctxOpts) {
+async function run(name, type, ctxOpts, only) {
   const browser = await type.launch();
   const errs = [];
   const mk = async () => { const ctx = await browser.newContext(ctxOpts); const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error' && !/Refused to apply/.test(m.text())) errs.push(m.text()); }); return { ctx, p }; };
@@ -40,7 +40,8 @@ async function run(name, type, ctxOpts) {
     await A.p.goto(B, { waitUntil: 'networkidle' });
     (await A.p.title()).includes('Batlas') ? ok(`${name}: home page loads ("${await A.p.title()}")`) : bad(`${name}: home title ${await A.p.title()}`);
     await A.p.screenshot({ path: `${OUT}/${name}-home.png`, fullPage: false });
-    const u1 = `live_${name.replace(/\W/g, '').slice(0, 6)}_${tag}a`.slice(0, 20);
+    const short = { 'chromium-desktop': 'cd', 'webkit-desktop': 'wd', 'webkit-ipad': 'ipad' }[name] || 'x';
+    const u1 = `live_${short}_${tag}a`;
     await register(A.p, u1);
     const me1 = await A.p.evaluate(async () => (await (await fetch('/api/me')).json()).user?.username);
     me1 === u1 ? ok(`${name}: registered ${u1} with username + password only`) : bad(`${name}: register -> ${me1}`);
@@ -60,7 +61,7 @@ async function run(name, type, ctxOpts) {
     wsUrls.some((u) => u.startsWith('wss://') && u.includes('/ws/sky-crew')) ? ok(`${name}: Sky Crew connected over ${wsUrls[0].replace(/\?.*/, '')}; room ${code} created`) : bad(`${name}: ws urls ${wsUrls}`);
     await A2.p.screenshot({ path: `${OUT}/${name}-coop-lobby-host.png` });
     const Bx = await mk();
-    const u2 = `live_${name.replace(/\W/g, '').slice(0, 6)}_${tag}b`.slice(0, 20);
+    const u2 = `live_${short}_${tag}b`;
     await register(Bx.p, u2);
     await bootGame(Bx.p);
     await Bx.p.fill('#joinCode', code); await Bx.p.click('#bJoin');
@@ -97,9 +98,10 @@ async function abood() {
   await browser.close();
 }
 
-await run('chromium-desktop', chromium, { viewport: { width: 1280, height: 800 } });
-await run('webkit-desktop', webkit, { viewport: { width: 1280, height: 800 } });
-await run('webkit-ipad', webkit, { ...devices['iPad (gen 7)'] });
+const ONLY = process.env.ONLY;
+if (!ONLY || ONLY === 'chromium-desktop') await run('chromium-desktop', chromium, { viewport: { width: 1280, height: 800 } });
+if (!ONLY || ONLY === 'webkit-desktop') await run('webkit-desktop', webkit, { viewport: { width: 1280, height: 800 } });
+if (!ONLY || ONLY === 'webkit-ipad') await run('webkit-ipad', webkit, { ...devices['iPad (gen 7)'] });
 if (!process.env.SKIP_ABOOD) await abood();
 fs.writeFileSync('/tmp/live-users.json', JSON.stringify(users));
 const n = results.filter((r) => r[0] === 'bad').length;
