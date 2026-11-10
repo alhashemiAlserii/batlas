@@ -15,7 +15,12 @@ export async function dumpDatabase(db: Knex): Promise<{ dump: DatabaseDump; rows
   const out: Record<string, unknown[]> = {};
   let rows = 0;
   for (const t of tables) {
-    out[t] = await db(t).select('*');
+    const rows_ = await db(t).select('*');
+    // Binary columns (uploaded media) as base64 instead of Buffer's huge {type,data:[...]} JSON.
+    out[t] = rows_.map((r: Record<string, unknown>) => {
+      for (const [k, v] of Object.entries(r)) if (Buffer.isBuffer(v)) r[k] = { $base64: v.toString('base64') };
+      return r;
+    });
     rows += out[t].length;
   }
   return { dump: { createdAt: new Date().toISOString(), source: pg ? 'postgres' : 'sqlite', tables: out }, rows };

@@ -257,6 +257,65 @@ The overlay shows only the tools your rank allows. **The game server re-checks e
   - Every Developer join is audit-logged as `ingame.dev.join`, with what was bypassed.
   - Admins and Players keep the normal full/locked rules.
 
+## Website upgrade (branch `website-upgrade`)
+
+**Homepage:** branded hero with Play / Browse / Create-account buttons, a **featured game** (the one marked *Featured* in the dashboard, else the newest released game) with a muted `playsinline` autoplay trailer preview, **Coming soon** cards with release date + countdown, **Latest news** cards, and a sign-up band (hidden when signed in). A site-wide **event banner** (see Events) shows on every page, below the sticky header, at most two at a time, dismissible.
+
+**Game pages:** media box with tabs for the uploaded **MP4 trailer** (`controls playsinline preload=metadata` + poster), a **YouTube** embed (`youtube-nocookie.com`, `playsinline=1`) and the cover; **screenshot gallery** with a touch-friendly **lightbox** (swipe left/right, swipe down to close, arrow keys, Esc, buttons); **Play in browser** (hidden and replaced by a notice when the game's *Play enabled* setting is off); **Download** only when the server confirms the file exists (external http(s) link, an existing `/media/:id`, or a real file under `web/public`) and downloads are enabled; **Upcoming** pill + release date; latest changelog, version history, news linked to the game, and the Sky Crew leaderboard (per-game setting).
+
+**Developer dashboard (`/studio-console`) additions:**
+
+| Tab | What it does |
+|---|---|
+| Games | Edit everything incl. description, release date, cover/screenshot/poster/trailer **uploads with progress**, screenshot reorder/remove, YouTube link, play/download URLs and **per-game settings** (featured, play enabled + message, downloads enabled, leaderboard). **Publish update** = new version + changelog, optionally also published as a news post linked to the game. |
+| Players & ranks | Existing ban/unban/kick/temp-password/delete/rank controls, plus **Edit profile** (reset display name / clear bio) and *last seen*. Rank changes keep the existing server rules (only the Developer grants Trusted/Admin/Developer; Developer needs password re-entry; Developers can never be demoted, banned, kicked or edited from the website). |
+| Online | Signed-in users seen in the last 5/15/60 min (auto-refresh) + **live Sky Crew rooms** read from the in-process game server (read-only snapshot taken in `index.ts`; the game server code is untouched). |
+| Events | Schedule / edit / cancel / restore / delete site-wide event banners (show-from, start, end, style, link). |
+| Media | Database media library: upload, copy URL, delete; shows total stored bytes. |
+| Maintenance | Maintenance mode switch + message + ETA (see below). |
+
+### Uploads are stored in the database
+
+Render's free plan wipes the disk on every deploy, so uploaded **images, trailers and avatars** now go into the `media` table (`bytea` on Postgres, `blob` on SQLite) and are served from `GET /media/:id.ext` with the stored `Content-Type`, `ETag`/304, `Cache-Control: public, max-age=31536000, immutable` (rows are never changed in place), `HEAD`, and **HTTP Range** (`206`, suffix and open ranges, `416`; a single response is capped at 4 MB and the player asks for the rest). Bytes are read in 1 MB slices with `substring()`/`substr()`, so a request never loads a whole trailer into memory. Caps: images **5 MB**, trailers **40 MB** (MP4 only, content-sniffed), avatars 2 MB (re-encoded 256 px WebP as before). The old `POST /api/dev/uploads` still works but now stores in the DB too. Existing `/uploads/...` files keep being served for old links.
+
+Things to know: a 40 MB upload is held in memory while it is processed; Render's free Postgres has a **1 GB storage limit**, so a handful of trailers uses a real share of it (the dashboard shows the total); and `npm run backup` / `GET /api/internal/backup` now include media as base64 (`{"$base64": …}`), so backups get bigger.
+
+### Maintenance mode
+
+- Switch: Developer dashboard → **Maintenance** (`PUT /api/dev/maintenance {enabled, message?, eta?}`, permission `site.maintenance`, Developer only, audit-logged as `maintenance.on/off/update`). Stored in `site_settings` (key `maintenance`).
+- `MAINTENANCE_MODE=true` env var **forces it on** (the dashboard then shows it as forced and cannot switch it off).
+- While on, everyone except a signed-in **Developer** gets the branded maintenance page (HTTP 503, `Retry-After`) for every page and `503 {code: "maintenance"}` for the API. Login and register return 503 for non-Developers (login checks the password first, so it reveals nothing), as does `POST /api/game/token`; existing non-Developer sessions are blocked too. Still open: `/healthz`, `/api/internal/backup`, static assets, `/media`, `/login` (so the Developer can sign in), `GET /api/maintenance`, `GET /api/csrf`, `GET /api/site`, logout, and the server-to-server `POST /api/game/verify` / `/api/game/audit`.
+- **Hook for other servers in the process (e.g. the Sky Crew WebSocket server):**
+
+  ```ts
+  import { isMaintenance, maintenanceBlocks, getMaintenance } from '../lib/maintenance.js';
+  await isMaintenance(db);                 // boolean: env override OR dashboard switch
+  await maintenanceBlocks(db, user.role);  // true if this role must be kept out (DEVELOPER → always false)
+  await getMaintenance(db);                // { on, forced, enabled, message, eta, updatedAt }
+  ```
+  Reads are cached for 5 s per DB handle (`CACHE_MS`); toggling from the dashboard clears the cache at once. The game server is **not** hooked in yet: `POST /api/game/verify` still verifies tokens during maintenance, so the game worker should call `maintenanceBlocks()` on connect (and optionally drop non-Developer sockets when it turns on).
+
+### New API
+
+| Method & path | Who |
+|---|---|
+| `GET /media/:id[.ext]` | public (Range, ETag, long cache) |
+| `POST /api/dev/media` (multipart `file`, optional `gameId`), `GET /api/dev/media?gameId=`, `DELETE /api/dev/media/:id` | `media.upload` (Developer) |
+| `GET /api/events/active` | public |
+| `GET/POST /api/dev/events`, `PATCH/DELETE /api/dev/events/:id` | `site.events` (Developer) |
+| `GET /api/admin/online?minutes=` | `players.online` (Admin+; rooms only for the Developer) |
+| `PATCH /api/admin/users/:id/profile` `{displayName?, bio?}` | `players.edit` (Admin+) + `canActOn` |
+| `GET /api/maintenance` | public · `GET/PUT /api/dev/maintenance` → `site.maintenance` (Developer) |
+
+Game objects gained `releaseDate`, `trailerVideo`, `trailerPoster`, `youtubeUrl`, `settings`; the public game detail also has `download` (only set when the file exists) and `news`. News posts gained an optional `gameId`.
+
+New permissions: `players.edit`, `players.online` (Admin + Developer), `media.upload`, `site.events`, `site.maintenance` (Developer). Migration **`005_website`** adds `media`, `site_settings`, `site_events`, `users.last_seen_at` (written at most once a minute per user), `news_posts.game_id` and the new `games` columns. It runs automatically at start-up (`migrate()` in `index.ts`).
+
+### Tests
+
+- `cd server && npm test` (SQLite) and `npm run test:pg` (Postgres): `tests/website.test.ts` (media/Range/caps, game fields, downloads, events, online, profile moderation, role rules) and `tests/maintenance.test.ts` (toggle permissions, env override, 503s, Developer bypass, healthz/backup exemptions, cache).
+- `e2e/website.mjs`: Playwright, drives every new dashboard control through the UI, then checks the public site in **Chromium + WebKit** at **iPhone 15, iPad (gen 7) and 1440×900**; screenshots in `docs/screenshots/website/` (results in `RESULTS.txt`). Run against a throw-away server: `BASE=http://localhost:3300 DEV_CREDS=../server/data/dev-creds.txt node website.mjs`. WebKit here has no GStreamer codecs, so WebKit runs skip the uploaded `<video>` (it crashes that renderer); trailer playback is verified in Chromium and by the Range tests. A check on a real iPhone/iPad is still recommended.
+
 ## Browser testing
 
 - Automated API tests: `cd server && npm test`.

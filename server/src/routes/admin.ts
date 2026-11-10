@@ -15,7 +15,7 @@ const roleSchema = z.object({
   confirmPassword: z.string().max(200).optional(),
 });
 
-async function loadTarget(ctx: Ctx, req: Request): Promise<UserRow> {
+export async function loadTarget(ctx: Ctx, req: Request): Promise<UserRow> {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Invalid user id');
   const t = await ctx.db<UserRow>('users').where({ id }).first();
@@ -24,7 +24,7 @@ async function loadTarget(ctx: Ctx, req: Request): Promise<UserRow> {
 }
 
 /** Runs canActOn and audit-logs denied attempts so abuse is visible. */
-async function guard(ctx: Ctx, req: Request, target: UserRow, action: string) {
+export async function guard(ctx: Ctx, req: Request, target: UserRow, action: string) {
   const actor = req.user!;
   const g = canActOn({ id: actor.id, role: actor.role }, { id: target.id, role: target.role });
   if (!g.ok) {
@@ -124,6 +124,7 @@ export function adminRoutes(ctx: Ctx) {
     const removed: Record<string, number> = {};
     await ctx.db.transaction(async (trx) => {
       for (const t of ['sessions', 'game_tokens', 'auth_tokens', 'game_flights']) removed[t] = await trx(t).where({ user_id: target.id }).delete();
+      removed.avatars = await trx('media').where({ uploaded_by: target.id, kind: 'avatar' }).delete();
       removed.news_posts_unlinked = await trx('news_posts').where({ author_id: target.id }).update({ author_id: null });
       const n = await trx('users').where({ id: target.id }).andWhereNot({ role: 'DEVELOPER' }).delete();
       if (n !== 1) throw new HttpError(409, 'Account changed while deleting; nothing was deleted.');

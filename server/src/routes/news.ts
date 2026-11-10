@@ -15,6 +15,7 @@ const postSchema = z.object({
   coverImage: imgUrl.optional(),
   status: z.enum(['draft', 'published']).optional(),
   pinned: z.boolean().optional(),
+  gameId: z.number().int().positive().nullable().optional(), // link to a game (shown on its page)
 });
 
 function toRow(b: Partial<z.infer<typeof postSchema>>) {
@@ -26,6 +27,7 @@ function toRow(b: Partial<z.infer<typeof postSchema>>) {
   if (b.coverImage !== undefined) row.cover_image = b.coverImage;
   if (b.status !== undefined) row.status = b.status;
   if (b.pinned !== undefined) row.pinned = b.pinned;
+  if (b.gameId !== undefined) row.game_id = b.gameId;
   return row;
 }
 
@@ -39,6 +41,7 @@ function out(p: any, includeBody = true) {
     coverImage: p.cover_image ?? '',
     status: p.status,
     pinned: !!p.pinned,
+    gameId: p.game_id ?? null,
     author: p.author_username ? { username: p.author_username, displayName: p.author_display ?? p.author_username, role: p.author_role, avatarUrl: p.author_avatar ?? '' } : null,
     publishedAt: p.published_at,
     updatedAt: p.updated_at,
@@ -75,6 +78,7 @@ export function newsRoutes(ctx: Ctx) {
 
   r.post('/dev/news', can, async (req, res) => {
     const b = parse(postSchema, req.body);
+    if (b.gameId && !(await ctx.db('games').where({ id: b.gameId }).first('id'))) throw new HttpError(400, 'Unknown game');
     if (await ctx.db('news_posts').where({ slug: b.slug }).first()) throw new HttpError(409, 'A post with that slug already exists');
     const now = new Date().toISOString();
     const id = await insertId(ctx.db('news_posts').insert({ ...toRow(b), status: b.status ?? 'draft', author_id: req.user!.id, created_at: now, updated_at: now, published_at: b.status === 'published' ? now : null }));
@@ -87,6 +91,7 @@ export function newsRoutes(ctx: Ctx) {
     const p = await ctx.db('news_posts').where({ id }).first();
     if (!p) throw new HttpError(404, 'Post not found');
     const b = parse(postSchema.partial(), req.body);
+    if (b.gameId && !(await ctx.db('games').where({ id: b.gameId }).first('id'))) throw new HttpError(400, 'Unknown game');
     if (b.slug && b.slug !== p.slug && (await ctx.db('news_posts').where({ slug: b.slug }).first())) throw new HttpError(409, 'Slug already in use');
     const row: Record<string, unknown> = { ...toRow(b), updated_at: new Date().toISOString() };
     if (b.status === 'published' && !p.published_at) row.published_at = new Date().toISOString();

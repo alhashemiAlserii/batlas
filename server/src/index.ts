@@ -9,7 +9,22 @@ const config = loadConfig();
 const db = createDb(dbTarget(config));
 await migrate(db);
 await bootstrapDeveloper(db);
-const { app } = createApp(db);
+// Live Sky Crew rooms for the dashboard's online view. Read-only snapshot of the game server's state;
+// the game server code itself is not modified. Returns null when the game server is off.
+let gameServer: ReturnType<typeof attachGameServer> | null = null;
+const liveRooms = () => {
+  if (!gameServer) return null;
+  return [...gameServer.rooms.values()].map((r: any) => {
+    const clients = r.clients instanceof Map ? [...r.clients.values()] : [];
+    const host = r.clients instanceof Map ? r.clients.get(r.hostCid) : null;
+    return {
+      code: String(r.code), host: host?.user?.username ?? null,
+      players: clients.filter((c: any) => !c.hidden).length,
+      max: null, locked: !!r.locked, route: r.route ?? null, phase: r.phase ?? null,
+    };
+  });
+};
+const { app } = createApp(db, {}, { liveRooms });
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
 const server = app.listen(port, host, () => {
@@ -19,7 +34,7 @@ const server = app.listen(port, host, () => {
 
 if (config.gameServerKey) {
   // The game server verifies players through the site's HTTP API (same as a separate process would).
-  attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey) });
+  gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey) });
   console.log(`Sky Crew game server on ws://localhost:${port}${WS_PATH}`);
 } else console.log('GAME_SERVER_KEY not set: co-op game server disabled.');
 

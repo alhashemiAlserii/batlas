@@ -22,6 +22,7 @@ export interface UserRow {
   avatar_url: string | null;
   password_changed_at: string | null;
   must_change_password: number | boolean;
+  last_seen_at?: string | null;
 }
 
 export interface Ctx {
@@ -66,5 +67,6 @@ export function adminUser(u: UserRow) {
     banReason: u.ban_reason,
     bannedAt: u.banned_at,
     lastLoginAt: u.last_login_at,
+    lastSeenAt: u.last_seen_at ?? null,
   };
 }
