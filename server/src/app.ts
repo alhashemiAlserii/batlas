@@ -18,6 +18,10 @@ import { newsRoutes } from './routes/news.js';
 import { contactRoutes } from './routes/contact.js';
 import { statsRoutes } from './routes/stats.js';
 import { FileMailer, type Mailer } from './lib/mailer.js';
+import { dumpDatabase } from './lib/backup.js';
+import { audit } from './lib/audit.js';
+import rateLimit from 'express-rate-limit';
+import crypto from 'node:crypto';
 
 /** Unlisted route for the Developer dashboard. Not linked anywhere public; protected server-side regardless. */
 export const DEV_DASHBOARD_PATH = '/studio-console';
@@ -37,6 +41,31 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
       res.json({ ok: true });
     } catch {
       res.status(503).json({ ok: false });
+    }
+  });
+
+  // Off-site backups over HTTPS (the database port is not reachable from everywhere).
+  // Bearer-token only: no cookies, no session; 404 unless BACKUP_TOKEN (32+ chars) is configured.
+  const backupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: config.backupRateLimit, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many backup requests', code: 'rate_limited' } });
+  app.get('/api/internal/backup', (req, res, next) => {
+    const token = config.backupToken;
+    if (!token || token.length < 32) return res.status(404).json({ error: 'Not found' });
+    next();
+  }, backupLimiter, async (req, res, next) => {
+    try {
+      res.set('Cache-Control', 'no-store');
+      const m = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''));
+      const want = crypto.createHash('sha256').update(config.backupToken!).digest();
+      const got = crypto.createHash('sha256').update(m?.[1] ?? '').digest();
+      if (!m || !crypto.timingSafeEqual(want, got)) {
+        await audit(db, req, { action: 'backup.denied', category: 'admin' }, { id: 0, username: 'backup-endpoint', role: 'SYSTEM' });
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const { dump, rows } = await dumpDatabase(db);
+      await audit(db, req, { action: 'backup.download', category: 'admin', details: { tables: Object.keys(dump.tables).length, rows } }, { id: 0, username: 'backup-endpoint', role: 'SYSTEM' });
+      res.json(dump);
+    } catch (e) {
+      next(e);
     }
   });
 

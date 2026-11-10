@@ -40,7 +40,7 @@ async function guard(ctx: Ctx, req: Request, target: UserRow, action: string) {
   }
 }
 
-export const MODERATION_ACTIONS = ['player.ban', 'player.unban', 'player.kick', 'player.password_reset'];
+export const MODERATION_ACTIONS = ['player.ban', 'player.unban', 'player.kick', 'player.password_reset', 'player.delete'];
 
 export function adminRoutes(ctx: Ctx) {
   const r = Router();
@@ -107,6 +107,29 @@ export function adminRoutes(ctx: Ctx) {
     // The password itself is never logged.
     await audit(ctx.db, req, { action: 'player.password_reset', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username });
     res.json({ ok: true, temporaryPassword: temp, note: 'Give this to the player privately. It works once; they must choose a new password after logging in.' });
+  });
+
+  // Permanently delete an account. Developer only (players.delete), never a Developer, never yourself.
+  // The client must echo the exact username as confirmation.
+  r.delete('/admin/users/:id', requirePermission('players.delete'), async (req, res) => {
+    const target = await loadTarget(ctx, req);
+    const { confirm } = parse(z.object({ confirm: z.string().max(64) }), req.body ?? {});
+    const actor = req.user!;
+    const refuse = target.id === actor.id ? 'You cannot delete your own account here.' : target.role === 'DEVELOPER' ? 'Developer accounts cannot be deleted.' : null;
+    if (refuse) {
+      await audit(ctx.db, req, { action: 'player.delete.denied', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { reason: refuse, targetRole: target.role } });
+      throw new HttpError(403, refuse, 'protected');
+    }
+    if (confirm !== target.username) throw new HttpError(400, `Type the username "${target.username}" to confirm.`, 'confirm_required');
+    const removed: Record<string, number> = {};
+    await ctx.db.transaction(async (trx) => {
+      for (const t of ['sessions', 'game_tokens', 'auth_tokens', 'game_flights']) removed[t] = await trx(t).where({ user_id: target.id }).delete();
+      removed.news_posts_unlinked = await trx('news_posts').where({ author_id: target.id }).update({ author_id: null });
+      const n = await trx('users').where({ id: target.id }).andWhereNot({ role: 'DEVELOPER' }).delete();
+      if (n !== 1) throw new HttpError(409, 'Account changed while deleting; nothing was deleted.');
+    });
+    await audit(ctx.db, req, { action: 'player.delete', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { role: target.role, removed } });
+    res.json({ ok: true, deleted: { id: target.id, username: target.username }, removed });
   });
 
   r.put('/admin/users/:id/role', async (req, res) => {

@@ -56,6 +56,13 @@ export function usersPanel(me, perms, { roles = false } = {}) {
       });
       actions.prepend(sel);
     }
+    // Developer dashboard only: permanent account deletion (the server re-checks everything).
+    if (roles && perms.has('players.delete') && u.role !== 'DEVELOPER' && u.id !== me.id) actions.append(h('button', { class: 'btn small danger', 'data-action': 'delete', onclick: () => {
+      const typed = prompt(`Permanently delete the account "${u.username}"? Their sessions, tokens and flight stats are removed too. This cannot be undone.\n\nType the username to confirm:`);
+      if (typed === null) return;
+      if (typed !== u.username) { alert('The username did not match. Nothing was deleted.'); return; }
+      act(() => api('DELETE', `/api/admin/users/${u.id}`, { confirm: typed }), `${u.username} deleted.`);
+    } }, 'Delete account'));
     if (!actions.childElementCount) actions.append(h('span', { class: 'muted small' }, u.role === 'DEVELOPER' ? 'Protected' : '—'));
     return h('tr', {},
       h('td', {}, userChip(u)),

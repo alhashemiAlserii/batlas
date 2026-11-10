@@ -15,6 +15,9 @@ export interface AppConfig {
   gameServerKey: string | null;
   /** Cookie-signing secret (SESSION_SECRET). Sessions themselves are random DB-backed tokens. */
   sessionSecret: string | null;
+  /** Bearer token for GET /api/internal/backup. The endpoint does not exist (404) unless this is 32+ chars. */
+  backupToken: string | null;
+  backupRateLimit: number;
   trustProxy: boolean;
   rateLimit: { windowMs: number; max: number };
   studioName: string;
@@ -36,6 +39,8 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sessionTtlMs: 1000 * 60 * 60 * 24 * 7,
     gameServerKey: process.env.GAME_SERVER_KEY ?? null,
     sessionSecret: process.env.SESSION_SECRET || null,
+    backupToken: process.env.BACKUP_TOKEN || null,
+    backupRateLimit: Number(process.env.BACKUP_RATE_LIMIT ?? 12), // per IP per hour
     // Behind Render's (or any) HTTPS proxy, so req.ip / secure cookies see the real client.
     trustProxy: process.env.TRUST_PROXY ? process.env.TRUST_PROXY === 'true' : prod,
     rateLimit: { windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT ?? 20) },

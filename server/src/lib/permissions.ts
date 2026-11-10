@@ -25,6 +25,7 @@ export const PERMISSIONS = [
   'moderation.view',
   'players.view',
   'players.reset_password', // staff-issued one-time temporary password
+  'players.delete', // permanently delete an account (Developer only)
   // world / game control
   'weather.change',
   'environment.control',
