@@ -25,7 +25,8 @@ export interface BanCall {
 }
 
 export interface SiteBridge {
-  verify(token: string): Promise<VerifiedUser | null>;
+  /** null = invalid token; { maintenance } = the site refused because maintenance mode is on */
+  verify(token: string): Promise<VerifiedUser | null | { maintenance: true; message?: string | null }>;
   audit(entry: AuditCall): Promise<void>;
   /** Account ban on the website. The site re-checks the actor's rank (players.ban + canActOn) in its own DB. */
   ban?(entry: BanCall): Promise<{ ok: boolean; reason?: string }>;
@@ -41,6 +42,7 @@ export function httpSiteBridge(siteUrl: string, key: string): SiteBridge {
         headers: { 'content-type': 'application/json', 'x-game-server-key': key },
         body: JSON.stringify({ token }),
       });
+      if (r.status === 503) { const m: any = await r.json().catch(() => ({})); if (m.code === 'maintenance') return { maintenance: true as const, message: m.message ?? null }; }
       if (!r.ok) return null;
       const d: any = await r.json();
       if (!d.valid) return null;

@@ -21,6 +21,7 @@ import { audit } from '../lib/audit.js';
 import { randomToken, sha256, safeEqual } from '../lib/crypto.js';
 import { canActOn, hasPermission, ITEM_TIERS, permissionsFor } from '../lib/permissions.js';
 import { insertId } from '../db/index.js';
+import { getMaintenance, maintenanceBlocks } from '../lib/maintenance.js';
 
 const GAME_TOKEN_TTL_MS = 10 * 60 * 1000;
 
@@ -47,6 +48,8 @@ export function gameRoutes(ctx: Ctx) {
     if (!row || new Date(row.expires_at) <= new Date()) return res.status(401).json({ valid: false });
     const u = await ctx.db<UserRow>('users').where({ id: row.user_id }).first();
     if (!u || u.banned) return res.status(403).json({ valid: false, banned: !!u?.banned });
+    // Maintenance: only the Developer can join game servers while it's on.
+    if (await maintenanceBlocks(ctx.db, u.role)) { const m = await getMaintenance(ctx.db); return res.status(503).json({ valid: false, code: 'maintenance', message: m.message || null }); }
     res.json({ valid: true, user: publicUser(u), role: u.role, permissions: permissionsFor(u.role), game: row.game_slug });
   });
 

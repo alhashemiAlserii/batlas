@@ -97,7 +97,7 @@ function sanitizeState(s: any): Record<string, unknown> | null {
 export interface GameServerOptions {
   bridge: SiteBridge;
   log?: (msg: string) => void;
-  /** Shared site maintenance helper; defaults to the MAINTENANCE_MODE env fallback. */
+  /** Shared site maintenance switch (siteMaintenance(db)); defaults to the MAINTENANCE_MODE env fallback. */
   isMaintenance?: MaintenanceCheck;
   /** how often live rooms are checked for maintenance being switched on (ms) */
   maintenancePollMs?: number;
@@ -460,8 +460,9 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     return true;
   }
 
-  async function maintenanceOn() {
-    try { return !!(await isMaintenance()); } catch (e) { log(`maintenance check failed: ${(e as Error).message}`); return false; }
+  /** maintenance message to show, or null when the game is open */
+  async function maintenanceMsg(): Promise<string | null> {
+    try { const m = await isMaintenance(); return m.on ? (m.message ? `${MAINTENANCE_MESSAGE} ${m.message}` : MAINTENANCE_MESSAGE) : null; } catch (e) { log(`maintenance check failed: ${(e as Error).message}`); return null; }
   }
 
   async function onMessage(c: Client, raw: string) {
@@ -478,15 +479,18 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       if (c.user || c.authed) return;
       if (typeof m.token !== 'string' || m.token.length > 200) return fail('auth_failed');
       c.authed = (async () => {
-        let u: VerifiedUser | null = null;
+        let u: Awaited<ReturnType<SiteBridge['verify']>> = null;
         try {
           u = await bridge.verify(m.token);
         } catch (e) {
           log(`verify error ${(e as Error).message}`);
         }
+        const refuseMaint = (message: string) => { send(c, { t: 'maintenance', message }); setTimeout(() => c.ws.close(4005, 'maintenance'), 20); };
+        if (u && 'maintenance' in u) return refuseMaint(u.message ? `${MAINTENANCE_MESSAGE} ${u.message}` : MAINTENANCE_MESSAGE); // the site refused (non-Developer)
         if (!u) return fail('auth_failed');
-        if (u.role !== 'DEVELOPER' && (await maintenanceOn())) {
-          send(c, { t: 'maintenance', message: MAINTENANCE_MESSAGE });
+        const mm = u.role !== 'DEVELOPER' ? await maintenanceMsg() : null;
+        if (mm) {
+          send(c, { t: 'maintenance', message: mm });
           setTimeout(() => c.ws.close(4005, 'maintenance'), 20);
           return;
         }
@@ -508,14 +512,14 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'ping':
         return send(c, { t: 'pong', at: m.at });
       case 'create': {
-        if (!isDev(c) && (await maintenanceOn())) return send(c, { t: 'maintenance', message: MAINTENANCE_MESSAGE });
+        { const mm = isDev(c) ? null : await maintenanceMsg(); if (mm) return send(c, { t: 'maintenance', message: mm }); }
         const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0 };
         rooms.set(room.code, room);
         log(`room ${room.code} created by ${c.user.username}`);
         return joinRoom(c, room, { created: true });
       }
       case 'join': {
-        if (!isDev(c) && (await maintenanceOn())) return send(c, { t: 'maintenance', message: MAINTENANCE_MESSAGE });
+        { const mm = isDev(c) ? null : await maintenanceMsg(); if (mm) return send(c, { t: 'maintenance', message: mm }); }
         const code = String(m.code ?? '').toUpperCase().trim();
         const room = rooms.get(code);
         if (!room) return send(c, { t: 'error', code: 'no_room', message: 'No room with that code.' });
@@ -645,11 +649,12 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
 
   /** When maintenance switches on, everyone except the Developer is removed with the maintenance screen. */
   async function enforceMaintenance() {
-    if (!(await maintenanceOn())) return 0;
+    const mm = await maintenanceMsg();
+    if (!mm) return 0;
     let n = 0;
     for (const c of clients) {
       if (!c.user || isDev(c)) continue;
-      eject(c, 'maintenance', { message: MAINTENANCE_MESSAGE }, 4005);
+      eject(c, 'maintenance', { message: mm }, 4005);
       n++;
     }
     if (n) log(`maintenance: removed ${n} player(s)`);

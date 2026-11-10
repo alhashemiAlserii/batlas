@@ -4,6 +4,7 @@ import { createApp, DEV_DASHBOARD_PATH } from './app.js';
 import { loadConfig, dbTarget } from './config.js';
 import { attachGameServer, WS_PATH } from './game-server/server.js';
 import { httpSiteBridge } from './game-server/bridge.js';
+import { siteMaintenance } from './game-server/maintenance.js';
 
 const config = loadConfig();
 const db = createDb(dbTarget(config));
@@ -34,7 +35,7 @@ const server = app.listen(port, host, () => {
 
 if (config.gameServerKey) {
   // The game server verifies players through the site's HTTP API (same as a separate process would).
-  gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey) });
+  gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey), isMaintenance: siteMaintenance(db) });
   console.log(`Sky Crew game server on ws://localhost:${port}${WS_PATH}`);
 } else console.log('GAME_SERVER_KEY not set: co-op game server disabled.');
 

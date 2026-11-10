@@ -6,6 +6,8 @@ import { testDb } from './helpers.js';
 import { createApp } from '../src/app.js';
 import { attachGameServer, WS_PATH } from '../src/game-server/server.js';
 import { httpSiteBridge } from '../src/game-server/bridge.js';
+import { siteMaintenance } from '../src/game-server/maintenance.js';
+import { setMaintenance } from '../src/lib/maintenance.js';
 import { hashPassword } from '../src/lib/crypto.js';
 import { MemoryMailer } from '../src/lib/mailer.js';
 import request from 'supertest';
@@ -23,7 +25,7 @@ beforeAll(async () => {
   server = http.createServer(app);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   port = (server.address() as any).port;
-  gs = attachGameServer(server, { bridge: httpSiteBridge(`http://127.0.0.1:${port}`, KEY), log: () => {} });
+  gs = attachGameServer(server, { bridge: httpSiteBridge(`http://127.0.0.1:${port}`, KEY), log: () => {}, isMaintenance: siteMaintenance(db) });
 });
 afterAll(async () => { gs.close(); await new Promise((r) => server.close(r)); await db.destroy(); });
 
@@ -509,10 +511,11 @@ describe('in-game Developer panel: every control is rank-checked on the server',
   });
 });
 
-describe('maintenance mode (MAINTENANCE_MODE env fallback)', () => {
+describe('maintenance mode (shared site switch + MAINTENANCE_MODE env override)', () => {
   it('refuses non-Developers, keeps the Developer, and removes players from live rooms when switched on', async () => {
     const dev = await player('DEVELOPER', 'mt_dev'); const pl = await player('PLAYER', 'mt_pl'); const adm = await player('ADMIN', 'mt_admin');
     await room(pl, dev, adm);
+    const late = await tokenFor('PLAYER', 'mt_late'); // website login itself is closed during maintenance
     process.env.MAINTENANCE_MODE = 'true';
     try {
       expect(await gs.enforceMaintenance()).toBeGreaterThanOrEqual(2); // + any leftover sockets from earlier tests
@@ -520,19 +523,37 @@ describe('maintenance mode (MAINTENANCE_MODE env fallback)', () => {
       expect(await pl.c.waitClose()).toBe(4005);
       expect((await adm.c.wait((m: any) => m.t === 'maintenance')).message).toMatch(/under maintenance/i);
       // new non-Developer connections are refused at sign-in
-      const late = await tokenFor('PLAYER', 'mt_late');
       const c = new TC(); await c.open(); c.send({ t: 'auth', token: late.token });
       expect((await c.wait((m: any) => m.t === 'maintenance' || m.t === 'welcome')).t).toBe('maintenance');
       expect(await c.waitClose()).toBe(4005);
       // the Developer stays and can still create rooms and sign in
       dev.c.send({ t: 'create' });
       expect((await dev.c.wait((m: any) => m.t === 'room' && m.you)).code).toMatch(/^[A-Z]{5}$/);
-      const dev2 = await player('DEVELOPER', 'mt_dev2');
-      expect(dev2.welcome.t).toBe('welcome');
-      dev2.c.close();
     } finally { delete process.env.MAINTENANCE_MODE; }
     const back = await player('PLAYER', 'mt_back');
     expect(back.welcome.t).toBe('welcome');
     for (const p of [dev, back]) p.c.close();
+  });
+});
+
+describe('maintenance mode from the Developer dashboard setting', () => {
+  it('the DB switch blocks sign-in and room creation for non-Developers, with the custom message', async () => {
+    const pl = await player('PLAYER', 'mdb_pl'); const dev = await player('DEVELOPER', 'mdb_dev');
+    await room(pl);
+    const late = await tokenFor('PLAYER', 'mdb_late');
+    await setMaintenance(db, { enabled: true, message: 'Back at 18:00.' }, null);
+    try {
+      pl.c.send({ t: 'create' });
+      expect((await pl.c.wait((m: any) => m.t === 'maintenance' || (m.t === 'room' && m.you))).message).toMatch(/under maintenance.*Back at 18:00/);
+      expect(await gs.enforceMaintenance()).toBeGreaterThanOrEqual(1);
+      expect(await pl.c.waitClose()).toBe(4005);
+      // /api/game/verify itself refuses non-Developers during maintenance
+      const v = await request(app).post('/api/game/verify').set('x-game-server-key', KEY).send({ token: late.token });
+      expect(v.status).toBe(503);
+      expect(v.body.code).toBe('maintenance');
+      dev.c.send({ t: 'create' });
+      expect((await dev.c.wait((m: any) => m.t === 'room' && m.you)).code).toMatch(/^[A-Z]{5}$/);
+    } finally { await setMaintenance(db, { enabled: false }, null); }
+    dev.c.close();
   });
 });
