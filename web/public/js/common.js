@@ -22,7 +22,7 @@ export const $ = (sel, root = document) => root.querySelector(sel);
 function readCookie(name) {
   return document.cookie.split('; ').find((c) => c.startsWith(name + '='))?.split('=').slice(1).join('=');
 }
-async function csrfToken() {
+export async function csrfToken() {
   let t = readCookie('__Host-csrf') || readCookie('csrf');
   if (!t) t = (await (await fetch('/api/csrf', { credentials: 'same-origin' })).json()).csrfToken;
   return decodeURIComponent(t);
@@ -53,7 +53,7 @@ export function rankBadge(role) {
   const r = RANK_LABEL[role] ? role : 'PLAYER';
   return h('span', { class: `rank rank-${r.toLowerCase()}`, title: `${r} rank` }, RANK_LABEL[r]);
 }
-const safeImg = (u) => (typeof u === 'string' && /^\/uploads\//.test(u) ? u : '');
+const safeImg = (u) => (typeof u === 'string' && /^\/(uploads|media)\//.test(u) ? u : '');
 export function avatar(u, size = 'sm') {
   const role = (u.role || 'PLAYER').toLowerCase();
   const src = safeImg(u.avatarUrl);
@@ -85,6 +85,48 @@ export function fmtDay(s) {
   return isNaN(d) ? s : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
+/** "in 3 days", "in 2 h", "in 5 min" (or "" if past). */
+export function timeUntil(s) {
+  const ms = Date.parse(s) - Date.now();
+  if (!(ms > 0)) return '';
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `in ${Math.max(1, m)} min`;
+  const hrs = Math.round(m / 60);
+  if (hrs < 48) return `in ${hrs} h`;
+  return `in ${Math.round(hrs / 24)} days`;
+}
+
+/** Only same-site paths or http(s) links are ever put into href/src. */
+export const safeUrl = (u) => (typeof u === 'string' && /^(https?:\/\/|\/(?!\/))/i.test(u) ? u : null);
+
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } } };
+
+async function renderBanners(header, me) {
+  const box = h('div', { class: 'site-banners' });
+  try {
+    if (me?.role === 'DEVELOPER') {
+      const m = await api('GET', '/api/maintenance');
+      if (m.on) box.append(h('div', { class: 'site-banner maint-on', role: 'status' }, h('strong', {}, '🛠 Maintenance mode is ON'), h('span', {}, m.forced ? 'Forced by MAINTENANCE_MODE on the server.' : 'Only you (Developer) can see the site.'), h('a', { href: '/studio-console#site' }, 'Manage')));
+    }
+    const { events } = await api('GET', '/api/events/active');
+    // At most two banners, so small screens are not buried.
+    for (const e of events.slice(0, 2)) {
+      if (store.get(`ev-hide-${e.id}-${e.updatedAt}`)) continue;
+      const live = Date.parse(e.startsAt) <= Date.now();
+      const link = safeUrl(e.linkUrl);
+      const el = h('div', { class: `site-banner ${e.style}`, role: 'region', 'aria-label': 'Event', dataset: { eventId: String(e.id) } },
+        h('strong', {}, live ? '🔴 Live now: ' : '📣 ', e.title),
+        e.message ? h('span', {}, e.message) : null,
+        h('span', { class: 'when' }, live ? `until ${fmtDate(e.endsAt)}` : `starts ${timeUntil(e.startsAt)} · ${fmtDate(e.startsAt)}`),
+        link ? h('a', { href: link }, live ? 'Join →' : 'Details →') : null,
+        h('button', { class: 'x', 'aria-label': 'Dismiss', onclick: () => { store.set(`ev-hide-${e.id}-${e.updatedAt}`, '1'); el.remove(); } }, '×'));
+      box.append(el);
+    }
+  } catch { /* banners are optional */ }
+  // Below the sticky header (not inside it), so banners scroll away instead of covering the page.
+  if (box.childElementCount) header.after(box);
+}
+
 export function fmtDate(s) {
   if (!s) return '';
   const d = new Date(s);
@@ -104,7 +146,7 @@ async function renderChrome() {
     const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
       h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` }, h('img', { class: 'brand-mark', src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 }), h('span', { class: 'sr-only', 'data-studio-name': '' }, studio),
         null),
-      h('button', { class: 'menu-btn', 'aria-label': 'Menu', onclick: () => nav.classList.toggle('open') }, '☰'),
+      h('button', { class: 'menu-btn', 'aria-label': 'Menu', 'aria-expanded': 'false', onclick: (e) => { const o = nav.classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); } }, '☰'),
       links, right);
     header.replaceChildren(nav);
     try {
@@ -120,13 +162,19 @@ async function renderChrome() {
       } else {
         right.append(h('a', { class: 'btn small', href: '/login' }, 'Log in'), h('a', { class: 'btn small primary', href: '/register' }, 'Create account'));
       }
-    } catch {}
+      await renderBanners(header, me);
+    } catch { renderBanners(header, null); }
   }
   document.querySelectorAll('main [data-studio-name]').forEach((e) => { e.textContent = studio; });
   if (footer) {
-    footer.replaceChildren(h('div', { class: 'inner' },
-      h('span', {}, `© ${new Date().getFullYear()} `, studio, '. All rights reserved.'),
-      h('span', {}, h('a', { href: '/games' }, 'Games'), ' · ', h('a', { href: '/contact' }, 'Contact'))));
+    footer.replaceChildren(
+      h('div', { class: 'cols' },
+        h('div', { class: 'foot-brand' }, h('img', { src: '/img/batlas-mark.png', alt: studio, width: 164, height: 120 }), h('p', { class: 'small' }, 'Chaotic co-op games you play with friends, right in your browser. One account for every game.')),
+        h('nav', { 'aria-label': 'Footer' }, h('h4', {}, 'Explore'), h('a', { href: '/games' }, 'Games'), h('a', { href: '/news' }, 'News'), h('a', { href: '/play/sky-crew' }, 'Play Sky Crew')),
+        h('div', {}, h('h4', {}, 'Studio'), h('a', { href: '/contact' }, 'Contact'), h('a', { href: '/register' }, 'Create account'), h('a', { href: '/login' }, 'Log in'))),
+      h('div', { class: 'inner' },
+        h('span', {}, `© ${new Date().getFullYear()} `, studio, '. All rights reserved.'),
+        h('span', {}, h('a', { href: '/games' }, 'Games'), ' · ', h('a', { href: '/contact' }, 'Contact'))));
   }
 }
 

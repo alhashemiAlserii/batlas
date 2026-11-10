@@ -63,12 +63,20 @@ export function usersPanel(me, perms, { roles = false } = {}) {
       if (typed !== u.username) { alert('The username did not match. Nothing was deleted.'); return; }
       act(() => api('DELETE', `/api/admin/users/${u.id}`, { confirm: typed }), `${u.username} deleted.`);
     } }, 'Delete account'));
+    if (actionable && perms.has('players.edit')) actions.append(h('button', { class: 'btn small', 'data-action': 'edit-profile', onclick: () => {
+      const dn = prompt(`New display name for ${u.username} (leave as is to keep):`, u.displayName);
+      if (dn === null) return;
+      const clearBio = u.bio ? confirm('Also clear their bio?') : false;
+      const body = { displayName: dn.trim() || u.username };
+      if (clearBio) body.bio = '';
+      act(() => api('PATCH', `/api/admin/users/${u.id}/profile`, body), `${u.username}'s profile updated.`);
+    } }, 'Edit profile'));
     if (!actions.childElementCount) actions.append(h('span', { class: 'muted small' }, u.role === 'DEVELOPER' ? 'Protected' : '—'));
     return h('tr', {},
       h('td', {}, userChip(u)),
       h('td', { class: 'small' }, u.email || h('span', { class: 'muted' }, '—')),
       h('td', {}, u.banned ? h('span', { class: 'pill', title: u.banReason || '' }, 'Banned') : h('span', { class: 'pill published' }, 'Active')),
-      h('td', { class: 'small muted' }, fmtDate(u.lastLoginAt) || 'never'),
+      h('td', { class: 'small muted' }, fmtDate(u.lastLoginAt) || 'never', u.lastSeenAt ? h('div', {}, 'seen ', fmtDate(u.lastSeenAt)) : null),
       h('td', {}, actions));
   }
   let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 250); });
@@ -77,7 +85,7 @@ export function usersPanel(me, perms, { roles = false } = {}) {
   return h('section', { class: 'card' },
     h('h2', {}, 'Players'),
     h('div', { class: 'inline' }, q, roleF, count), msg,
-    h('div', { class: 'table-wrap section-head' }, h('table', {}, h('thead', {}, h('tr', {}, ...['Player', 'Email', 'Status', 'Last login', 'Actions'].map((c) => h('th', {}, c)))), tbody)));
+    h('div', { class: 'table-wrap section-head' }, h('table', {}, h('thead', {}, h('tr', {}, ...['Player', 'Email', 'Status', 'Last login / seen', 'Actions'].map((c) => h('th', {}, c)))), tbody)));
 }
 
 export function logPanel(title, url, { categories = null } = {}) {
