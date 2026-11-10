@@ -26,6 +26,7 @@ npm test                        # vitest + supertest
 | `npm run typecheck` | TypeScript check |
 | `npm run test:pg` | Same tests against Postgres (`TEST_DATABASE_URL`, default `postgres://batlas:localtest@127.0.0.1:5433/batlas_test`) |
 | `npm run backup [-- --out file.json]` | Dump every table to JSON from `DATABASE_URL` (or the SQLite file). Contains password hashes: keep private |
+| `npm run restore -- --file f.json [--dry-run] [--force --confirm <db>]` | Restore a backup into `DATABASE_URL` (or the SQLite file): migrates first, refuses a non-empty DB unless `--force` + typed DB name, one transaction, fixes sequences. See [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) |
 | `cd e2e && npm i && npx playwright install webkit && npm run webkit` | Optional Safari (WebKit) end-to-end check against the running server (creates a throwaway `webkit_*` user and contact messages) |
 
 ## Stack
