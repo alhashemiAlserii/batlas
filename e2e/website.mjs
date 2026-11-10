@@ -86,7 +86,7 @@ console.log('Phase 1: dashboard actions');
   await upload(page, 'up-poster', 'exterior.jpg', 'Upload poster');
   await page.check('#gs-featured');
   await page.click('#save-game'); await okAlert(page.locator('#game-form')); ok('save Sky Crew (cover, 5 screenshots, MP4 trailer, poster, featured)');
-  await page.screenshot({ path: `${OUT}/dashboard-game-editor.png`, fullPage: true });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-game-editor.png`, fullPage: true });
 
   // publish an update (+ news post)
   const ver = `0.4.${Date.now() % 1000}`;
@@ -115,7 +115,7 @@ console.log('Phase 1: dashboard actions');
   await page.locator('[data-game="harbor-havoc"] button:has-text("Set draft")').click(); await page.waitForTimeout(400);
   await page.locator('[data-game="harbor-havoc"] button:has-text("Set upcoming")').click(); await page.waitForTimeout(400);
   expect(await page.locator('[data-game="harbor-havoc"] .pill.upcoming').count() === 1, 'status buttons (draft → upcoming)');
-  await page.screenshot({ path: `${OUT}/dashboard-games.png` });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-games.png` });
 
   // --- events ---
   await tab(page, 'events'); await page.click('#new-event');
@@ -123,7 +123,7 @@ console.log('Phase 1: dashboard actions');
   await page.fill('#e-message', 'Every Sky Crew flight pays x2 credits.');
   await page.fill('#e-linkUrl', '/play/sky-crew');
   await page.click('#save-event'); await okAlert(page.locator('#event-form')); ok('schedule event');
-  await page.screenshot({ path: `${OUT}/dashboard-events.png`, fullPage: true });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-events.png`, fullPage: true });
   // second event: create, cancel, restore, delete
   await page.click('#new-event'); await page.fill('#e-title', 'Temp event'); await page.click('#save-event'); await okAlert(page.locator('#event-form'));
   const temp = page.locator('#events-list .card:has(h3:text-is("Temp event"))');
@@ -168,7 +168,7 @@ console.log('Phase 1: dashboard actions');
   await page.fill('input[type=search]', DEV.user); await page.waitForTimeout(600);
   expect((await page.locator(`tr:has(a[href="/u/${DEV.user}"])`).first().textContent()).includes('Protected'), 'Developer row is protected (no demote/ban controls)');
   await page.fill('input[type=search]', ''); await page.waitForTimeout(500);
-  await page.screenshot({ path: `${OUT}/dashboard-players.png` });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-players.png` });
 
   // --- online ---
   await pp.goto(`${B}/profile`); // fresh activity
@@ -177,7 +177,7 @@ console.log('Phase 1: dashboard actions');
   await page.selectOption('#online-window', '15'); await page.waitForTimeout(400);
   expect(await page.locator('#online-panel').textContent().then((t) => t.includes(DEV.user)), 'online view lists signed-in users');
   expect(await page.locator('#online-panel h3:has-text("Sky Crew rooms")').count() === 1, 'online view shows live Sky Crew rooms table (game server attached)');
-  await page.screenshot({ path: `${OUT}/dashboard-online.png` });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-online.png` });
 
   // --- media ---
   await tab(page, 'media'); await page.waitForSelector('#media-grid .media-tile');
@@ -190,7 +190,7 @@ console.log('Phase 1: dashboard actions');
   answer(true); await page.locator('#media-grid .media-tile').first().locator('button:has-text("Delete")').click();
   await page.waitForFunction((n) => document.querySelectorAll('#media-grid .media-tile').length === n, before);
   ok('media library upload / copy URL / delete');
-  await page.screenshot({ path: `${OUT}/dashboard-media.png` });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-media.png` });
 
   // --- other existing tabs still render ---
   for (const k of ['stats', 'inbox', 'audit', 'rooms', 'tools']) { await tab(page, k); await page.waitForTimeout(300); }
@@ -204,19 +204,19 @@ console.log('Phase 1: dashboard actions');
   await page.fill('#m-text', 'We are installing new planes and a shinier website. Back very soon!');
   await page.fill('#m-eta-input', '2026-11-11T09:00');
   answer(true); await page.click('#m-save'); await page.waitForSelector('#m-state:text-is("ON")'); ok('maintenance ON via dashboard');
-  await page.screenshot({ path: `${OUT}/dashboard-maintenance.png` });
+  await page.screenshot({ scale: 'css', path: `${OUT}/dashboard-maintenance.png` });
   const anon = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const ap = await anon.newPage(); watch(ap, 'maint-anon');
   const resp = await ap.goto(`${B}/`); await ap.waitForSelector('#m-eta:not([hidden])');
   expect(resp.status() === 503 && (await ap.textContent('h1')).includes('under maintenance'), 'visitors get the 503 maintenance page with message + ETA');
-  await ap.screenshot({ path: `${OUT}/maintenance-desktop.png` });
+  await ap.screenshot({ scale: 'css', path: `${OUT}/maintenance-desktop.png` });
   expect((await pp.goto(`${B}/games`)).status() === 503, 'existing player session gets the maintenance page');
   expect(await pp.evaluate(async () => (await fetch('/api/me')).status) === 503, 'player API calls get 503');
   await pp.goto(`${B}/login`); await pp.fill('#login', uname2); await pp.fill('#password', 'player-pass-123456'); await pp.click('#f button');
   await pp.locator('.alert.error:has-text("maintenance")').waitFor(); ok('non-Developer login refused during maintenance');
   await page.goto(`${B}/`); await page.waitForSelector('.site-banner.maint-on');
   ok('Developer still sees the site, with a "Maintenance mode is ON" banner');
-  await page.screenshot({ path: `${OUT}/maintenance-developer-view.png` });
+  await page.screenshot({ scale: 'css', path: `${OUT}/maintenance-developer-view.png` });
   await page.goto(`${B}/studio-console#site`); await page.waitForSelector('#m-enabled');
   await page.uncheck('#m-enabled'); await page.click('#m-save'); await page.waitForSelector('#m-state:text-is("OFF")');
   expect((await ap.goto(`${B}/`)).status() === 200, 'maintenance OFF: site back for everyone');
@@ -260,7 +260,7 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
       await page.click('.menu-btn');
     }
     await overflow(page, L);
-    await page.screenshot({ path: `${OUT}/${L}-home.png`, fullPage: true });
+    await page.screenshot({ scale: 'css', path: `${OUT}/${L}-home.png`, fullPage: true });
     await page.click('#featured-details'); await page.waitForURL('**/games/sky-crew');
 
     // game page
@@ -278,7 +278,7 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
       await page.click('.media-switch button >> nth=0');
     }
     await overflow(page, L);
-    await page.screenshot({ path: `${OUT}/${L}-game.png`, fullPage: true });
+    await page.screenshot({ scale: 'css', path: `${OUT}/${L}-game.png`, fullPage: true });
     // gallery + lightbox
     await page.locator('#screenshots .gallery button').first().scrollIntoViewIfNeeded();
     await page.locator('#screenshots .gallery button').first().click();
@@ -299,7 +299,7 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
     }
     await page.waitForTimeout(150);
     expect(await page.textContent('.lb-count') === '2 / 5', `[${L}] lightbox swipe to next`);
-    await page.screenshot({ path: `${OUT}/${L}-lightbox.png` });
+    await page.screenshot({ scale: 'css', path: `${OUT}/${L}-lightbox.png` });
     if (!touch) { await page.keyboard.press('Escape'); } else { await page.click('.lb-close'); }
     expect(await page.locator('.lightbox').count() === 0, `[${L}] lightbox closes`);
     await page.click('#gallery-btn'); await page.waitForSelector('.lightbox'); await page.click('.lb-close');
@@ -310,10 +310,10 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
     expect((await page.textContent('#release-date')).includes('2027'), `[${L}] upcoming game shows release date`);
     expect(await page.locator('#game-media iframe[src*="youtube-nocookie.com/embed/aqz-KE-bpKQ"]').count() === 1 || await page.locator('.media-switch button[data-media="youtube"]').count() === 1, `[${L}] YouTube trailer embed available`);
     await overflow(page, L);
-    if (size !== 'ipad') await page.screenshot({ path: `${OUT}/${L}-upcoming.png`, fullPage: true });
+    if (size !== 'ipad') await page.screenshot({ scale: 'css', path: `${OUT}/${L}-upcoming.png`, fullPage: true });
 
     for (const p of ['/games', '/news', '/contact', '/login', '/register']) { await page.goto(B + p, { waitUntil: 'networkidle' }); await overflow(page, L); }
-    await page.goto(`${B}/games`); await page.waitForSelector('.game-card'); await page.screenshot({ path: `${OUT}/${L}-games.png`, fullPage: true });
+    await page.goto(`${B}/games`); await page.waitForSelector('.game-card'); await page.screenshot({ scale: 'css', path: `${OUT}/${L}-games.png`, fullPage: true });
     ok(`[${L}] games / news / contact / login / register load without overflow`);
 
     // dashboard on this device
@@ -321,9 +321,9 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
     await page.goto(`${B}/studio-console#games`); await page.waitForSelector('[data-game="sky-crew"]');
     await page.locator('[data-game="sky-crew"] button:has-text("Edit")').click(); await page.waitForSelector('#game-form');
     await overflow(page, `${L} dashboard`);
-    await page.screenshot({ path: `${OUT}/${L}-dashboard.png`, fullPage: size !== 'desktop' ? false : true });
+    await page.screenshot({ scale: 'css', path: `${OUT}/${L}-dashboard.png`, fullPage: size !== 'desktop' ? false : true });
     await page.goto(`${B}/studio-console#site`); await page.waitForSelector('#m-enabled');
-    if (size === 'iphone') await page.screenshot({ path: `${OUT}/${L}-dashboard-maintenance.png` });
+    if (size === 'iphone') await page.screenshot({ scale: 'css', path: `${OUT}/${L}-dashboard-maintenance.png` });
     ok(`[${L}] dashboard usable`);
     await ctx.close();
   }
@@ -334,9 +334,9 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
     await login(dp, DEV.user, DEV.pw);
     await dp.evaluate(async () => { const t = document.cookie.match(/csrf=([^;]+)/)[1]; await fetch('/api/dev/maintenance', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-csrf-token': decodeURIComponent(t) }, body: JSON.stringify({ enabled: true, message: 'New planes are landing. Back soon!', eta: new Date(Date.now() + 2 * 3600e3).toISOString() }) }); });
     const an = await browser.newContext({ ...devices['iPhone 15'] }); const ap = await an.newPage();
-    await ap.goto(`${B}/`); await ap.waitForSelector('#m-eta:not([hidden])'); await ap.screenshot({ path: `${OUT}/maintenance-iphone-webkit.png` });
+    await ap.goto(`${B}/`); await ap.waitForSelector('#m-eta:not([hidden])'); await ap.screenshot({ scale: 'css', path: `${OUT}/maintenance-iphone-webkit.png` });
     const ipad = await browser.newContext({ ...devices['iPad (gen 7)'] }); const ip = await ipad.newPage();
-    await ip.goto(`${B}/`); await ip.waitForSelector('#m-eta:not([hidden])'); await ip.screenshot({ path: `${OUT}/maintenance-ipad-webkit.png` });
+    await ip.goto(`${B}/`); await ip.waitForSelector('#m-eta:not([hidden])'); await ip.screenshot({ scale: 'css', path: `${OUT}/maintenance-ipad-webkit.png` });
     await dp.evaluate(async () => { const t = document.cookie.match(/csrf=([^;]+)/)[1]; await fetch('/api/dev/maintenance', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-csrf-token': decodeURIComponent(t) }, body: JSON.stringify({ enabled: false }) }); });
     ok('[webkit] maintenance page on iPhone + iPad');
     await an.close(); await ipad.close(); await ctx.close();

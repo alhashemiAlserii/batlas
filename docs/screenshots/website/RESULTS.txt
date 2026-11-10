@@ -1,0 +1,143 @@
+Website e2e (2026-11-10T12:21:47.029Z)
+136 passed, 0 problems, 3 notes
+
+✓ developer login
+✓ screenshots uploaded into the gallery list
+✓ screenshot remove + reorder buttons
+✓ save Sky Crew (cover, 5 screenshots, MP4 trailer, poster, featured)
+✓ publish update v0.4.479 with news post
+✓ create upcoming game with release date + YouTube trailer
+✓ status buttons (draft → upcoming)
+✓ schedule event
+✓ event cancel / restore / delete
+✓ news post linked to a game
+✓ register two players (username + password only)
+✓ assign TRUSTED
+✓ assign ADMIN
+✓ assign PLAYER
+✓ edit player profile (display name)
+✓ kick
+✓ temporary password
+✓ ban
+✓ unban
+✓ Developer row is protected (no demote/ban controls)
+✓ online view lists signed-in users
+✓ online view shows live Sky Crew rooms table (game server attached)
+✓ media library upload / copy URL / delete
+✓ audit log has media.upload.video
+✓ audit log has game.create
+✓ audit log has game.status
+✓ audit log has event.create
+✓ audit log has role.change
+✓ audit log has player.profile_edit
+✓ audit log has player.ban
+✓ maintenance ON via dashboard
+✓ visitors get the 503 maintenance page with message + ETA
+✓ existing player session gets the maintenance page
+✓ player API calls get 503
+✓ non-Developer login refused during maintenance
+✓ Developer still sees the site, with a "Maintenance mode is ON" banner
+✓ maintenance OFF: site back for everyone
+✓ [chromium-iphone] homepage featured game
+✓ [chromium-iphone] upcoming games with release date
+✓ [chromium-iphone] latest news
+✓ [chromium-iphone] event banner site-wide
+✓ [chromium-iphone] featured autoplay preview is muted + playsinline
+✓ [chromium-iphone] mobile menu opens
+✓ [chromium-iphone] Play in browser button
+✓ [chromium-iphone] no Download button when no download file exists
+✓ [chromium-iphone] uploaded MP4 trailer with poster, controls, playsinline
+✓ [chromium-iphone] trailer metadata loads over Range requests (duration 12.0s)
+✓ [chromium-iphone] media switch (→ cover)
+✓ [chromium-iphone] lightbox next/prev (1 / 5 → 2 / 5 → 1 / 5)
+✓ [chromium-iphone] lightbox swipe to next
+✓ [chromium-iphone] lightbox closes
+✓ [chromium-iphone] "Screenshots" button opens the lightbox
+✓ [chromium-iphone] upcoming game shows release date
+✓ [chromium-iphone] YouTube trailer embed available
+✓ [chromium-iphone] games / news / contact / login / register load without overflow
+✓ [chromium-iphone] dashboard usable
+✓ [chromium-ipad] homepage featured game
+✓ [chromium-ipad] upcoming games with release date
+✓ [chromium-ipad] latest news
+✓ [chromium-ipad] event banner site-wide
+✓ [chromium-ipad] featured autoplay preview is muted + playsinline
+✓ [chromium-ipad] Play in browser button
+✓ [chromium-ipad] no Download button when no download file exists
+✓ [chromium-ipad] uploaded MP4 trailer with poster, controls, playsinline
+✓ [chromium-ipad] trailer metadata loads over Range requests (duration 12.0s)
+✓ [chromium-ipad] media switch (→ cover)
+✓ [chromium-ipad] lightbox next/prev (1 / 5 → 2 / 5 → 1 / 5)
+✓ [chromium-ipad] lightbox swipe to next
+✓ [chromium-ipad] lightbox closes
+✓ [chromium-ipad] "Screenshots" button opens the lightbox
+✓ [chromium-ipad] upcoming game shows release date
+✓ [chromium-ipad] YouTube trailer embed available
+✓ [chromium-ipad] games / news / contact / login / register load without overflow
+✓ [chromium-ipad] dashboard usable
+✓ [chromium-desktop] homepage featured game
+✓ [chromium-desktop] upcoming games with release date
+✓ [chromium-desktop] latest news
+✓ [chromium-desktop] event banner site-wide
+✓ [chromium-desktop] featured autoplay preview is muted + playsinline
+✓ [chromium-desktop] Play in browser button
+✓ [chromium-desktop] no Download button when no download file exists
+✓ [chromium-desktop] uploaded MP4 trailer with poster, controls, playsinline
+✓ [chromium-desktop] trailer metadata loads over Range requests (duration 12.0s)
+✓ [chromium-desktop] media switch (→ cover)
+✓ [chromium-desktop] lightbox next/prev (1 / 5 → 2 / 5 → 1 / 5)
+✓ [chromium-desktop] lightbox swipe to next
+✓ [chromium-desktop] lightbox closes
+✓ [chromium-desktop] "Screenshots" button opens the lightbox
+✓ [chromium-desktop] upcoming game shows release date
+✓ [chromium-desktop] YouTube trailer embed available
+✓ [chromium-desktop] games / news / contact / login / register load without overflow
+✓ [chromium-desktop] dashboard usable
+✓ [webkit-iphone] homepage featured game
+✓ [webkit-iphone] upcoming games with release date
+✓ [webkit-iphone] latest news
+✓ [webkit-iphone] event banner site-wide
+✓ [webkit-iphone] mobile menu opens
+✓ [webkit-iphone] Play in browser button
+✓ [webkit-iphone] no Download button when no download file exists
+✓ [webkit-iphone] lightbox next/prev (1 / 5 → 2 / 5 → 1 / 5)
+✓ [webkit-iphone] lightbox swipe to next
+✓ [webkit-iphone] lightbox closes
+✓ [webkit-iphone] "Screenshots" button opens the lightbox
+✓ [webkit-iphone] upcoming game shows release date
+✓ [webkit-iphone] YouTube trailer embed available
+✓ [webkit-iphone] games / news / contact / login / register load without overflow
+✓ [webkit-iphone] dashboard usable
+✓ [webkit-ipad] homepage featured game
+✓ [webkit-ipad] upcoming games with release date
+✓ [webkit-ipad] latest news
+✓ [webkit-ipad] event banner site-wide
+✓ [webkit-ipad] Play in browser button
+✓ [webkit-ipad] no Download button when no download file exists
+✓ [webkit-ipad] lightbox next/prev (1 / 5 → 2 / 5 → 1 / 5)
+✓ [webkit-ipad] lightbox swipe to next
+✓ [webkit-ipad] lightbox closes
+✓ [webkit-ipad] "Screenshots" button opens the lightbox
+✓ [webkit-ipad] upcoming game shows release date
+✓ [webkit-ipad] YouTube trailer embed available
+✓ [webkit-ipad] games / news / contact / login / register load without overflow
+✓ [webkit-ipad] dashboard usable
+✓ [webkit-desktop] homepage featured game
+✓ [webkit-desktop] upcoming games with release date
+✓ [webkit-desktop] latest news
+✓ [webkit-desktop] event banner site-wide
+✓ [webkit-desktop] Play in browser button
+✓ [webkit-desktop] no Download button when no download file exists
+✓ [webkit-desktop] lightbox next/prev (1 / 5 → 2 / 5 → 1 / 5)
+✓ [webkit-desktop] lightbox swipe to next
+✓ [webkit-desktop] lightbox closes
+✓ [webkit-desktop] "Screenshots" button opens the lightbox
+✓ [webkit-desktop] upcoming game shows release date
+✓ [webkit-desktop] YouTube trailer embed available
+✓ [webkit-desktop] games / news / contact / login / register load without overflow
+✓ [webkit-desktop] dashboard usable
+✓ [webkit] maintenance page on iPhone + iPad
+
+NOTE [webkit-iphone] uploaded-trailer <video> skipped in WebKit (no GStreamer codecs on this box)
+NOTE [webkit-ipad] uploaded-trailer <video> skipped in WebKit (no GStreamer codecs on this box)
+NOTE [webkit-desktop] uploaded-trailer <video> skipped in WebKit (no GStreamer codecs on this box)
