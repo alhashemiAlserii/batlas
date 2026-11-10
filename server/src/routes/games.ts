@@ -9,6 +9,24 @@ import { requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { randomToken } from '../lib/crypto.js';
 import { insertId } from '../db/index.js';
+import { storeMedia, mediaIdFromUrl, IMAGE_MAX_BYTES } from '../lib/media.js';
+import { WEB_ROOT } from '../config.js';
+
+/** Public per-game settings, editable in the Developer dashboard. */
+export const settingsSchema = z.object({
+  featured: z.boolean().optional(), // show as the homepage's featured game
+  playEnabled: z.boolean().optional(), // false hides "Play in browser" (e.g. during an update)
+  downloadEnabled: z.boolean().optional(),
+  showLeaderboard: z.boolean().optional(),
+  maintenanceMessage: z.string().trim().max(200).optional(), // shown instead of Play when play is off
+  accentColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, '#rrggbb').or(z.literal('')).optional(),
+  sortOrder: z.number().int().min(-1000).max(1000).optional(),
+}).strict();
+export type GameSettings = z.infer<typeof settingsSchema>;
+const DEFAULT_SETTINGS: Required<GameSettings> = { featured: false, playEnabled: true, downloadEnabled: true, showLeaderboard: true, maintenanceMessage: '', accentColor: '', sortOrder: 0 };
+export const parseSettings = (s: unknown): Required<GameSettings> => {
+  try { return { ...DEFAULT_SETTINGS, ...(typeof s === 'string' && s ? JSON.parse(s) : {}) }; } catch { return { ...DEFAULT_SETTINGS }; }
+};
 
 const url = z
   .string()
@@ -28,6 +46,11 @@ const gameSchema = z.object({
   coverImage: url,
   screenshots: z.array(z.string().trim().max(500)).max(20).optional(),
   trailerUrl: url,
+  trailerVideo: url, // uploaded MP4 (/media/:id.mp4)
+  trailerPoster: url,
+  youtubeUrl: z.string().trim().max(300).refine((v) => v === '' || /^https:\/\/(www\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\//i.test(v), 'must be a YouTube link').optional(),
+  releaseDate: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/, 'YYYY-MM-DD').refine((d) => d === '' || !isNaN(Date.parse(d)), 'invalid date').optional(),
+  settings: settingsSchema.optional(),
   playUrl: url,
   downloadUrl: url,
   config: z.record(z.string(), z.unknown()).optional(),
@@ -48,6 +71,10 @@ function toRow(b: Partial<z.infer<typeof gameSchema>>) {
   if (b.playUrl !== undefined) row.play_url = b.playUrl;
   if (b.downloadUrl !== undefined) row.download_url = b.downloadUrl;
   if (b.config !== undefined) row.config = JSON.stringify(b.config);
+  if (b.trailerVideo !== undefined) row.trailer_video = b.trailerVideo || null;
+  if (b.trailerPoster !== undefined) row.trailer_poster = b.trailerPoster || null;
+  if (b.youtubeUrl !== undefined) row.youtube_url = b.youtubeUrl || null;
+  if (b.releaseDate !== undefined) row.release_date = b.releaseDate || null;
   return row;
 }
 
@@ -66,6 +93,11 @@ export function gameOut(g: any, includeConfig = false) {
     trailerUrl: g.trailer_url ?? '',
     playUrl: g.play_url ?? '',
     downloadUrl: g.download_url ?? '',
+    trailerVideo: g.trailer_video ?? '',
+    trailerPoster: g.trailer_poster ?? '',
+    youtubeUrl: g.youtube_url ?? '',
+    releaseDate: g.release_date ?? '',
+    settings: parseSettings(g.settings),
     publishedAt: g.published_at,
     updatedAt: g.updated_at,
     ...(includeConfig ? { config: g.config ? JSON.parse(g.config) : {} } : {}),
@@ -88,22 +120,42 @@ export function gamesRoutes(ctx: Ctx) {
   fs.mkdirSync(ctx.config.uploadDir, { recursive: true });
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+    limits: { fileSize: IMAGE_MAX_BYTES, files: 1 },
     fileFilter: (_req, file, cb) => cb(null, file.mimetype in IMAGE_TYPES),
   });
 
   // ---- public ----
   r.get('/games', async (_req, res) => {
     const rows = await ctx.db('games').whereIn('status', ['published', 'upcoming']).orderBy([{ column: 'status', order: 'asc' }, { column: 'updated_at', order: 'desc' }]);
-    res.json({ games: rows.map((g) => gameOut(g)) });
+    const games = rows.map((g) => gameOut(g)).sort((a, b) => Number(b.settings.featured) - Number(a.settings.featured) || a.settings.sortOrder - b.settings.sortOrder);
+    res.json({ games });
   });
 
   r.get('/games/:slug', async (req, res) => {
     const g = await ctx.db('games').where({ slug: String(req.params.slug).toLowerCase() }).whereIn('status', ['published', 'upcoming']).first();
     if (!g) throw new HttpError(404, 'Game not found');
     const versions = await ctx.db('game_versions').where({ game_id: g.id }).orderBy([{ column: 'released_at', order: 'desc' }, { column: 'id', order: 'desc' }]);
-    res.json({ game: { ...gameOut(g), versions: versions.map(versionOut), latestVersion: versions[0] ? versionOut(versions[0]) : null } });
+    const out = gameOut(g);
+    const vs = versions.map(versionOut);
+    // The Download button is only offered when the file really exists (or is an external link)
+    // and downloads are enabled for this game.
+    const candidate = vs[0]?.downloadUrl || out.downloadUrl;
+    const download = out.settings.downloadEnabled && candidate && (await downloadExists(candidate)) ? candidate : '';
+    const news = await ctx.db('news_posts').where({ game_id: g.id, status: 'published' }).orderBy('published_at', 'desc').limit(5).select('slug', 'title', 'summary', 'published_at');
+    res.json({ game: { ...out, versions: vs, latestVersion: vs[0] ?? null, download, news: news.map((n) => ({ slug: n.slug, title: n.title, summary: n.summary ?? '', publishedAt: n.published_at })) } });
   });
+
+  async function downloadExists(u: string): Promise<boolean> {
+    if (/^https?:\/\//i.test(u)) return true; // external host: trust the link
+    if (!u.startsWith('/') || u.startsWith('//')) return false;
+    const mid = mediaIdFromUrl(u);
+    if (mid) return !!(await ctx.db('media').where({ id: mid }).first('id'));
+    const clean = path.posix.normalize(decodeURIComponent(u.split('?')[0]));
+    if (clean.includes('..')) return false;
+    if (clean.startsWith('/uploads/')) return fs.existsSync(path.join(ctx.config.uploadDir, clean.slice('/uploads/'.length)));
+    const p = path.join(WEB_ROOT, 'public', clean);
+    return p.startsWith(path.join(WEB_ROOT, 'public')) && fs.existsSync(p) && fs.statSync(p).isFile();
+  }
 
   // ---- developer only ----
   const dev = requirePermission('games.manage');
@@ -117,7 +169,7 @@ export function gamesRoutes(ctx: Ctx) {
     const body = parse(gameSchema, req.body);
     if (await ctx.db('games').where({ slug: body.slug }).first()) throw new HttpError(409, 'A game with that slug already exists');
     const now = new Date().toISOString();
-    const row = { ...toRow(body), status: body.status ?? 'draft', created_at: now, updated_at: now, published_at: body.status === 'published' ? now : null };
+    const row = { ...toRow(body), ...(body.settings ? { settings: JSON.stringify(body.settings) } : {}), status: body.status ?? 'draft', created_at: now, updated_at: now, published_at: body.status === 'published' ? now : null };
     const id = await insertId(ctx.db('games').insert(row));
     await audit(ctx.db, req, { action: 'game.create', category: 'games', targetType: 'game', targetId: id, targetLabel: body.slug });
     res.status(201).json({ game: gameOut(await ctx.db('games').where({ id }).first(), true) });
@@ -130,6 +182,7 @@ export function gamesRoutes(ctx: Ctx) {
     const body = parse(gameSchema.partial(), req.body);
     if (body.slug && body.slug !== g.slug && (await ctx.db('games').where({ slug: body.slug }).first())) throw new HttpError(409, 'Slug already in use');
     const row = { ...toRow(body), updated_at: new Date().toISOString() } as Record<string, unknown>;
+    if (body.settings) row.settings = JSON.stringify({ ...parseSettings(g.settings), ...body.settings });
     if (body.status === 'published' && !g.published_at) row.published_at = new Date().toISOString();
     await ctx.db('games').where({ id }).update(row);
     await audit(ctx.db, req, { action: 'game.update', category: 'games', targetType: 'game', targetId: id, targetLabel: g.slug, details: { fields: Object.keys(body) } });
@@ -185,15 +238,15 @@ export function gamesRoutes(ctx: Ctx) {
     res.json({ ok: true });
   });
 
+  // Legacy image upload endpoint (kept for compatibility). Now stored in the database, not on disk.
   r.post('/dev/uploads', dev, upload.single('file'), async (req, res) => {
     const f = req.file;
     if (!f) throw new HttpError(400, 'Upload a PNG, JPEG, WebP or GIF image as "file"');
     const t = IMAGE_TYPES[f.mimetype];
     if (!t || !t.magic(f.buffer)) throw new HttpError(400, 'File content is not a valid image');
-    const name = `${Date.now()}-${randomToken(9)}${t.ext}`;
-    await fs.promises.writeFile(path.join(ctx.config.uploadDir, name), f.buffer, { flag: 'wx' });
-    await audit(ctx.db, req, { action: 'upload.image', category: 'games', targetType: 'file', targetId: name, details: { size: f.size, type: f.mimetype } });
-    res.status(201).json({ url: `/uploads/${name}` });
+    const m = await storeMedia(ctx.db, { kind: 'image', contentType: f.mimetype, data: f.buffer, filename: f.originalname, userId: req.user!.id });
+    await audit(ctx.db, req, { action: 'upload.image', category: 'media', targetType: 'media', targetId: m.id, details: { size: f.size, type: f.mimetype } });
+    res.status(201).json({ url: m.url, id: m.id });
   });
 
   return r;

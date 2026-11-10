@@ -215,9 +215,10 @@ describe('avatars', () => {
     const r = await player.agent.post('/api/me/avatar').set('x-csrf-token', player.csrf).attach('file', jpg, { filename: 'me.jpg', contentType: 'image/jpeg' });
     expect(r.status).toBe(201);
     const url = r.body.user.avatarUrl;
-    expect(url).toMatch(/^\/uploads\/avatars\/.+\.webp$/);
-    const file = path.join(env.uploadDir, 'avatars', path.basename(url));
-    const buf = fs.readFileSync(file);
+    expect(url).toMatch(/^\/media\/\d+\.webp$/); // stored in the DB
+    const got = await request(env.app).get(url).buffer(true).parse((res, cb) => { const c: Buffer[] = []; res.on('data', (d: Buffer) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    expect(got.headers['content-type']).toBe('image/webp');
+    const buf = got.body as Buffer;
     const meta = await sharp(buf).metadata();
     expect([meta.format, meta.width, meta.height]).toEqual(['webp', 256, 256]);
     expect(meta.exif).toBeUndefined();
@@ -228,7 +229,7 @@ describe('avatars', () => {
     const png = await sharp({ create: { width: 50, height: 50, channels: 4, background: '#19d3e6' } }).png().toBuffer();
     const r2 = await player.agent.post('/api/me/avatar').set('x-csrf-token', player.csrf).attach('file', png, { filename: 'a.png', contentType: 'image/png' });
     expect(r2.status).toBe(201);
-    expect(fs.existsSync(file)).toBe(false);
+    expect((await request(env.app).get(url)).status).toBe(404); // old avatar row deleted
     expect((await send(player, 'delete', '/api/me/avatar')).status).toBe(200);
     expect((await request(env.app).get(`/api/users/${player.username}`)).body.user.avatarUrl).toBe('');
   });

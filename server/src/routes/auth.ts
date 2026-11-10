@@ -1,3 +1,4 @@
+import { maintenanceBlocks } from '../lib/maintenance.js';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -75,6 +76,8 @@ export function authRoutes(ctx: Ctx) {
       await audit(ctx.db, req, { action: 'auth.login_blocked_banned', category: 'auth', targetType: 'user', targetId: user.id, targetLabel: user.username }, user);
       throw new HttpError(403, 'This account is banned.' + (user.ban_reason ? ` Reason: ${user.ban_reason}` : ''), 'banned');
     }
+    // Maintenance mode: only the Developer may sign in (checked after the password, so it reveals nothing).
+    if (await maintenanceBlocks(ctx.db, user.role)) throw new HttpError(503, 'Batlas is under maintenance. Please try again later.', 'maintenance');
     await ctx.db('users').where({ id: user.id }).update({ last_login_at: new Date().toISOString() });
     await createSession(ctx, req, res, user);
     res.json({ user: selfUser(user) });

@@ -42,7 +42,7 @@ describe('games publishing', () => {
   it('uploads images (developer only, content-checked)', async () => {
     const ok = await dev.agent.post('/api/dev/uploads').set('x-csrf-token', dev.csrf).attach('file', PNG, { filename: 'a.png', contentType: 'image/png' });
     expect(ok.status).toBe(201);
-    expect(ok.body.url).toMatch(/^\/uploads\/.+\.png$/);
+    expect(ok.body.url).toMatch(/^\/media\/\d+\.png$/); // stored in the DB (free-plan disk is wiped on deploy)
     const served = await request(env.app).get(ok.body.url);
     expect(served.status).toBe(200);
     expect(served.headers['content-type']).toContain('image/png');

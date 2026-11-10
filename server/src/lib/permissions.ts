@@ -26,6 +26,8 @@ export const PERMISSIONS = [
   'players.view',
   'players.reset_password', // staff-issued one-time temporary password
   'players.delete', // permanently delete an account (Developer only)
+  'players.edit', // reset a player's display name / bio (moderation)
+  'players.online', // see who is online right now
   // world / game control
   'weather.change',
   'environment.control',
@@ -45,6 +47,9 @@ export const PERMISSIONS = [
   'news.manage', // create/edit/publish/pin announcements (Developer only by default)
   'inbox.view', // contact-form messages
   'stats.view', // player statistics
+  'media.upload', // upload images / trailers to the database (Developer only)
+  'site.events', // schedule site-wide event banners (Developer only)
+  'site.maintenance', // switch maintenance mode (Developer only)
   // roles
   'roles.grant.trusted',
   'roles.grant.admin',
@@ -60,6 +65,8 @@ const ADMIN_PERMS: Permission[] = [
   'players.kick',
   'players.view',
   'players.reset_password',
+  'players.edit',
+  'players.online',
   'moderation.view',
   'weather.change',
   'emergency.trigger',
