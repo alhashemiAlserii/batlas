@@ -12,6 +12,8 @@
  *     Stage 1 stubs return ok without touching a live game.
  */
 import { parseStoredOutfit, validOutfit } from '../game-server/outfits.js';
+import { CATALOG, SALARY_CAP, MAX_PAID_FLIGHTS_PER_HOUR, outfitAllowed } from '../game-server/shop.js';
+import { applyLedger, balanceOf, buyItem, grant, ownedItems, ownsFn, recentLedger } from '../lib/wallet.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Ctx, UserRow } from '../lib/types.js';
@@ -52,7 +54,10 @@ export function gameRoutes(ctx: Ctx) {
     // Maintenance: only the Developer can join game servers while it's on.
     if (await maintenanceBlocks(ctx.db, u.role)) { const m = await getMaintenance(ctx.db); return res.status(503).json({ valid: false, code: 'maintenance', message: m.message || null }); }
     const prof = await ctx.db('game_profiles').where({ user_id: u.id, game_slug: 'sky-crew' }).first();
-    res.json({ valid: true, user: publicUser(u), role: u.role, permissions: permissionsFor(u.role), game: row.game_slug, outfit: parseStoredOutfit(prof?.outfit) });
+    const owned = await ownedItems(ctx.db, u.id, u.role);
+    let outfit = parseStoredOutfit(prof?.outfit);
+    if (!outfitAllowed(outfit, ownsFn(owned))) outfit = parseStoredOutfit(null); // e.g. an item the Developer took back
+    res.json({ valid: true, user: publicUser(u), role: u.role, permissions: permissionsFor(u.role), game: row.game_slug, outfit, owned: owned.keys, ownsAll: owned.all, balance: await balanceOf(ctx.db, u.id) });
   });
 
   // Sky Crew outfit, saved per account (validated against the server whitelist).
@@ -63,9 +68,78 @@ export function gameRoutes(ctx: Ctx) {
   r.put('/game/sky-crew/outfit', requireAuth, async (req, res) => {
     const o = validOutfit(req.body?.outfit);
     if (!o) throw new HttpError(400, 'Unknown outfit.', 'bad_outfit');
+    if (!outfitAllowed(o, ownsFn(await ownedItems(ctx.db, req.user!.id, req.user!.role)))) throw new HttpError(403, 'Buy that item in the shop first.', 'not_owned');
     const row = { user_id: req.user!.id, game_slug: 'sky-crew', outfit: JSON.stringify(o), updated_at: new Date().toISOString() };
     await ctx.db('game_profiles').insert(row).onConflict(['user_id', 'game_slug']).merge(['outfit', 'updated_at']);
     res.json({ ok: true, outfit: o });
+  });
+
+  // ---------------- Sky Crew wallet + shop (server-verified; the client only asks) ----------------
+  r.get('/game/sky-crew/wallet', requireAuth, async (req, res) => {
+    const u = req.user!;
+    const owned = await ownedItems(ctx.db, u.id, u.role);
+    res.json({ balance: await balanceOf(ctx.db, u.id), owned: owned.keys, ownsAll: owned.all, catalog: CATALOG, ledger: await recentLedger(ctx.db, u.id, 20) });
+  });
+  r.post('/game/sky-crew/shop/buy', requireAuth, async (req, res) => {
+    if (req.authVia !== 'session') throw new HttpError(403, 'Purchases must be made with a website session');
+    const b = parse(z.object({ item: z.string().max(48), purchaseId: z.string().min(8).max(64).regex(/^[A-Za-z0-9_-]+$/) }), req.body);
+    const u = req.user!;
+    const r2 = await buyItem(ctx.db, u.id, u.role, b.item, b.purchaseId);
+    if (!r2.ok) {
+      if (r2.code === 'insufficient_funds') await audit(ctx.db, req, { action: 'shop.denied', category: 'game', targetType: 'item', targetId: b.item, details: { reason: 'insufficient_funds', balance: r2.balance, price: r2.price } });
+      return res.status(r2.code === 'unknown_item' ? 404 : 402).json({ error: r2.code === 'unknown_item' ? 'Unknown item.' : 'Not enough credits.', code: r2.code, balance: r2.balance, price: r2.price });
+    }
+    if (!r2.already) await audit(ctx.db, req, { action: 'shop.purchase', category: 'game', targetType: 'item', targetId: b.item, details: { balance: r2.balance, purchaseId: b.purchaseId } });
+    res.json(r2);
+  });
+
+  const serverKeyOk = (req: import('express').Request) => { const key = req.get('x-game-server-key') ?? ''; if (!ctx.config.gameServerKey || !safeEqual(key, ctx.config.gameServerKey)) throw new HttpError(401, 'Invalid game server key'); };
+  // Game server: what does this account own right now (class picks, outfit changes are checked against this)
+  r.post('/game/owned', async (req, res) => {
+    serverKeyOk(req);
+    const { userId } = parse(z.object({ userId: z.number().int().positive() }), req.body);
+    const u = await ctx.db<UserRow>('users').where({ id: userId }).first();
+    if (!u) throw new HttpError(404, 'Unknown user');
+    const owned = await ownedItems(ctx.db, u.id, u.role);
+    res.json({ role: u.role, owned: owned.keys, ownsAll: owned.all, balance: await balanceOf(ctx.db, u.id) });
+  });
+  // Game server: pay the crew of a finished flight. The game server computed the salary from its OWN room
+  // tracking; the site caps it, rate-limits paid flights per account and makes every flight key payable once.
+  r.post('/game/salary', async (req, res) => {
+    serverKeyOk(req);
+    const b = parse(z.object({
+      flightKey: z.string().min(6).max(100).regex(/^[A-Za-z0-9:._-]+$/),
+      userIds: z.array(z.number().int().positive()).min(1).max(8),
+      amount: z.number().int().min(0).max(SALARY_CAP),
+      lines: z.array(z.tuple([z.string().max(80), z.number()])).max(12).optional(),
+      facts: z.record(z.string(), z.unknown()).optional(),
+    }), req.body);
+    const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+    const paid: { userId: number; amount: number; balance: number; duplicate?: boolean; refused?: string }[] = [];
+    for (const userId of [...new Set(b.userIds)]) {
+      const u = await ctx.db<UserRow>('users').where({ id: userId }).first();
+      if (!u || u.banned) { paid.push({ userId, amount: 0, balance: 0, refused: 'unknown or banned' }); continue; }
+      const recent = await ctx.db('wallet_ledger').where({ user_id: userId, kind: 'salary' }).andWhere('created_at', '>', hourAgo).count({ n: '*' }).first();
+      const already = await ctx.db('wallet_ledger').where({ user_id: userId, kind: 'salary', ref: b.flightKey }).first();
+      if (!already && Number(recent?.n ?? 0) >= MAX_PAID_FLIGHTS_PER_HOUR) { paid.push({ userId, amount: 0, balance: await balanceOf(ctx.db, userId), refused: 'too many paid flights this hour' }); continue; }
+      const r2 = await applyLedger(ctx.db, userId, b.amount, 'salary', b.flightKey, { lines: b.lines ?? [], facts: b.facts ?? {} });
+      if (r2.ok) paid.push({ userId, amount: r2.duplicate ? 0 : b.amount, balance: r2.balance, duplicate: r2.duplicate });
+      if (r2.ok && !r2.duplicate) await audit(ctx.db, req, { action: 'ingame.salary', category: 'game', targetType: 'user', targetId: userId, targetLabel: u.username, details: { flightKey: b.flightKey, amount: b.amount, facts: b.facts ?? {} } }, u);
+    }
+    res.json({ paid });
+  });
+  // Game server: Developer grants/removes credits or items. The actor's rank is re-checked in the DB.
+  r.post('/game/grant', async (req, res) => {
+    serverKeyOk(req);
+    const b = parse(z.object({ actorUserId: z.number().int().positive(), targetUserId: z.number().int().positive(), credits: z.number().int().min(-1_000_000).max(1_000_000).optional(), item: z.string().max(48).optional(), remove: z.boolean().optional() }), req.body);
+    const actor = await ctx.db<UserRow>('users').where({ id: b.actorUserId }).first();
+    const target = await ctx.db<UserRow>('users').where({ id: b.targetUserId }).first();
+    if (!actor || actor.role !== 'DEVELOPER') { if (actor) await audit(ctx.db, req, { action: 'ingame.wallet.denied', category: 'game', targetType: 'user', targetId: b.targetUserId, details: { credits: b.credits, item: b.item } }, actor); throw new HttpError(403, 'Only the Developer can grant credits or items.', 'forbidden'); }
+    if (!target) throw new HttpError(404, 'Unknown user');
+    let out;
+    try { out = await grant(ctx.db, target.id, { credits: b.credits, item: b.item, remove: b.remove }, actor.username); } catch { throw new HttpError(400, 'Unknown item.', 'unknown_item'); }
+    await audit(ctx.db, req, { action: 'ingame.wallet.grant', category: 'game', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { credits: out.credits ?? 0, item: b.item ?? null, remove: !!b.remove, balance: out.balance } }, actor);
+    res.json({ ok: true, ...out });
   });
 
   // In-game admin actions reported by a game server (authenticated by X-Game-Server-Key).

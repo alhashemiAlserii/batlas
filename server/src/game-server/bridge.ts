@@ -10,6 +10,9 @@ export interface VerifiedUser {
   permissions: Permission[];
   avatarUrl: string;
   outfit?: Outfit;
+  owned?: string[];
+  ownsAll?: boolean;
+  balance?: number;
 }
 
 export interface AuditCall {
@@ -32,7 +35,13 @@ export interface SiteBridge {
   audit(entry: AuditCall): Promise<void>;
   /** Account ban on the website. The site re-checks the actor's rank (players.ban + canActOn) in its own DB. */
   ban?(entry: BanCall): Promise<{ ok: boolean; reason?: string }>;
+  /** Economy (optional so test bridges can leave it out). */
+  owned?(userId: number): Promise<{ owned: string[]; ownsAll: boolean; balance: number } | null>;
+  salary?(entry: SalaryCall): Promise<{ paid: { userId: number; amount: number; balance: number; duplicate?: boolean; refused?: string }[] } | null>;
+  grant?(entry: GrantCall): Promise<{ ok: boolean; reason?: string; balance?: number; credits?: number; item?: string; removed?: boolean }>;
 }
+export interface SalaryCall { flightKey: string; userIds: number[]; amount: number; lines: [string, number][]; facts: Record<string, unknown> }
+export interface GrantCall { actorUserId: number; targetUserId: number; credits?: number; item?: string; remove?: boolean }
 
 /** Talks to the site over HTTP with the shared GAME_SERVER_KEY, so the game server can run anywhere. */
 export function httpSiteBridge(siteUrl: string, key: string): SiteBridge {
@@ -56,6 +65,9 @@ export function httpSiteBridge(siteUrl: string, key: string): SiteBridge {
         permissions: d.permissions,
         avatarUrl: d.user.avatarUrl ?? '',
         outfit: validOutfit(d.outfit) ?? undefined,
+        owned: Array.isArray(d.owned) ? d.owned.map(String) : [],
+        ownsAll: !!d.ownsAll,
+        balance: Number(d.balance ?? 0),
       };
     },
     async audit(entry) {
@@ -74,6 +86,21 @@ export function httpSiteBridge(siteUrl: string, key: string): SiteBridge {
       });
       const d: any = await r.json().catch(() => ({}));
       return r.ok ? { ok: true } : { ok: false, reason: d.error ?? `ban failed (${r.status})` };
+    },
+    async owned(userId) {
+      const r = await fetch(`${base}/api/game/owned`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-game-server-key': key }, body: JSON.stringify({ userId }) });
+      if (!r.ok) return null;
+      const d: any = await r.json();
+      return { owned: (d.owned ?? []).map(String), ownsAll: !!d.ownsAll, balance: Number(d.balance ?? 0) };
+    },
+    async salary(entry) {
+      const r = await fetch(`${base}/api/game/salary`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-game-server-key': key }, body: JSON.stringify(entry) });
+      return r.ok ? ((await r.json()) as any) : null;
+    },
+    async grant(entry) {
+      const r = await fetch(`${base}/api/game/grant`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-game-server-key': key }, body: JSON.stringify(entry) });
+      const d: any = await r.json().catch(() => ({}));
+      return r.ok ? { ok: true, ...d } : { ok: false, reason: d.error ?? `grant failed (${r.status})` };
     },
   };
 }

@@ -11,6 +11,8 @@
  *   written to the website audit log.
  */
 import { DEFAULT_OUTFIT, validOutfit, type Outfit } from './outfits.js';
+import { CLASS_IDS, ITEM_BY_KEY, outfitAllowed } from './shop.js';
+import { newFlight, trackSnapshot, salaryFor, type Flight } from './flight-tracker.js';
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -54,6 +56,7 @@ interface Client {
   lastChat: number;
   outfit: Outfit;
   lastOutfit: number;
+  klass: string | null; // class picked for the next flight (ownership checked with the website)
 }
 
 interface RoomConfig { difficulty: (typeof DIFFICULTIES)[number]; payout: number; maxPlayers: number }
@@ -72,6 +75,8 @@ interface Room {
   config: RoomConfig;
   devItems: Set<string>; // ids of Developer-tier pickups spawned in this room
   seq: number;
+  flight: Flight | null; // server-side record of the current flight (salaries)
+  flightSeq: number;
 }
 
 type Send = (c: Client, msg: unknown) => void;
@@ -104,10 +109,13 @@ export interface GameServerOptions {
   isMaintenance?: MaintenanceCheck;
   /** how often live rooms are checked for maintenance being switched on (ms) */
   maintenancePollMs?: number;
+  /** clock (tests) */
+  now?: () => number;
 }
 
 export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions) {
   const { bridge } = opts;
+  const now = opts.now ?? Date.now;
   const log = opts.log ?? ((m: string) => console.log(`[game] ${m}`));
   const isMaintenance = opts.isMaintenance ?? envMaintenance;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
@@ -119,7 +127,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   const send: Send = (c, msg) => {
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit });
+  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit, klass: c.klass });
   // Hidden Developers are left out of everyone else's player list.
   const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, hour: r.hour, locked: r.locked, config: r.config, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
   const broadcastRoom = (r: Room, except?: Client) => { for (const c of r.clients.values()) if (c !== except) send(c, roomInfo(r, c)); };
@@ -237,6 +245,34 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   }
 
   /** Validates and applies an admin command. Returns an error string or null on success. */
+  /** What this account owns right now (asked from the website each time: purchases can happen mid-session). */
+  async function ownsOf(c: Client): Promise<(k: string) => boolean> {
+    if (isDev(c)) return () => true; // the Developer owns everything
+    const o = bridge.owned ? await bridge.owned(c.user!.userId).catch(() => null) : null;
+    const keys = new Set(o?.owned ?? c.user!.owned ?? []);
+    for (const i of ITEM_BY_KEY.values()) if (i.price === 0) keys.add(i.key);
+    return (k: string) => !!o?.ownsAll || keys.has(k);
+  }
+  async function paySalaries(r: Room, f: Flight, w: any) {
+    f.paid = true;
+    const sal = salaryFor(f, w, r.config.payout);
+    const present = [...r.clients.values()].filter((o) => o.user && !o.hidden);
+    const crew = present.filter((o) => f.crew.get(o.cid) === o.user!.userId);
+    for (const o of present) if (!crew.includes(o)) send(o, { t: 'salary', amount: 0, reason: 'You joined after takeoff, so this flight is not on your payslip.' });
+    if (sal.rejected || !crew.length) {
+      for (const o of crew) send(o, { t: 'salary', amount: 0, reason: `No salary: ${sal.rejected ?? 'no crew'}.`, facts: sal.facts });
+      const host = r.clients.get(r.hostCid);
+      if (host?.user) void audit(host, 'salary.rejected', { flight: f.key, reason: sal.rejected, facts: sal.facts });
+      return;
+    }
+    const res = bridge.salary ? await bridge.salary({ flightKey: f.key, userIds: crew.map((o) => o.user!.userId), amount: sal.amount, lines: sal.lines, facts: sal.facts }).catch(() => null) : null;
+    for (const o of crew) {
+      const p = res?.paid.find((x) => x.userId === o.user!.userId);
+      send(o, p && !p.refused ? { t: 'salary', amount: p.amount, balance: p.balance, lines: sal.lines, duplicate: !!p.duplicate, facts: sal.facts }
+        : { t: 'salary', amount: 0, reason: p?.refused ? `No salary: ${p.refused}.` : 'The wallet service did not answer; this flight was not paid.', facts: sal.facts });
+    }
+  }
+
   async function adminCommand(c: Client, cmd: string, args: any): Promise<string | null> {
     const r = c.room;
     args = args && typeof args === 'object' ? args : {};
@@ -312,6 +348,21 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         send(target!, { t: 'muted', minutes, by: c.user!.username });
         broadcastRoom(r);
         await audit(c, minutes ? 'mute' : 'unmute', { minutes }, target);
+        return null;
+      }
+      case 'wallet': {
+        // Developer only: grant/remove credits, grant/remove shop items (the website re-checks the rank and logs it)
+        if (!isDev(c) || !can(c, 'dev.commands')) { await audit(c, 'wallet.denied', { credits: args.credits, item: args.item }, target); return 'Only the Developer can grant credits or items.'; }
+        if (!target?.user) return 'Pick a player.';
+        if (!bridge.grant) return 'Wallet service unavailable.';
+        const credits = args.credits == null ? undefined : Math.trunc(Number(args.credits));
+        if (credits !== undefined && (!Number.isFinite(credits) || Math.abs(credits) > 1_000_000)) return 'Bad amount.';
+        const item = args.item == null ? undefined : String(args.item);
+        if (item !== undefined && !ITEM_BY_KEY.has(item)) return 'Unknown item.';
+        const g = await bridge.grant({ actorUserId: c.user!.userId, targetUserId: target.user.userId, credits, item, remove: !!args.remove });
+        if (!g.ok) return g.reason ?? 'Refused.';
+        send(target, { t: 'wallet', balance: g.balance, by: c.user!.username, credits: g.credits ?? 0, item: g.item ?? null, removed: !!g.removed });
+        if (item && args.remove && target.klass && item === `class:${target.klass}`) { target.klass = null; broadcastRoom(r!); }
         return null;
       }
       case 'freeze': {
@@ -517,7 +568,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         return send(c, { t: 'pong', at: m.at });
       case 'create': {
         { const mm = isDev(c) ? null : await maintenanceMsg(); if (mm) return send(c, { t: 'maintenance', message: mm }); }
-        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0 };
+        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0, flight: null, flightSeq: 0 };
         rooms.set(room.code, room);
         log(`room ${room.code} created by ${c.user.username}`);
         return joinRoom(c, room, { created: true });
@@ -569,7 +620,15 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'world':
         if (!r || r.hostCid !== c.cid) return; // only the host's simulation counts
         if (raw.length > 48 * 1024) return;
-        if (m.w && typeof m.w === 'object') { r.route = typeof m.w.route === 'string' ? m.w.route.slice(0, 8) : r.route; r.phase = typeof m.w.ph === 'string' ? m.w.ph.slice(0, 16) : r.phase; }
+        if (m.w && typeof m.w === 'object') {
+          r.route = typeof m.w.route === 'string' ? m.w.route.slice(0, 8) : r.route; r.phase = typeof m.w.ph === 'string' ? m.w.ph.slice(0, 16) : r.phase;
+          const seed = Number(m.w.seed);
+          if (Number.isFinite(seed) && (!r.flight || r.flight.seed !== seed || (r.flight.paid && m.w.ph === 'boarding'))) r.flight = newFlight(r.code, seed, ++r.flightSeq);
+          if (r.flight) {
+            const crewNow = new Map([...r.clients.values()].filter((o) => o.user && !o.hidden).map((o) => [o.cid, o.user!.userId] as [string, number]));
+            if (trackSnapshot(r.flight, m.w, now(), crewNow) === 'results') void paySalaries(r, r.flight, m.w);
+          }
+        }
         return broadcast(r, { t: 'world', w: m.w }, c);
       case 'pilot': {
         if (!r || c.hidden) return;
@@ -585,9 +644,22 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         const o = validOutfit(m.outfit);
         if (!o) return send(c, { t: 'error', code: 'bad_outfit', message: 'Unknown outfit.' });
         if (Date.now() - c.lastOutfit < 400) return;
-        c.lastOutfit = Date.now(); c.outfit = o;
+        c.lastOutfit = Date.now();
+        if (!outfitAllowed(o, await ownsOf(c))) { void audit(c, 'outfit.denied', { outfit: o }); return send(c, { t: 'error', code: 'not_owned', message: 'Buy that item in the shop first.' }); }
+        c.outfit = o;
         if (r && !c.hidden) broadcast(r, { t: 'outfit', cid: c.cid, outfit: o });
         return send(c, { t: 'outfit', cid: c.cid, outfit: o });
+      }
+      case 'class': {
+        // class pick for the next flight: must be OWNED (checked with the website) and picked before takeoff
+        const id = m.id == null ? null : String(m.id);
+        if (id !== null && !CLASS_IDS.includes(id)) { void audit(c, 'class.denied', { id: id.slice(0, 32), reason: 'unknown' }); return send(c, { t: 'error', code: 'bad_class', message: 'Unknown class.' }); }
+        if (r && r.flight?.airborneAt && !r.flight.resultsAt) return send(c, { t: 'error', code: 'class_locked', message: 'Pick your class before takeoff.' });
+        if (id && !(await ownsOf(c))(`class:${id}`)) { void audit(c, 'class.denied', { id, reason: 'not_owned' }); return send(c, { t: 'error', code: 'not_owned', message: 'Buy that class in the shop first.' }); }
+        c.klass = id;
+        send(c, { t: 'class', cid: c.cid, id });
+        if (r) broadcastRoom(r);
+        return;
       }
       case 'crew': {
         // lobby role pick: pilot / copilot / cabin / cargo (null = no preference)
@@ -630,7 +702,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   }
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0, outfit: { ...DEFAULT_OUTFIT }, lastOutfit: 0 };
+    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0, outfit: { ...DEFAULT_OUTFIT }, lastOutfit: 0, klass: null };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4003, 'auth_timeout'); }, 10_000);
     ws.on('message', (data) => {
