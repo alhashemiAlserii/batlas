@@ -1,4 +1,5 @@
 // Shared helpers for every page. No inline scripts: CSP is script-src 'self'.
+import './pwa.js';
 
 /** Safe element builder: strings become text nodes, never HTML. */
 export function h(tag, attrs = {}, ...children) {

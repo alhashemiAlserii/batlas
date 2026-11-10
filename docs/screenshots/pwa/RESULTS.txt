@@ -1,0 +1,73 @@
+PWA e2e 2026-11-10T13:10:13.876Z: 72 passed, 0 failed
+PASS Chromium desktop: manifest linked
+PASS Chromium desktop: manifest name/display/start_url
+PASS Chromium desktop: apple-mobile-web-app-capable
+PASS Chromium desktop: service worker registered (scope /, activated)
+PASS Chromium desktop: page is controlled by the worker after reload
+PASS Chromium desktop: Chromium installability errors: none
+PASS Chromium desktop: /api/me #1 not served by the service worker (status 200, cache-control no-store)
+PASS Chromium desktop: /api/me #2 not served by the service worker (status 200, cache-control no-store)
+PASS Chromium desktop: positive control: /css/site.css IS served by the worker
+PASS Chromium desktop: cache holds 15 shell entries, none for /api /media /play /ws /admin (ok)
+PASS Chromium desktop: /play/sky-crew not served by the worker
+PASS Chromium desktop: nothing from /play cached after visiting Sky Crew
+PASS Chromium desktop: offline navigation to an uncached page shows the offline page
+PASS Chromium desktop: cached homepage opens offline
+PASS Chromium desktop: /api offline is a network error (never a cached answer)
+PASS Chromium iPhone: manifest linked
+PASS Chromium iPhone: manifest name/display/start_url
+PASS Chromium iPhone: apple-mobile-web-app-capable
+PASS Chromium iPhone: service worker registered (scope /, activating)
+PASS Chromium iPhone: page is controlled by the worker after reload
+PASS Chromium iPhone: Chromium installability errors: none
+PASS Chromium iPhone: /api/me #1 not served by the service worker (status 200, cache-control no-store)
+PASS Chromium iPhone: /api/me #2 not served by the service worker (status 200, cache-control no-store)
+PASS Chromium iPhone: positive control: /css/site.css IS served by the worker
+PASS Chromium iPhone: cache holds 15 shell entries, none for /api /media /play /ws /admin (ok)
+PASS Chromium iPhone: /play/sky-crew not served by the worker
+PASS Chromium iPhone: nothing from /play cached after visiting Sky Crew
+PASS Chromium iPhone: offline navigation to an uncached page shows the offline page
+PASS Chromium iPhone: cached homepage opens offline
+PASS Chromium iPhone: /api offline is a network error (never a cached answer)
+PASS WebKit iPhone: manifest linked
+PASS WebKit iPhone: manifest name/display/start_url
+PASS WebKit iPhone: apple-mobile-web-app-capable
+PASS WebKit iPhone: service worker registered (scope /, activated)
+PASS WebKit iPhone: page is controlled by the worker after reload
+PASS WebKit iPhone: /api/me #1 not served by the service worker (status 200, cache-control no-store)
+PASS WebKit iPhone: /api/me #2 not served by the service worker (status 200, cache-control no-store)
+PASS WebKit iPhone: positive control: /css/site.css IS served by the worker
+PASS WebKit iPhone: cache holds 15 shell entries, none for /api /media /play /ws /admin (ok)
+PASS WebKit iPhone: /play/sky-crew not served by the worker
+PASS WebKit iPhone: nothing from /play cached after visiting Sky Crew
+PASS WebKit iPhone: offline navigation to an uncached page shows the offline page
+PASS WebKit iPhone: cached homepage opens offline
+PASS WebKit iPhone: /api offline is a network error (never a cached answer)
+PASS WebKit iPad: manifest linked
+PASS WebKit iPad: manifest name/display/start_url
+PASS WebKit iPad: apple-mobile-web-app-capable
+PASS WebKit iPad: service worker registered (scope /, activated)
+PASS WebKit iPad: page is controlled by the worker after reload
+PASS WebKit iPad: /api/me #1 not served by the service worker (status 200, cache-control no-store)
+PASS WebKit iPad: /api/me #2 not served by the service worker (status 200, cache-control no-store)
+PASS WebKit iPad: positive control: /css/site.css IS served by the worker
+PASS WebKit iPad: cache holds 15 shell entries, none for /api /media /play /ws /admin (ok)
+PASS WebKit iPad: /play/sky-crew not served by the worker
+PASS WebKit iPad: nothing from /play cached after visiting Sky Crew
+PASS WebKit iPad: offline navigation to an uncached page shows the offline page
+PASS WebKit iPad: cached homepage opens offline
+PASS WebKit iPad: /api offline is a network error (never a cached answer)
+PASS WebKit desktop: manifest linked
+PASS WebKit desktop: manifest name/display/start_url
+PASS WebKit desktop: apple-mobile-web-app-capable
+PASS WebKit desktop: service worker registered (scope /, activating)
+PASS WebKit desktop: page is controlled by the worker after reload
+PASS WebKit desktop: /api/me #1 not served by the service worker (status 200, cache-control no-store)
+PASS WebKit desktop: /api/me #2 not served by the service worker (status 200, cache-control no-store)
+PASS WebKit desktop: positive control: /css/site.css IS served by the worker
+PASS WebKit desktop: cache holds 15 shell entries, none for /api /media /play /ws /admin (ok)
+PASS WebKit desktop: /play/sky-crew not served by the worker
+PASS WebKit desktop: nothing from /play cached after visiting Sky Crew
+PASS WebKit desktop: offline navigation to an uncached page shows the offline page
+PASS WebKit desktop: cached homepage opens offline
+PASS WebKit desktop: /api offline is a network error (never a cached answer)
