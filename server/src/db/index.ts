@@ -54,7 +54,8 @@ export function createDb(target: string, opts: { schema?: string } = {}): Knex {
     const wantSsl = process.env.DATABASE_SSL ? process.env.DATABASE_SSL === 'true' : mode ? mode !== 'disable' : !localHost;
     return knexFactory({
       client: 'pg',
-      connection: { connectionString: target, ssl: wantSsl ? { rejectUnauthorized: false } : false },
+      connection: { connectionString: target, ssl: wantSsl ? { rejectUnauthorized: false } : false, connectionTimeoutMillis: 15000 },
+      acquireConnectionTimeout: 20000,
       searchPath: opts.schema ? [opts.schema] : undefined,
       pool: { min: 0, max: Number(process.env.DATABASE_POOL_MAX ?? 5) },
     });
