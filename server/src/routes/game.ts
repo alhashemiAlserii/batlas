@@ -11,6 +11,7 @@
  *  4. Privileged actions (weather, emergencies, spawning...) are validated here and audit-logged.
  *     Stage 1 stubs return ok without touching a live game.
  */
+import { parseStoredOutfit, validOutfit } from '../game-server/outfits.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Ctx, UserRow } from '../lib/types.js';
@@ -50,7 +51,21 @@ export function gameRoutes(ctx: Ctx) {
     if (!u || u.banned) return res.status(403).json({ valid: false, banned: !!u?.banned });
     // Maintenance: only the Developer can join game servers while it's on.
     if (await maintenanceBlocks(ctx.db, u.role)) { const m = await getMaintenance(ctx.db); return res.status(503).json({ valid: false, code: 'maintenance', message: m.message || null }); }
-    res.json({ valid: true, user: publicUser(u), role: u.role, permissions: permissionsFor(u.role), game: row.game_slug });
+    const prof = await ctx.db('game_profiles').where({ user_id: u.id, game_slug: 'sky-crew' }).first();
+    res.json({ valid: true, user: publicUser(u), role: u.role, permissions: permissionsFor(u.role), game: row.game_slug, outfit: parseStoredOutfit(prof?.outfit) });
+  });
+
+  // Sky Crew outfit, saved per account (validated against the server whitelist).
+  r.get('/game/sky-crew/outfit', requireAuth, async (req, res) => {
+    const prof = await ctx.db('game_profiles').where({ user_id: req.user!.id, game_slug: 'sky-crew' }).first();
+    res.json({ outfit: parseStoredOutfit(prof?.outfit), saved: !!prof });
+  });
+  r.put('/game/sky-crew/outfit', requireAuth, async (req, res) => {
+    const o = validOutfit(req.body?.outfit);
+    if (!o) throw new HttpError(400, 'Unknown outfit.', 'bad_outfit');
+    const row = { user_id: req.user!.id, game_slug: 'sky-crew', outfit: JSON.stringify(o), updated_at: new Date().toISOString() };
+    await ctx.db('game_profiles').insert(row).onConflict(['user_id', 'game_slug']).merge(['outfit', 'updated_at']);
+    res.json({ ok: true, outfit: o });
   });
 
   // In-game admin actions reported by a game server (authenticated by X-Game-Server-Key).

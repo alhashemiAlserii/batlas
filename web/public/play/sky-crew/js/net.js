@@ -25,6 +25,7 @@ export class Net extends EventTarget {
         const m = JSON.parse(ev.data);
         if (m.t === 'welcome') { clearTimeout(t); this.you = m.you; this.cid = m.you.cid; resolve(); }
         else if (m.t === 'error') { clearTimeout(t); reject(new Error(m.message || m.code)); }
+        else if (m.t === 'maintenance') { clearTimeout(t); const e = new Error(m.message); e.maintenance = true; this.dispatchEvent(new CustomEvent('maintenance', { detail: m })); reject(e); }
       };
     });
     ws.onmessage = (ev) => this.onMsg(JSON.parse(ev.data));
@@ -33,15 +34,15 @@ export class Net extends EventTarget {
   }
 
   onMsg(m) {
-    if (m.t === 'room') { this.room = { code: m.code, hostCid: m.hostCid, pilotCid: m.pilotCid, weather: m.weather, players: m.players, locked: !!m.locked, hidden: m.you ? !!m.hidden : this.room?.hidden || false }; }
+    if (m.t === 'room') { this.room = { code: m.code, hostCid: m.hostCid, pilotCid: m.pilotCid, weather: m.weather, players: m.players, locked: !!m.locked, hour: m.hour, config: m.config, hidden: m.you ? !!m.hidden : this.room?.hidden || false }; }
     if (m.t === 'room_left') this.room = null;
     this.dispatchEvent(new CustomEvent(m.t, { detail: m }));
     this.dispatchEvent(new CustomEvent('any', { detail: m }));
   }
 
   send(msg) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(msg)); }
-  create() { this.send({ t: 'create' }); return this.waitFor('room'); }
-  join(code, { hidden = false } = {}) { this.send({ t: 'join', code, hidden }); return this.waitFor('room', 'error'); }
+  create() { this.send({ t: 'create' }); return this.waitFor('room', ['error', 'maintenance']); }
+  join(code, { hidden = false } = {}) { this.send({ t: 'join', code, hidden }); return this.waitFor('room', ['error', 'maintenance']); }
   rooms() { this.send({ t: 'rooms' }); return this.waitFor('rooms', 'error'); }
   leave() { this.send({ t: 'leave' }); this.room = null; }
   admin(cmd, args) { this.send({ t: 'admin', cmd, args }); return this.waitFor('admin_ok', 'admin_denied'); }
@@ -49,9 +50,10 @@ export class Net extends EventTarget {
     return new Promise((resolve, reject) => {
       const ok = (e) => { cleanup(); resolve(e.detail); };
       const bad = (e) => { cleanup(); reject(new Error(e.detail.reason || e.detail.message || e.detail.code)); };
-      const cleanup = () => { this.removeEventListener(okType, ok); if (errType) this.removeEventListener(errType, bad); };
+      const errs = [errType || []].flat();
+      const cleanup = () => { this.removeEventListener(okType, ok); for (const t of errs) this.removeEventListener(t, bad); };
       this.addEventListener(okType, ok);
-      if (errType) this.addEventListener(errType, bad);
+      for (const t of errs) this.addEventListener(t, bad);
       setTimeout(() => { cleanup(); reject(new Error('Timed out.')); }, 8000);
     });
   }

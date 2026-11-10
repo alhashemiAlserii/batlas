@@ -7,6 +7,8 @@ import { Audio } from './audio.js';
 import { makeCharacter, animateCharacter, nameTag, RANK_COLORS } from './characters.js';
 import { Net } from './net.js';
 import * as UI from './ui.js';
+import { Gadgets } from './gadgets.js';
+import { buildPanel } from './devpanel.js';
 
 const $ = (s) => document.querySelector(s);
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 && /iPad|iPhone|Android|Mobile/i.test(navigator.userAgent);
@@ -49,11 +51,12 @@ sim.onRoute = () => refreshRouteUi();
 // ---------------- player ----------------
 const R = 0.3, H = 1.7, EYE = 1.58, STEP = 0.45;
 const SPAWN = new THREE.Vector3(7.5, -GEAR_H, 17.5); // on the apron, behind and right of the aircraft, facing the rear door
-const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, cannon: false, moving: false };
+const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, moving: false, frozen: false, flying: false };
 let myAvatar = makeCharacter({ uniform: 'cabin' });
 ship.plane.add(myAvatar);
 let myCrew = null; // lobby pick: pilot | copilot | cabin | cargo (solo: null = do everything)
-function dressMe() { ship.plane.remove(myAvatar); myAvatar = makeCharacter({ uniform: myCrew || 'pilot', hair: 'short' }); ship.plane.add(myAvatar); }
+function dressMe() { ship.plane.remove(myAvatar); myAvatar = makeCharacter({ uniform: myCrew || 'pilot', hair: 'short' }); ship.plane.add(myAvatar); if (gadgets) gadgets.rebuild(myId()); }
+let gadgets = null; // Developer gadgets (created once the remote-player table exists)
 let myCid = 'solo', myRole = null, playing = false, paused = false, seenSeed = sim.seed, resultsShown = false;
 const myId = () => (net.inRoom ? net.cid : 'solo');
 
@@ -61,7 +64,7 @@ const myId = () => (net.inRoom ? net.cid : 'solo');
 const keys = new Set();
 const touch = { mx: 0, my: 0, thr: 0 };
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
   if (e.code === 'F2') { e.preventDefault(); toggleAdmin(); return; }
   if (!playing) return;
   if (e.code === 'Escape') { togglePause(); return; }
@@ -70,6 +73,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyQ') throwHeld();
   if (e.code === 'KeyV') me.third = !me.third;
+  if (e.code === 'Enter' && net.inRoom) { e.preventDefault(); openChat(); return; }
+  if (me.mode === 'walk' && gadgets.tool() && (e.code === 'KeyF' || e.code === 'KeyT')) gadgets.fire(e.code === 'KeyT');
   if (e.code === 'KeyX' && (me.mode === 'pilot' || me.mode === 'copilot')) leaveSeat();
   if (me.mode === 'pilot' || me.mode === 'copilot') {
     const sys = { KeyL: 'lights', KeyB: 'seatbelt', KeyN: 'announce', KeyG: 'gear' }[e.code];
@@ -84,9 +89,10 @@ let dragLook = null;
 canvas.addEventListener('mousedown', (e) => {
   if (!playing || paused || isTouch) return;
   if (document.pointerLockElement !== canvas) { try { const p = canvas.requestPointerLock(); if (p?.catch) p.catch(() => {}); } catch { /* unsupported */ } dragLook = { x: e.clientX, y: e.clientY }; return; }
-  if (e.button === 0) fireCannon();
+  if (e.button === 0 || e.button === 2) fireGadget(e.button === 2);
 });
 addEventListener('mouseup', () => { dragLook = null; });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('mousemove', (e) => {
   if (!playing || paused) return;
   if (document.pointerLockElement === canvas) look(e.movementX, e.movementY, 0.0022);
@@ -94,7 +100,7 @@ addEventListener('mousemove', (e) => {
 });
 document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && playing && !paused && !overlayOpen()) setPaused(true); });
 function look(dx, dy, s) { me.yaw -= dx * s; me.pitch = Math.max(-1.45, Math.min(1.45, me.pitch - dy * s)); }
-const overlayOpen = () => !$('#results').classList.contains('hidden') || !$('#admin').classList.contains('hidden');
+const overlayOpen = () => !$('#results').classList.contains('hidden') || !$('#admin').classList.contains('hidden') || !$('#chatBox').classList.contains('hidden');
 
 // touch: joystick + look + buttons
 function setupTouch() {
@@ -113,15 +119,21 @@ function setupTouch() {
   canvas.addEventListener('pointerup', lend); canvas.addEventListener('pointercancel', lend);
   const tap = (id, fn) => $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); if (playing && !paused) fn(); });
   tap('#tE', interact);
-  tap('#tJ', () => { keys.add('Space'); setTimeout(() => keys.delete('Space'), 120); });
+  // jump: hold (jetpack / noclip fly while held)
+  $('#tJ').addEventListener('pointerdown', (e) => { e.preventDefault(); if (playing && !paused) keys.add('Space'); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('#tJ').addEventListener(ev, () => keys.delete('Space'));
   tap('#tV', () => { me.third = !me.third; });
   tap('#tLeave', leaveSeat);
   tap('#tGear', () => systemAct('gear'));
   const hold = (id, v) => { const b = $(id); b.addEventListener('pointerdown', () => { touch.thr = v; }); b.addEventListener('pointerup', () => { touch.thr = 0; }); b.addEventListener('pointercancel', () => { touch.thr = 0; }); };
   hold('#tThrUp', 1); hold('#tThrDn', -1);
-  const fire = UI.el('button', { id: 'tF', type: 'button', class: 'hidden' }, '💦');
-  $('#tbtns').prepend(fire);
-  fire.addEventListener('pointerdown', (e) => { e.preventDefault(); fireCannon(); });
+  // Developer gadget trigger (+ mode switch for the Shrink/Grow Ray); shown only while a tool is equipped
+  const fire = UI.el('button', { id: 'tF', type: 'button', class: 'hidden', 'aria-label': 'Use gadget' }, '🔫');
+  const alt = UI.el('button', { id: 'tAlt', type: 'button', class: 'hidden', 'aria-label': 'Switch gadget mode' }, '🔁');
+  $('#tbtns').prepend(fire, alt);
+  fire.addEventListener('pointerdown', (e) => { e.preventDefault(); fireGadget(false); });
+  alt.addEventListener('pointerdown', (e) => { e.preventDefault(); fireGadget(true); });
+  tap('#tChat', openChat);
 }
 if (isTouch) setupTouch();
 
@@ -156,14 +168,24 @@ function updatePlayer(dt) {
   if (keys.has('KeyD') || keys.has('ArrowRight')) fx += 1;
   fx += touch.mx; fz += touch.my;
   const L = Math.hypot(fx, fz); if (L > 1) { fx /= L; fz /= L; }
-  const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4;
+  if (me.frozen || gadgets.frozenT > 0) { me.vel.set(0, Math.min(0, me.vel.y), 0); fx = 0; fz = 0; }
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4) * gadgets.speedMul();
   me.sprint = speed > 5 && L > 0.1;
   const s = Math.sin(me.yaw), c = Math.cos(me.yaw);
   const wx = (fx * c + fz * s) * speed, wz = (-fx * s + fz * c) * speed;
   const a = Math.min(1, dt * (me.onGround ? 14 : 3));
   me.vel.x += (wx - me.vel.x) * a; me.vel.z += (wz - me.vel.z) * a;
-  if (keys.has('Space') && me.onGround) { me.vel.y = 4.3; me.onGround = false; }
-  me.vel.y -= 9.8 * dt;
+  // Developer abilities (equip state comes from the server): noclip ghost-flight, jetpack, super jump
+  if (gadgets.has('noclip') && !me.frozen) {
+    const up = (keys.has('Space') ? 1 : 0) - (keys.has('KeyC') || keys.has('ControlLeft') ? 1 : 0);
+    me.pos.x += me.vel.x * dt; me.pos.z += me.vel.z * dt; me.pos.y += up * speed * dt; me.vel.y = 0;
+    me.pos.y = Math.max(-GEAR_H - 0.2, me.pos.y); me.onGround = false; me.flying = up !== 0; me.moving = L > 0.1;
+    return;
+  }
+  me.flying = false;
+  if (gadgets.has('jetpack') && keys.has('Space') && !me.frozen) { me.vel.y = Math.min(5.5, me.vel.y + 16 * dt); me.onGround = false; me.flying = true; }
+  else if (keys.has('Space') && me.onGround) { me.vel.y = 4.3 * gadgets.jumpMul(); me.onGround = false; }
+  me.vel.y -= (gadgets.has('super_jump') && me.vel.y < 0 ? 7 : 9.8) * dt; // super jump: floaty fall
   if (sim.turb > 0.3 && me.onGround && Math.random() < sim.turb * dt * 2) { me.vel.x += (Math.random() - 0.5) * sim.turb * 2.5; me.vel.z += (Math.random() - 0.5) * sim.turb * 2.5; }
   me.moving = L > 0.1;
   const cols = solids();
@@ -221,7 +243,7 @@ function findTarget() {
     const chest = p.mesh.position.clone(); chest.y += p.state === 'seated' ? 0.7 : 1.0;
     consider(chest, 2.0, { kind: 'grabPax', pax: p, prio: 2.2, label: 'Pick up the passenger (they will hate it)' });
   }
-  if (!held) for (const it of sim.items.values()) { if (!it.heldBy) consider(it.mesh.position, 2.4, { kind: 'grab', item: it, label: `Pick up ${ITEM_DEFS[it.type].label}` }); }
+  if (!held) for (const it of sim.items.values()) { if (!it.heldBy && (!ITEM_DEFS[it.type].gadget || net.you?.role === 'DEVELOPER')) consider(it.mesh.position, 2.4, { kind: 'grab', item: it, label: ITEM_DEFS[it.type].gadget ? `Equip ${ITEM_DEFS[it.type].label.replace(' case', '')}` : `Pick up ${ITEM_DEFS[it.type].label}` }); }
   for (const ip of ship.interact) {
     const t = { ...ip };
     if (ip.kind === 'door') t.label = `${ship.doors[ip.door].open ? 'Close' : 'Open'} the ${ip.label}`;
@@ -237,6 +259,7 @@ function interact() {
   const t = findTarget(), held = heldItem();
   if (!t) return;
   if (t.kind === 'leave') return leaveSeat();
+  if (t.kind === 'grab' && ITEM_DEFS[t.item.type].gadget) { audio.play('pickup'); net.admin('equip', { item: t.item.type }).then(() => act({ k: 'grab', id: t.item.id })).catch((e) => UI.toast(e.message, 'warn')); return; }
   if (t.kind === 'grab') { audio.play('pickup'); act({ k: 'grab', id: t.item.id }); return; }
   if (t.kind === 'drop') return dropHeld(0.9, 0);
   if (t.kind === 'serve') { if (t.ok) { audio.play('serve'); act({ k: 'serve', pax: t.pax.id, item: held?.id || null }); } else UI.toast(t.label); return; }
@@ -285,7 +308,7 @@ function dropPax(dist, speed) {
 function act(a) {
   if (net.inRoom && !net.isHost) {
     net.send({ t: 'act', a });
-    if (a.k === 'grab') { const it = sim.items.get(a.id); if (it && !it.heldBy) it.heldBy = myId(); }
+    if (a.k === 'grab') { const it = sim.items.get(a.id); if (it && !it.heldBy && !ITEM_DEFS[it.type].gadget) it.heldBy = myId(); }
     if (a.k === 'grabPax') { const p = sim.pax.find((q) => q.id === a.id); if (p && !p.carriedBy && !heldPax() && !heldItem()) { p.carriedBy = myId(); p.state = 'carried'; p.predictT = 0.6; } }
     if (a.k === 'dropPax') { const p = sim.pax.find((q) => q.id === a.id); if (p) { p.carriedBy = null; p.state = 'thrown'; p.mesh.position.set(...a.p); p.target = p.mesh.position.clone(); p.predictT = 0.3; } }
     if (a.k === 'drop') { const it = sim.items.get(a.id); if (it) { it.heldBy = null; it.mesh.position.set(...a.p); it.target = { p: it.mesh.position.clone(), q: it.mesh.quaternion.clone() }; } }
@@ -297,7 +320,12 @@ const holderOf = (cid) => [...sim.items.values()].find((i) => i.heldBy === cid);
 function applyAct(cid, a) {
   if (!a || typeof a !== 'object') return;
   switch (a.k) {
-    case 'grab': if (!holderOf(cid) && !sim.carrierOf(cid)) sim.grab(String(a.id), cid); break;
+    case 'grab': {
+      const it = sim.items.get(String(a.id));
+      // gadget cases: only a server-verified Developer (rank comes from the server's room list) can take one; it turns into equipped gear
+      if (it && ITEM_DEFS[it.type].gadget) { if (roleOf(cid) === 'DEVELOPER') sim.removeItem(it.id); break; }
+      if (!holderOf(cid) && !sim.carrierOf(cid)) sim.grab(String(a.id), cid); break;
+    }
     case 'grabPax': if (!holderOf(cid)) sim.grabPax(Number(a.id), cid); break;
     case 'dropPax': if (Array.isArray(a.p) && a.p.length === 3 && a.p.every(Number.isFinite)) sim.dropPax(Number(a.id), cid, a.p.map(Number), Array.isArray(a.v) ? a.v.map(Number) : [0, 0, 0]); break;
     case 'drop': if (Array.isArray(a.p) && a.p.length === 3) sim.drop(String(a.id), cid, a.p.map(Number), Array.isArray(a.v) ? a.v.map(Number) : [0, 0, 0]); break;
@@ -362,10 +390,29 @@ const amPilot = () => me.mode === 'pilot' && (!net.inRoom || net.room?.pilotCid 
 const someonePilots = () => (net.inRoom ? !!net.room?.pilotCid : me.mode === 'pilot');
 
 // ---------------- Wave Cannon (fictional Developer gear) ----------------
-function fireCannon() {
-  if (!me.cannon || heldItem() || me.mode === 'pilot' || !net.inRoom) return;
-  const o = eyePos(), d = lookDir();
-  net.send({ t: 'admin', cmd: 'fire', args: { o: [o.x, o.y, o.z], d: [d.x, d.y, d.z] } });
+const roleOf = (cid) => (cid === myId() ? net.you?.role : net.room?.players?.find((p) => p.cid === cid)?.role) || 'PLAYER';
+function fireGadget(alt) {
+  if (heldItem() || heldPax() || me.mode !== 'walk' || !net.inRoom) return false;
+  return gadgets.fire(alt);
+}
+/** What the gadget is pointed at: nearest passenger / item / player along the aim ray, plus the first solid point and a floor spot (teleport). */
+function aim(o, d) {
+  let best = null, bd = 40;
+  const test = (c, r, target) => { const t = c.clone().sub(o).dot(d); if (t < 0.2 || t > bd) return; const off = o.clone().addScaledVector(d, t).distanceTo(c); if (off < r) { bd = t; best = target; } };
+  for (const p of sim.pax) if (p.state !== 'lost' && p.carriedBy !== myId()) test(p.mesh.position.clone().add(new THREE.Vector3(0, 0.85, 0)), 0.55, { type: 'pax', id: p.id });
+  for (const it of sim.items.values()) if (!it.heldBy) test(it.mesh.position, 0.45, { type: 'item', id: it.id });
+  for (const [cid, r] of remotes) if (r.info.role !== 'DEVELOPER') test(r.mesh.position.clone().add(new THREE.Vector3(0, 0.9, 0)), 0.6, { type: 'player', id: cid });
+  // march to the first solid (walls, seats, floor)
+  const cols = solids(); let p = o.clone(), last = o.clone(); const step = 0.1;
+  for (let t = 0; t < Math.min(bd, 40); t += step) {
+    p = o.clone().addScaledVector(d, t);
+    const inCab = sim.inCabin(p), floor = inCab ? 0 : -GEAR_H;
+    if (p.y < floor || cols.some((c) => p.x > c.min[0] && p.x < c.max[0] && p.y > c.min[1] && p.y < c.max[1] && p.z > c.min[2] && p.z < c.max[2])) break;
+    last = p;
+  }
+  const hitP = best ? o.clone().addScaledVector(d, bd) : last;
+  const floor = last.clone(); floor.y = sim.inCabin(last) ? 0 : -GEAR_H; if (sim.inCabin(last) && last.y > 1.5) floor.y = 0;
+  return { target: best, p: hitP, floor };
 }
 const splashes = [];
 function splash(o, d) {
@@ -390,6 +437,40 @@ function updateSplashes(dt) {
 
 // ---------------- remote players ----------------
 const remotes = new Map();
+gadgets = new Gadgets({
+  parent: ship.plane, sim, me, myId: () => myId(), eye: () => eyePos(), dir: () => lookDir(), aim,
+  avatarOf: (cid) => (cid === myId() ? myAvatar : remotes.get(cid)?.mesh), isHost: () => sim.host,
+  send: (cmd, args) => net.admin(cmd, args).catch((e) => { if (!/cool/i.test(e.message)) UI.toast(`Gadget: ${e.message}`, 'warn'); }),
+  toast: (m) => UI.toast(m), audio,
+});
+gadgets.splash = splash;
+gadgets.onTeleport = (p) => { if (me.mode !== 'walk') leaveSeat(); me.pos.copy(p); me.vel.set(0, 0, 0); };
+
+// ---------------- room chat (server relays; muted players are refused there) ----------------
+function openChat() {
+  if (!net.inRoom) return;
+  UI.show('#chatBox', true); keys.clear(); document.exitPointerLock?.();
+  const i = $('#chatInput'); i.value = ''; i.focus();
+}
+$('#chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { const t = e.target.value.trim(); if (t) net.send({ t: 'chat', text: t.slice(0, 200) }); UI.show('#chatBox', false); e.preventDefault(); }
+  if (e.key === 'Escape') { UI.show('#chatBox', false); e.preventDefault(); }
+  e.stopPropagation();
+});
+$('#chatInput').addEventListener('blur', () => UI.show('#chatBox', false));
+function chatLine(name, role, text) {
+  const log = $('#chatLog');
+  const line = UI.el('div', { class: 'chatline' }, UI.rankBadge(role), UI.el('b', {}, ` ${name}: `), text);
+  log.append(line); while (log.children.length > 6) log.firstChild.remove();
+  setTimeout(() => line.classList.add('fade'), 12000);
+}
+/** Maintenance screen (server refused us or removed us while maintenance mode is on). */
+function showMaintenance(message) {
+  if (playing) quitToMenu();
+  $('#maintMsg').textContent = message || 'Sky Crew is under maintenance. Please check back soon.';
+  UI.show('#maint', true);
+}
+$('#maintClose').addEventListener('click', () => UI.show('#maint', false));
 function syncRemotes(room) {
   const ids = new Set(room ? room.players.map((p) => p.cid) : []);
   for (const [cid, r] of remotes) if (!ids.has(cid) || cid === myId() || r.crew !== (room?.players.find((p) => p.cid === cid)?.crew || null)) { ship.plane.remove(r.mesh); remotes.delete(cid); }
@@ -421,6 +502,12 @@ function updateRemotes(dt) {
 net.addEventListener('room', (e) => {
   const room = net.room;
   syncRemotes(room);
+  gadgets.syncRoom(room);
+  gadgets.serverFrozen = new Set((room?.players || []).filter((p) => p.frozen).map((p) => p.cid));
+  me.frozen = gadgets.serverFrozen.has(myId());
+  if (room?.config && sim.host) sim.config = room.config;
+  if (room?.hour != null && sim.host) sim.hour = room.hour;
+  if (room?.weather && sim.host && !e.detail.you) void 0;
   UI.roomInfo(room, myId(), UI.rankBadge);
   renderLobby();
   const wasHost = sim.host;
@@ -435,7 +522,7 @@ net.addEventListener('room', (e) => {
   if (me.mode === 'pilot' && room.pilotCid !== myId()) me.mode = 'walk';
   if (!$('#admin').classList.contains('hidden')) renderAdmin();
 });
-net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.mode = s.mode; r.moving = s.moving; r.run = !!s.run; r.held = s.held; });
+net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.pt = s.pt; r.mode = s.mode; r.moving = s.moving; r.run = !!s.run; r.fly = !!s.fly; r.held = s.held; });
 let freshJoin = true; // a flight that had already ended when we joined is not ours to report
 net.addEventListener('world', (e) => {
   if (sim.host) return;
@@ -455,21 +542,34 @@ net.addEventListener('fx', (e) => {
   const who = `${by.username}`;
   if (cmd === 'spawn' && sim.host) {
     const src = by.cid === myId() ? me.pos : remotes.get(by.cid)?.target || me.pos;
-    for (let i = 0; i < args.count; i++) { const dir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5); sim.spawnItem(args.item, [src.x + dir.x, src.y + 1.6 + i * 0.4, src.z + dir.z]); }
+    for (let i = 0; i < args.count; i++) { const dir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5); sim.spawnItem(args.item, [src.x + dir.x, src.y + 1.6 + i * 0.4, src.z + dir.z], { id: args.ids?.[i] || null }); }
   }
   if (cmd === 'spawn') UI.toast(`${who} spawned ${ITEM_DEFS[args.item]?.label || args.item}.`);
   if (cmd === 'weather') { if (sim.host) sim.weather = args.weather; UI.toast(`${who} set the weather to ${args.weather}.`, args.weather === 'storm' ? 'warn' : 'info'); }
   if (cmd === 'emergency' && sim.host) sim.emergency(args.scenario, args.action);
   if (cmd === 'emergency' && args.action === 'stop') UI.toast(`${who} ended the ${args.scenario.replace('_', ' ')} scenario.`);
-  if (cmd === 'teleport' && args.cid === myId()) { teleport(args.to); UI.toast(`Teleported to ${args.to}.`); }
-  if (cmd === 'npc') { if (sim.host) sim.npcAction(args.action); UI.toast(`${who}: passengers ${args.action}!`); }
-  if (cmd === 'gear' && args.cid === myId()) { me.cannon = true; $('#tF')?.classList.remove('hidden'); UI.toast('🌊 Wave Cannon equipped: click with empty hands to splash.', 'info'); }
-  if (cmd === 'fire') { splash(args.o, args.d); if (sim.host) sim.waveImpulse(args.o, args.d); }
+  if (cmd === 'teleport' && args.cid === myId()) { if (args.p) { if (me.mode !== 'walk') leaveSeat(); me.pos.set(...args.p); me.vel.set(0, 0, 0); UI.toast(by.cid === myId() ? 'Teleported.' : `${who} brought you to them.`); } else { teleport(args.to); UI.toast(`Teleported to ${args.to}.`); } }
+  if (cmd === 'npc') { if (sim.host) sim.npcAction(args.action, args.count || 1); UI.toast(`${who}: passengers ${args.action}!`); }
+  if (cmd === 'event' && sim.host) sim.roomEvent(args.event);
+  if (cmd === 'event' && args.event === 'birthday') gadgets.confetti(new THREE.Vector3(0, 2.2, 0), new THREE.Vector3(0, -0.2, -1), null);
+  if (cmd === 'time') { sim.hour = args.hour; UI.toast(`${who} set the time to ${String(Math.floor(args.hour)).padStart(2, '0')}:${String(Math.round((args.hour % 1) * 60)).padStart(2, '0')}.`); }
+  if (cmd === 'config') { sim.config = args.config; UI.toast(`${who} changed the game config: ${args.config.difficulty}, payout ×${args.config.payout}, max ${args.config.maxPlayers} players.`); }
+  if (cmd === 'freeze') { if (args.on) gadgets.serverFrozen.add(args.cid); else gadgets.serverFrozen.delete(args.cid); if (args.cid === myId()) { me.frozen = !!args.on; UI.toast(args.on ? `🧊 ${who} froze you.` : 'You can move again.', args.on ? 'warn' : 'info'); } }
+  if (cmd === 'equip') {
+    gadgets.setGear(args.cid, args.gear || []);
+    if (args.cid === myId()) { const it = devInv?.items.find((i) => i.id === args.item); UI.toast(`${it?.icon || '🔮'} ${it?.name || args.item} ${args.on ? 'equipped' : 'unequipped'}.${args.on && it?.kind === 'tool' ? ' Click / F to use' + (args.item === 'size_ray' ? ' (right-click / T: shrink ↔ grow)' : '') + '.' : ''}`); if (!$('#admin').classList.contains('hidden')) renderAdmin(); }
+  }
+  if (cmd === 'use') gadgets.onUse(args, by);
 });
 net.addEventListener('admin_denied', (e) => { $('#admMsg').textContent = `Denied: ${e.detail.reason}`; });
-net.addEventListener('admin_ok', (e) => { if (e.detail.cmd !== 'fire') $('#admMsg').textContent = `Done: ${e.detail.cmd}`; });
-net.addEventListener('kicked', (e) => { quitToMenu(`You were removed from the room by ${e.detail.by}.`); });
-net.addEventListener('error', (e) => { if (e.detail.code === 'seat_taken') { me.mode = 'walk'; UI.toast('Someone else is flying.'); } if (e.detail.code === 'crew_taken') { $('#lobRouteNote').textContent = e.detail.message; UI.toast(e.detail.message); } });
+net.addEventListener('admin_ok', (e) => { if (e.detail.cmd !== 'use') $('#admMsg').textContent = `Done: ${e.detail.cmd}`; });
+net.addEventListener('inventory', (e) => { devInv = e.detail; if (!$('#admin').classList.contains('hidden')) renderAdmin(); });
+net.addEventListener('chat', (e) => chatLine(e.detail.username, e.detail.role, e.detail.text));
+net.addEventListener('announce', (e) => { UI.toast(`📣 ${e.detail.by}: ${e.detail.text}`, 'warn', 9000); chatLine(`📣 ${e.detail.by}`, 'DEVELOPER', e.detail.text); });
+net.addEventListener('muted', (e) => UI.toast(e.detail.minutes ? `🔇 ${e.detail.by} muted you for ${e.detail.minutes} min.` : 'You can chat again.', 'warn'));
+net.addEventListener('maintenance', (e) => showMaintenance(e.detail.message));
+net.addEventListener('kicked', (e) => { const d = e.detail; quitToMenu(d.banned ? `You were banned from Sky Crew by ${d.by}${d.minutes ? ` for ${d.minutes} min` : ''}.${d.reason ? ` Reason: ${d.reason}` : ''}` : `You were removed from the room by ${d.by}.${d.reason ? ` ${d.reason}` : ''}`); });
+net.addEventListener('error', (e) => { if (e.detail.code === 'muted') UI.toast(e.detail.message, 'warn'); if (e.detail.code === 'seat_taken') { me.mode = 'walk'; UI.toast('Someone else is flying.'); } if (e.detail.code === 'crew_taken') { $('#lobRouteNote').textContent = e.detail.message; UI.toast(e.detail.message); } });
 net.addEventListener('close', () => { if (playing && net.wasInRoom) { UI.toast('Disconnected from the co-op room. Continuing solo.', 'warn'); sim.host = true; syncRemotes(null); UI.roomInfo(null); } });
 
 let sendT = 0, worldT = 0;
@@ -480,7 +580,7 @@ function netTick(dt) {
   if (sendT > 1 / 15) {
     sendT = 0;
     const held = heldItem();
-    net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint } });
+    net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint, fly: !!me.flying } });
     if (amPilot()) net.send({ t: 'plane', s: sim.planeState() });
   }
   if (net.isHost && worldT > 0.1) { worldT = 0; net.send({ t: 'world', w: sim.snapshot(!net.room.pilotCid) }); }
@@ -569,24 +669,45 @@ const PALETTE = {
 };
 const cA = new THREE.Color(), cB = new THREE.Color();
 function mix(a, b, t) { return cA.setHex(a).lerp(cB.setHex(b), t); }
+// weather presets (Admin/Developer can switch them): sky dimming, fog, sun and ambient light
+const WX = {
+  clear: { dim: 1, near: 900, far: 16000, sun: 2.0, hemi: 1.25, fog: null },
+  cloudy: { dim: 0.72, near: 600, far: 9000, sun: 1.0, hemi: 1.15, fog: 0xb7c3d3 },
+  rain: { dim: 0.55, near: 250, far: 5000, sun: 0.65, hemi: 0.95, fog: 0x7d8899 },
+  storm: { dim: 0.38, near: 150, far: 3500, sun: 0.5, hemi: 0.8, fog: 0x4a5468 },
+  fog: { dim: 0.85, near: 20, far: 700, sun: 0.8, hemi: 1.1, fog: 0xdfe5ec },
+};
+const sunDir = new THREE.Vector3();
+/** time of day (Developer control): 0..24 h. Returns daylight 0..1 and a warm tint near sunrise/sunset. */
+function daylight(h) { const k = Math.sin(((h - 6) / 12) * Math.PI); return { k: Math.max(0, Math.min(1, k * 1.6 + 0.12)), warm: Math.max(0, 1 - Math.abs(k) * 3.2) * (k > -0.3 ? 1 : 0) }; }
 function updateWeather(dt) {
-  const storm = sim.weather === 'storm';
+  const w = WX[sim.weather] || WX.clear, storm = sim.weather === 'storm', wet = storm || sim.weather === 'rain';
+  const day = daylight(sim.hour ?? 13);
   const u = env.sky.material.uniforms;
-  u.dim.value += ((storm ? 0.38 : 1) - u.dim.value) * Math.min(1, dt * 2);
+  u.dim.value += ((w.dim * (0.12 + 0.88 * day.k)) - u.dim.value) * Math.min(1, dt * 2);
   const f = sim.flight;
   const near = Math.max(0, Math.min(1, 1 - (distTo(f, DEST) - 3000) / 9000)); // blend in over the last ~12 km
   const P0 = PALETTE.harbor, P1 = PALETTE[DEST.style] || P0;
-  scene.fog.far = storm ? 3500 : 16000; scene.fog.near = storm ? 150 : 900;
-  scene.fog.color.copy(storm ? cA.setHex(0x4a5468) : mix(P0.fog, P1.fog, near));
+  scene.fog.far = w.far; scene.fog.near = w.near;
+  scene.fog.color.copy(w.fog ? cA.setHex(w.fog) : mix(P0.fog, P1.fog, near));
+  if (day.warm > 0.01) scene.fog.color.lerp(cB.setHex(0xffa36b), day.warm * 0.5);
+  scene.fog.color.multiplyScalar(0.25 + 0.75 * day.k);
   u.mid.value.copy(mix(P0.mid, P1.mid, near)); u.bottom.value.copy(mix(P0.bottom, P1.bottom, near));
-  env.sea.material.color.copy(mix(P0.sea, P1.sea, near));
-  env.sun.intensity = storm ? 0.5 : 2.0;
+  if (day.warm > 0.01) u.bottom.value.lerp(cB.setHex(0xff9a5a), day.warm * 0.7);
+  env.sea.material.color.copy(mix(P0.sea, P1.sea, near)).multiplyScalar(0.35 + 0.65 * day.k);
+  env.sun.intensity = w.sun * day.k;
+  env.sun.color.setHex(0xffffff).lerp(cB.setHex(0xffb37a), day.warm);
   flashT -= dt;
   if (storm && Math.random() < dt * 0.15) { flashT = 0.12; if (playing) audio.thunder(); }
-  env.hemi.intensity = flashT > 0 ? 4 : storm ? 0.8 : 1.25;
-  // the sun (and its small shadow box) follows the aircraft
-  env.sun.position.copy(ship.plane.position).add(SUN_OFF); env.sun.target.position.copy(ship.plane.position); env.sun.target.updateMatrixWorld();
-  if (storm && !rain) {
+  env.hemi.intensity = flashT > 0 ? 4 : w.hemi * (0.3 + 0.7 * day.k);
+  // the sun (and its small shadow box) follows the aircraft; its height follows the clock
+  const el = Math.max(0.12, Math.sin(((sim.hour ?? 13) - 6) / 12 * Math.PI)), az = (((sim.hour ?? 13) - 12) / 12) * Math.PI;
+  sunDir.set(Math.sin(az) * 0.8 + 0.35, el, Math.cos(az) * 0.4 + 0.25).normalize();
+  u.sunDir.value.copy(sunDir);
+  env.sun.position.copy(ship.plane.position).addScaledVector(sunDir, 600); env.sun.target.position.copy(ship.plane.position); env.sun.target.updateMatrixWorld();
+  // cabin lights matter more at night
+  ship.cabin.key.intensity = ship.cabin.key.userData.base * (1.25 - 0.25 * day.k);
+  if (wet && !rain) {
     const geo = new THREE.BufferGeometry(); const n = 1500, a = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { a[i * 3] = (Math.random() - 0.5) * 60; a[i * 3 + 1] = Math.random() * 30 - 8; a[i * 3 + 2] = (Math.random() - 0.5) * 70; }
     geo.setAttribute('position', new THREE.BufferAttribute(a, 3));
@@ -594,7 +715,7 @@ function updateWeather(dt) {
     ship.plane.add(rain);
   }
   if (rain) {
-    rain.visible = storm;
+    rain.visible = wet;
     const a = rain.geometry.attributes.position.array;
     for (let i = 1; i < a.length; i += 3) { a[i] -= dt * 22; if (a[i] < -8) a[i] += 30; }
     for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i]) < HALF_W + 0.3 && a[i + 1] > -0.5 && a[i + 1] < CEIL + 0.5 && a[i + 2] > -17 && a[i + 2] < 14) a[i + 1] = CEIL + 1;
@@ -675,7 +796,8 @@ function updateHud() {
   const t = playing && !paused ? findTarget() : null;
   UI.prompt(t && t.kind !== 'leave' ? t.label : null);
   const h = heldItem();
-  UI.held(heldPax() ? 'Carrying a passenger (furious)  ·  E put down · Q throw' : h ? `Holding: ${ITEM_DEFS[h.type].label}  ·  E place · Q throw` : me.cannon ? '🌊 Wave Cannon ready (click)' : null);
+  UI.held(heldPax() ? 'Carrying a passenger (furious)  ·  E put down · Q throw' : h ? `Holding: ${ITEM_DEFS[h.type].label}  ·  E place · Q throw` : gadgets.tool() && me.mode === 'walk' ? `${devInv?.items.find((i) => i.id === gadgets.tool())?.icon || '🔮'} ${devInv?.items.find((i) => i.id === gadgets.tool())?.name || gadgets.tool()}  ·  click / F use${gadgets.tool() === 'size_ray' ? ` · right-click / T mode (${gadgets.mode})` : gadgets.tool() === 'gravity_gun' ? (gadgets.holding ? ' again to LAUNCH' : ' to lift') : ''}` : null);
+  if (isTouch) { UI.show('#tF', !!gadgets.tool() && me.mode === 'walk'); UI.show('#tAlt', gadgets.tool() === 'size_ray' && me.mode === 'walk'); UI.show('#tChat', net.inRoom); }
   const pilot = me.mode === 'pilot', cop = me.mode === 'copilot';
   UI.show('#fhud', pilot || cop);
   UI.show('#cross', !pilot && !cop);
@@ -719,7 +841,8 @@ const live = { rooms: null, hidden: false,
   async refresh() { try { live.rooms = (await net.rooms()).rooms; $('#admMsg').textContent = `${live.rooms.length} live room(s).`; } catch (e) { $('#admMsg').textContent = `Denied: ${e.message}`; } renderAdmin(); },
   async join(code, hidden) { toggleAdmin(false); await devJoin(code, hidden); },
 };
-function renderAdmin() { UI.buildAdmin({ you: net.you || { role: myRole, permissions: [] }, room: net.room, myCid: myId(), live: net.you?.role === 'DEVELOPER' ? live : null, send: (cmd, args) => { $('#admMsg').textContent = '…'; net.admin(cmd, args).catch(() => {}); } }); }
+let devInv = null; // the secret inventory catalogue: sent by the server ONLY to a verified Developer
+function renderAdmin() { buildPanel({ you: net.you || { role: myRole, permissions: [] }, room: net.room, myCid: myId(), live: net.you?.role === 'DEVELOPER' ? live : null, inv: devInv, gear: gadgets.mine(), flight: { pax: sim.pax.filter((p) => p.state !== 'lost').length }, send: (cmd, args) => { $('#admMsg').textContent = '…'; return net.admin(cmd, args).catch(() => {}); } }); }
 /** Developer: jump into any room by code (full / locked / hidden are decided by the server). */
 async function devJoin(code, hidden) {
   try {
@@ -738,6 +861,7 @@ async function toggleAdmin(force) {
   if (open && !net.connected && myRole === 'DEVELOPER') { try { await net.connect(); } catch { /* offline */ } }
   if (open && !(net.you?.permissions || []).includes('admin.panel')) return UI.toast('Staff tools are for Trusted, Admin and Developer ranks.');
   if (open && net.you?.role === 'DEVELOPER' && !live.rooms) setTimeout(() => live.refresh(), 0);
+  if (open && net.you?.role === 'DEVELOPER' && !devInv) net.send({ t: 'inventory' });
   UI.show('#admin', open);
   if (open) { renderAdmin(); document.exitPointerLock?.(); keys.clear(); }
 }
@@ -775,7 +899,7 @@ async function goOnline(code) {
     if (!net.connected) await net.connect();
     if (code) { sim.host = false; sim.seed = -1; await net.join(code); } else { setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; await net.create(); }
     openLobby();
-  } catch (e) { err.textContent = e.message || String(e); UI.show('#menuErr', true); }
+  } catch (e) { if (e.maintenance) return showMaintenance(e.message); err.textContent = e.message || String(e); UI.show('#menuErr', true); }
 }
 $('#bCreate').addEventListener('click', () => goOnline());
 $('#bJoin').addEventListener('click', () => { const c = $('#joinCode').value.trim().toUpperCase(); if (c.length === 5) goOnline(c); else { $('#menuErr').textContent = 'Room codes have 5 letters.'; UI.show('#menuErr', true); } });
@@ -893,6 +1017,8 @@ function updateAudio() {
 // ---------------- main loop ----------------
 const clock = new THREE.Clock();
 const perfStat = { frames: 0, t0: performance.now(), fps: 0 };
+const RENDER_CAP = Math.max(0, Math.min(60, Number(qs.get('fps')) || 0));
+let lastRender = 0, forceRender = false;
 function frame() {
   perfStat.frames++; { const n = performance.now(); if (n - perfStat.t0 > 1000) { perfStat.fps = perfStat.frames * 1000 / (n - perfStat.t0); perfStat.frames = 0; perfStat.t0 = n; } }
   const dt = Math.min(0.05, clock.getDelta());
@@ -906,6 +1032,7 @@ function frame() {
   sim.animate(dt);
   placeHeld();
   updateRemotes(dt);
+  gadgets.update(dt, { remotes });
   updateSplashes(dt);
   updateWeather(dt);
   // my own body (visible in third person)
@@ -914,7 +1041,10 @@ function frame() {
   animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk' });
   updateCamera();
   if (playing) { updateHud(); netTick(dt); updateAudio(); }
-  renderer.render(scene, camera);
+  // ?fps=N caps how often the 3D view is DRAWN (the game itself keeps running every frame): used by multi-client
+  // tests on software GL, and handy on very weak devices.
+  const nowR = performance.now();
+  if (!RENDER_CAP || forceRender || nowR - lastRender >= 1000 / RENDER_CAP) { renderer.render(scene, camera); lastRender = nowR; forceRender = false; }
   requestAnimationFrame(frame);
 }
 UI.show('#loading', false);
@@ -928,6 +1058,7 @@ window.skyCrew = {
   look: (yaw, pitch) => { me.yaw = yaw; me.pitch = pitch; },
   lookAt: (x, y, z) => { const e = eyePos(); const d = new THREE.Vector3(x, y, z).sub(e); me.yaw = Math.atan2(-d.x, -d.z); me.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); },
   items: () => [...sim.items.values()].map((i) => ({ id: i.id, type: i.type, x: i.mesh.position.x, y: i.mesh.position.y, z: i.mesh.position.z, heldBy: i.heldBy })),
+  net,
   target: () => { const t = findTarget(); return t && { kind: t.kind, label: t.label }; },
   interact, takeSeat, leaveSeat,
   key: (code, down) => (down ? keys.add(code) : keys.delete(code)),
@@ -945,7 +1076,14 @@ window.skyCrew = {
   myCrew: () => myCrew,
   lastReport: () => lastReport,
   paxLooks: () => sim.pax.map((p) => p.look || null),
-  pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible })),
+  pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible, frozen: (p.frozenT || 0) > 0, sizeK: p.sizeK || 1, cheer: (p.cheerT || 0) > 0, vip: p.id >= 900 })),
+  gadgets: () => ({ mine: [...gadgets.mine()], tool: gadgets.tool(), mode: gadgets.mode, fx: gadgets.fx.length, frozenT: gadgets.frozenT, sizeK: gadgets.sizeK, scale: myAvatar.scale.x, flying: !!me.flying, frozen: !!me.frozen, iced: !!myAvatar.userData.ice, attach: Object.keys(gadgets.attach.get(myId()) || {}), grav: !!sim.grav, inv: devInv ? devInv.items.map((i) => i.id) : null, remoteGear: Object.fromEntries([...gadgets.gear].filter(([c]) => c !== myId()).map(([c, g]) => [remotes.get(c)?.info.username || c, [...g]])), remoteAttach: Object.fromEntries([...remotes].map(([c, r]) => [r.info.username, Object.keys(gadgets.attach.get(c) || {})])) }),
+  fire: (alt) => fireGadget(!!alt),
+  draw: () => { forceRender = true; },
+  hour: () => sim.hour, config: () => sim.config,
+  panelTabs: () => [...document.querySelectorAll('#admTabs [data-tab]')].map((b) => b.dataset.tab),
+  openPanel: (v = true) => toggleAdmin(v),
+  chat: (t) => net.send({ t: 'chat', text: t }),
   heldPax: () => heldPax()?.id ?? null,
   devJoin, liveRooms: () => net.rooms(),
   admin: (cmd, args) => net.admin(cmd, args),

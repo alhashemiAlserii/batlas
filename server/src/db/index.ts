@@ -7,6 +7,7 @@ import * as m002 from './migrations/002_stage2.js';
 import * as m003 from './migrations/003_optional_email.js';
 import * as m004 from './migrations/004_game_flights.js';
 import * as m005 from './migrations/005_website.js';
+import * as m006 from './migrations/006_sky_crew_outfits.js';
 
 /** Migrations are registered in code so they run the same under tsx, tests and builds. */
 const MIGRATIONS: Record<string, { up: (k: Knex) => Promise<void>; down: (k: Knex) => Promise<void>; config?: { transaction?: boolean } }> = {
@@ -15,6 +16,7 @@ const MIGRATIONS: Record<string, { up: (k: Knex) => Promise<void>; down: (k: Kne
   '003_optional_email': m003,
   '004_game_flights': m004,
   '005_website': m005,
+  '006_sky_crew_outfits': m006,
 };
 
 const migrationSource: Knex.MigrationSource<string> = {

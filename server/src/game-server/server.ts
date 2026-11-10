@@ -10,6 +10,7 @@
  * - Admin commands are validated here (permission map + canActOn), applied to the room and
  *   written to the website audit log.
  */
+import { DEFAULT_OUTFIT, validOutfit, type Outfit } from './outfits.js';
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -51,6 +52,8 @@ interface Client {
   mutedUntil: number;
   frozen: boolean;
   lastChat: number;
+  outfit: Outfit;
+  lastOutfit: number;
 }
 
 interface RoomConfig { difficulty: (typeof DIFFICULTIES)[number]; payout: number; maxPlayers: number }
@@ -116,7 +119,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   const send: Send = (c, msg) => {
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now() });
+  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit });
   // Hidden Developers are left out of everyone else's player list.
   const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, hour: r.hour, locked: r.locked, config: r.config, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
   const broadcastRoom = (r: Room, except?: Client) => { for (const c of r.clients.values()) if (c !== except) send(c, roomInfo(r, c)); };
@@ -501,6 +504,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
           return;
         }
         c.user = u; // the ONLY source of name/rank/permissions
+        if (u.outfit) c.outfit = u.outfit;
         send(c, { t: 'welcome', you: { cid: c.cid, username: u.username, displayName: u.displayName, role: u.role, permissions: u.permissions, avatarUrl: u.avatarUrl } });
       })();
       return;
@@ -576,6 +580,15 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         } else if (r.pilotCid === c.cid) r.pilotCid = null;
         return broadcastRoom(r);
       }
+      case 'outfit': {
+        // outfit change (lobby or mid-flight): whitelist-checked, rate-limited, then shown to the room
+        const o = validOutfit(m.outfit);
+        if (!o) return send(c, { t: 'error', code: 'bad_outfit', message: 'Unknown outfit.' });
+        if (Date.now() - c.lastOutfit < 400) return;
+        c.lastOutfit = Date.now(); c.outfit = o;
+        if (r && !c.hidden) broadcast(r, { t: 'outfit', cid: c.cid, outfit: o });
+        return send(c, { t: 'outfit', cid: c.cid, outfit: o });
+      }
       case 'crew': {
         // lobby role pick: pilot / copilot / cabin / cargo (null = no preference)
         if (!r || c.hidden) return;
@@ -617,7 +630,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   }
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0 };
+    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0, outfit: { ...DEFAULT_OUTFIT }, lastOutfit: 0 };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4003, 'auth_timeout'); }, 10_000);
     ws.on('message', (data) => {

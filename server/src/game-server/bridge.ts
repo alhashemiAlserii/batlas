@@ -1,3 +1,4 @@
+import { validOutfit, type Outfit } from './outfits.js';
 /** How the game server talks to the Batlas website: token verification + audit log. */
 import type { Permission, Role } from '../lib/permissions.js';
 
@@ -8,6 +9,7 @@ export interface VerifiedUser {
   role: Role;
   permissions: Permission[];
   avatarUrl: string;
+  outfit?: Outfit;
 }
 
 export interface AuditCall {
@@ -53,6 +55,7 @@ export function httpSiteBridge(siteUrl: string, key: string): SiteBridge {
         role: d.role,
         permissions: d.permissions,
         avatarUrl: d.user.avatarUrl ?? '',
+        outfit: validOutfit(d.outfit) ?? undefined,
       };
     },
     async audit(entry) {

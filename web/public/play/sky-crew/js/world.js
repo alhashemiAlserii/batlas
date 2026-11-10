@@ -523,7 +523,7 @@ export function buildPlane() {
   const cockpitLight = new THREE.PointLight(0xdfe8ff, 5, 6, 1.6); cockpitLight.position.set(0, 2.2, -14.5); plane.add(cockpitLight);
   const warnLight = new THREE.PointLight(0xff2030, 0, 30, 1.2); warnLight.position.set(0, 2.2, 0); plane.add(warnLight);
   // directional "ceiling" key light: its shadow camera starts just under the ceiling so the hull above casts nothing
-  const key = new THREE.DirectionalLight(0xfff6e8, 1.1);
+  const key = new THREE.DirectionalLight(0xfff6e8, 1.1); key.userData.base = 1.1;
   key.position.set(0.6, CEIL - 0.05, 2.5); key.target.position.set(0, 0, 3.5); plane.add(key); plane.add(key.target);
   key.shadow.camera.left = -11.5; key.shadow.camera.right = 11.5; key.shadow.camera.top = 2.6; key.shadow.camera.bottom = -2.6;
   key.shadow.camera.near = 0.02; key.shadow.camera.far = 4; key.shadow.bias = -0.0015; key.shadow.normalBias = 0.02; key.shadow.radius = 3;
