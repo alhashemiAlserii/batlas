@@ -18,9 +18,17 @@ export interface AuditCall {
   details?: Record<string, unknown>;
 }
 
+export interface BanCall {
+  actorUserId: number;
+  targetUserId: number;
+  reason?: string;
+}
+
 export interface SiteBridge {
   verify(token: string): Promise<VerifiedUser | null>;
   audit(entry: AuditCall): Promise<void>;
+  /** Account ban on the website. The site re-checks the actor's rank (players.ban + canActOn) in its own DB. */
+  ban?(entry: BanCall): Promise<{ ok: boolean; reason?: string }>;
 }
 
 /** Talks to the site over HTTP with the shared GAME_SERVER_KEY, so the game server can run anywhere. */
@@ -52,6 +60,15 @@ export function httpSiteBridge(siteUrl: string, key: string): SiteBridge {
         body: JSON.stringify(entry),
       });
       if (!r.ok) console.error('[game] audit failed', r.status);
+    },
+    async ban(entry) {
+      const r = await fetch(`${base}/api/game/ban`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-game-server-key': key },
+        body: JSON.stringify(entry),
+      });
+      const d: any = await r.json().catch(() => ({}));
+      return r.ok ? { ok: true } : { ok: false, reason: d.error ?? `ban failed (${r.status})` };
     },
   };
 }

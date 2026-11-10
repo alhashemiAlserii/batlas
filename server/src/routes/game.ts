@@ -19,7 +19,7 @@ import { parse, HttpError } from '../lib/http.js';
 import { requireAuth, requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { randomToken, sha256, safeEqual } from '../lib/crypto.js';
-import { hasPermission, ITEM_TIERS, permissionsFor } from '../lib/permissions.js';
+import { canActOn, hasPermission, ITEM_TIERS, permissionsFor } from '../lib/permissions.js';
 import { insertId } from '../db/index.js';
 
 const GAME_TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -63,8 +63,28 @@ export function gameRoutes(ctx: Ctx) {
     }), req.body);
     const actor = await ctx.db<UserRow>('users').where({ id: b.actorUserId }).first();
     if (!actor) throw new HttpError(404, 'Unknown actor');
-    const category = /kick/.test(b.action) ? 'moderation' : 'game';
+    const category = /kick|ban|mute|freeze/.test(b.action) ? 'moderation' : 'game';
     await audit(ctx.db, req, { action: b.action, category, targetType: b.targetUserId ? 'user' : 'room', targetId: b.targetUserId ?? (b.details?.room as string | undefined), targetLabel: b.targetLabel, details: b.details }, actor);
+    res.json({ ok: true });
+  });
+
+  // In-game account ban requested by a game server. The actor's rank is re-checked here against the DB.
+  r.post('/game/ban', async (req, res) => {
+    const key = req.get('x-game-server-key') ?? '';
+    if (!ctx.config.gameServerKey || !safeEqual(key, ctx.config.gameServerKey)) throw new HttpError(401, 'Invalid game server key');
+    const b = parse(z.object({ actorUserId: z.number().int().positive(), targetUserId: z.number().int().positive(), reason: z.string().max(200).optional() }), req.body);
+    const actor = await ctx.db<UserRow>('users').where({ id: b.actorUserId }).first();
+    const target = await ctx.db<UserRow>('users').where({ id: b.targetUserId }).first();
+    if (!actor || !target) throw new HttpError(404, 'Unknown user');
+    if (actor.banned || !hasPermission(actor.role, 'players.ban')) throw new HttpError(403, 'You do not have permission to do that.', 'forbidden');
+    const g = canActOn({ id: actor.id, role: actor.role }, { id: target.id, role: target.role });
+    if (!g.ok) throw new HttpError(403, g.reason, 'forbidden');
+    await ctx.db.transaction(async (trx) => {
+      await trx('users').where({ id: target.id }).update({ banned: true, ban_reason: b.reason ?? null, banned_at: new Date().toISOString() });
+      await trx('sessions').where({ user_id: target.id }).delete();
+      await trx('game_tokens').where({ user_id: target.id }).delete();
+    });
+    await audit(ctx.db, req, { action: 'player.ban', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { reason: b.reason ?? null, via: 'sky-crew' } }, actor);
     res.json({ ok: true });
   });
 

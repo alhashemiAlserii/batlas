@@ -1,9 +1,9 @@
-// Sky Crew v0.4 (Stage 4) browser checks: Chromium + WebKit, desktop + mobile, plus a two-client co-op room.
+// Sky Crew (game revision: rear door, forward hold) browser checks: Chromium + WebKit, desktop + mobile, plus a two-client co-op room.
 // Usage: node sky-crew.mjs [chromium|webkit|coop|all]
 import { chromium, webkit, devices } from 'playwright';
 import fs from 'node:fs';
-const B = process.env.BASE || 'http://localhost:3000';
-const OUT = '/workspace/studio/docs/screenshots/stage4';
+const B = process.env.BASE || 'http://localhost:3200';
+const OUT = new URL('../docs/screenshots/revision/e2e', import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
 const which = process.argv[2] || 'all';
 const report = [];
@@ -25,11 +25,11 @@ async function boot(page, solo = true) {
 }
 const st = (page) => page.evaluate(() => window.skyCrew.state());
 
-/** Pick up a passenger, throw them down the aisle, then out of the open front door in flight. */
+/** Pick up a passenger, throw them down the aisle, then out of the open REAR door in flight. */
 async function paxChaos(page, name) {
   // depart properly (everyone seated), then jump to cruise
   await page.evaluate(() => { window.skyCrew.debug.sitAll(); window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
-  await page.keyboard.down('KeyR'); await page.waitForFunction(() => window.skyCrew.state().phase !== 'boarding', null, { timeout: 20000 }).catch(() => {}); await page.keyboard.up('KeyR');
+  await page.keyboard.down('KeyR'); await page.waitForFunction(() => window.skyCrew.state().phase !== 'boarding', null, { timeout: 90000 }).catch(() => {}); await page.keyboard.up('KeyR');
   await page.evaluate(() => { window.skyCrew.leaveSeat(); window.skyCrew.setFlight({ y: 600, speed: 90, throttle: 0.6, onGround: false, airborneOnce: true, pitch: 0 }); });
   await sleep(600);
   const near = (await page.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated').sort((a, b) => a.z - b.z);
@@ -54,15 +54,16 @@ async function paxChaos(page, name) {
   await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'seated', held, { timeout: 40000 }).catch(() => {});
   const st2 = (await page.evaluate(() => window.skyCrew.pax())).find((x) => x.id === held).state;
   ['thrown', 'return'].includes(st1) && st2 === 'seated' ? ok(`${name}: thrown passenger (${st1}) landed in the aisle and walked back to their seat`) : bad(`${name}: throw states ${st1} -> ${st2}`);
-  // open the front door mid-flight, carry a passenger there and throw them out
-  const d = await page.evaluate(() => window.skyCrew.debug.interactPoint('door_front'));
-  await page.evaluate((d) => { window.skyCrew.teleport(-0.6, 0, d.z - 0.35); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
-  await sleep(150); await page.keyboard.press('KeyE'); await sleep(400);
+  // open the rear door mid-flight, carry a passenger there and throw them out
+  const d = await page.evaluate(() => window.skyCrew.debug.interactPoint('door_rear'));
+  await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
+  await sleep(150); await page.keyboard.press('KeyE');
+  await page.waitForFunction(() => window.skyCrew.state().doors.rearPassable, null, { timeout: 15000 }).catch(() => {});
   const p2 = (await page.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated').sort((a, b) => a.z - b.z)[0];
   await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, p2);
   await sleep(150); await page.keyboard.press('KeyE'); await sleep(300);
   const h2 = await page.evaluate(() => window.skyCrew.heldPax());
-  await page.evaluate((d) => { window.skyCrew.teleport(-0.9, 0, d.z - 0.95); window.skyCrew.look(Math.PI / 2, 0.1); }, d); // middle of the doorway
+  await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.6); window.skyCrew.look(Math.PI, 0.1); }, d); // facing aft, in front of the rear doorway
   await sleep(100); await page.keyboard.press('KeyQ');
   try {
     await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'lost', h2, { timeout: 8000 });
@@ -74,7 +75,7 @@ async function paxChaos(page, name) {
   } catch { bad(`${name}: eject failed ${JSON.stringify((await page.evaluate(() => window.skyCrew.pax())).find((x) => x.id === h2))}`); }
   await page.evaluate(() => window.skyCrew.debug.watchEject(false));
   // close the door, land, check the payout charges the refund + fine
-  await page.evaluate((d) => { window.skyCrew.teleport(-0.6, 0, d.z - 0.35); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
+  await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
   await sleep(150); await page.keyboard.press('KeyE'); await sleep(300);
   await page.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
   await page.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
@@ -120,7 +121,7 @@ async function singlePlayer(name, type) {
   await page.screenshot({ path: `${OUT}/${name}-desktop-spawn.png` });
   // move
   const p0 = (await st(page)).me;
-  await page.keyboard.down('KeyW'); await sleep(900); await page.keyboard.up('KeyW');
+  await page.keyboard.down('KeyW'); await page.waitForFunction((p0) => { const m = window.skyCrew.state().me; return Math.hypot(m.x - p0.x, m.z - p0.z) > 0.6; }, p0, { timeout: 8000 }).catch(() => {}); await page.keyboard.up('KeyW');
   const p1 = (await st(page)).me;
   const moved = Math.hypot(p1.x - p0.x, p1.z - p0.z);
   moved > 0.5 ? ok(`${name}: WASD movement (${moved.toFixed(2)} m)`) : bad(`${name}: player did not move (${moved})`);
@@ -133,7 +134,7 @@ async function singlePlayer(name, type) {
   const held = (await st(page)).held;
   held ? ok(`${name}: picked up a ${held} (prompt: "${tgt?.label}")`) : bad(`${name}: pick up failed (target ${JSON.stringify(tgt)})`);
   // carry it up the cargo stairs into the hold by walking (stairs + door)
-  await page.evaluate(() => { window.skyCrew.teleport(5.6, -2.4, 8); window.skyCrew.look(-Math.PI / 2 + Math.PI, -0.1); });
+  await page.evaluate(() => { window.skyCrew.teleport(5.6, -2.4, -10.9); window.skyCrew.look(-Math.PI / 2 + Math.PI, -0.1); });
   await page.evaluate(() => window.skyCrew.look(Math.PI / 2, -0.1)); // face -x (towards the plane)
   // walk until inside (software-rendered headless browsers run the game in slow motion, so wait on position)
   await page.keyboard.down('KeyW'); await page.waitForFunction(() => window.skyCrew.state().me.x < 1.2, null, { timeout: 20000 }).catch(() => {}); await page.keyboard.up('KeyW');
@@ -167,8 +168,8 @@ async function singlePlayer(name, type) {
   await page.keyboard.press('KeyX'); await sleep(100);
   // start a flight: captain's seat, throttle up, rotate
   await page.evaluate(() => { window.skyCrew.debug.sitAll(); window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
-  await page.keyboard.down('KeyR'); await sleep(2500); await page.keyboard.up('KeyR');
-  await page.waitForFunction(() => window.skyCrew.state().flight.speed > 2, null, { timeout: 15000 });
+  // software-rendered browsers run in slow motion: hold the throttle key until the aircraft rolls
+  await page.keyboard.down('KeyR'); await page.waitForFunction(() => window.skyCrew.state().flight.speed > 2, null, { timeout: 90000 }); await page.keyboard.up('KeyR');
   const ph = (await st(page)).phase;
   ph === 'taxi' ? ok(`${name}: flight started (phase ${ph}, doors auto-closed)`) : bad(`${name}: phase after throttle ${ph}`);
   await page.keyboard.down('KeyR');
@@ -197,7 +198,7 @@ async function singlePlayer(name, type) {
   // short final approach into Coral Point -> touchdown -> results screen
   await page.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
   try {
-    await page.waitForFunction(() => window.skyCrew.state().phase === 'landed' || window.skyCrew.state().results, null, { timeout: 60000 });
+    await page.waitForFunction(() => window.skyCrew.state().phase === 'landed' || window.skyCrew.state().results, null, { timeout: 300000 });
     await page.waitForSelector('#results:not(.hidden)', { timeout: 200000 });
     const res = (await st(page)).results;
     const sc = await page.evaluate(() => window.skyCrew.debug.score());
@@ -291,7 +292,8 @@ const admin_ = (p, cmd, args) => p.evaluate(({ cmd, args }) => window.skyCrew.ad
 async function coop() {
   const browser = await chromium.launch();
   const errs = [];
-  const devPw = fs.readFileSync('/workspace/studio/server/data/test-developer-credentials.txt', 'utf8').match(/password=(.*)/)[1].trim();
+  const credTxt = fs.readFileSync(process.env.DEV_CREDS || new URL('../server/data/dev-creds.txt', import.meta.url).pathname, 'utf8');
+  const devPw = credTxt.match(/password=(.*)/)[1].trim(), devUser = credTxt.match(/username=(.*)/)[1].trim();
   const mk = async (label) => { const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } }); const p = await ctx.newPage(); watch(p, label, errs); return { ctx, p }; };
   const A = await mk('coop-dev'), Bc = await mk('coop-player');
   const login = async (p, username, password, register = false) => {
@@ -304,9 +306,9 @@ async function coop() {
     if (r >= 300) throw new Error(`${register ? 'register' : 'login'} ${username} -> ${r}`);
   };
   const guestName = `e2e_pilot${Date.now() % 100000}`;
-  await login(A.p, 'test_dev', devPw);
+  await login(A.p, devUser, devPw);
   await login(Bc.p, guestName, 'Sky-crew-test-pass-1', true);
-  ok(`coop: signed in test_dev (Developer) and registered ${guestName} (Player, username only)`);
+  ok(`coop: signed in the Developer and registered ${guestName} (Player, username only)`);
   await boot(A.p, false); await A.p.selectOption('#routeSel', 'DNB'); await A.p.click('#bCreate');
   await A.p.waitForFunction(() => window.skyCrew.state().room?.code, null, { timeout: 10000 });
   const code = (await st(A.p)).room.code;
@@ -389,14 +391,15 @@ async function coop() {
   await A.p.evaluate(() => window.skyCrew.debug.sitAll());
   await Bc.p.keyboard.press('KeyX'); await sleep(200);
   await A.p.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
-  await A.p.keyboard.down('KeyR'); await sleep(2500); await A.p.keyboard.up('KeyR');
-  await sleep(6000);
+  await A.p.keyboard.down('KeyR'); await A.p.waitForFunction(() => window.skyCrew.state().phase !== 'boarding', null, { timeout: 90000 }).catch(() => {}); await A.p.keyboard.up('KeyR');
+  await sleep(3000);
   await A.p.evaluate(() => window.skyCrew.setFlight({ y: 500, onGround: false, airborneOnce: true, pitch: 0, speed: 85 }));
   await sleep(1500);
-  // guest throws a passenger out of the front door (host authoritative, guest predicts)
-  const df = await Bc.p.evaluate(() => window.skyCrew.debug.interactPoint('door_front'));
-  await Bc.p.evaluate((d) => { window.skyCrew.teleport(-0.6, 0, d.z - 0.35); window.skyCrew.lookAt(d.x, d.y, d.z); }, df);
-  await sleep(200); await Bc.p.keyboard.press('KeyE'); await sleep(900);
+  // guest throws a passenger out of the REAR door (host authoritative, guest predicts)
+  const df = await Bc.p.evaluate(() => window.skyCrew.debug.interactPoint('door_rear'));
+  await Bc.p.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, df);
+  await sleep(200); await Bc.p.keyboard.press('KeyE');
+  await Bc.p.waitForFunction(() => window.skyCrew.state().doors.rearPassable, null, { timeout: 15000 }).catch(() => {});
   const pB = (await Bc.p.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && x.z > -8).sort((a, b) => a.z - b.z)[0];
   if (!pB) bad('coop: no seated passengers for the throw test');
   else {
@@ -405,10 +408,8 @@ async function coop() {
     const hostView = (await A.p.evaluate(() => window.skyCrew.pax())).find((x) => x.id === pB.id);
     const bCid = await A.p.evaluate(() => [...window.skyCrew.state().remotes].length);
     hostView?.state === 'carried' && hostView.carriedBy && bCid ? ok('coop: guest picked up a passenger; host simulation shows them carried by the guest') : bad(`coop: host pax view ${JSON.stringify(hostView)}`);
-    // throw from the middle of the doorway (door spans z -12.6..-11.4; the door handle point sits 0.35 behind its edge).
-    // Throwing from the very edge made the result depend on how far the player capsule settled after the teleport.
-    // (In-flight turbulence randomly shoves walking players, which is what pushed the throw point past the door edge.)
-    await Bc.p.evaluate((d) => { window.skyCrew.teleport(-0.9, 0, d.z - 0.95); window.skyCrew.look(Math.PI / 2, 0.1); }, df);
+    // throw aft through the middle of the rear doorway (door spans x -0.6..0.6 in the rear wall at z 13)
+    await Bc.p.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.6); window.skyCrew.look(Math.PI, 0.1); }, df);
     await sleep(150);
     const throwFrom = await Bc.p.evaluate(() => window.skyCrew.state().me);
     await Bc.p.keyboard.press('KeyQ');
@@ -431,7 +432,7 @@ async function coop() {
       await Bc.p.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'seated', pB.id, { timeout: 10000 });
       ok(`coop: Developer respawned the lost passenger (${rr}); guest sees them back in their seat`);
     } catch (e) { bad(`coop: eject/respawn sync failed at "${stage}": ${e.message.split('\n')[0]} ${await diag()}`); }
-    await Bc.p.evaluate((d) => { window.skyCrew.teleport(-0.6, 0, d.z - 0.35); window.skyCrew.lookAt(d.x, d.y, d.z); }, df);
+    await Bc.p.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, df);
     await sleep(200); await Bc.p.keyboard.press('KeyE'); await sleep(600);
   }
   await A.p.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
@@ -444,7 +445,7 @@ async function coop() {
     ok(`coop: landed at ${ra.landedAt} (${ra.routeName}); results on both clients, ${ra.total} pts`);
     await A.p.screenshot({ path: `${OUT}/coop-results.png` });
     const lbd = await A.p.evaluate(async () => (await (await fetch('/api/games/sky-crew/leaderboard')).json()).leaderboard.map((x) => x.username));
-    lbd.includes('test_dev') && lbd.includes(guestName) ? ok(`coop: both flights saved; leaderboard lists ${lbd.join(', ')}`) : bad(`coop: leaderboard ${lbd}`);
+    lbd.includes(devUser) && lbd.includes(guestName) ? ok(`coop: both flights saved; leaderboard lists ${lbd.join(', ')}`) : bad(`coop: leaderboard ${lbd}`);
     const prof = await A.p.evaluate(async (u) => (await (await fetch(`/api/users/${u}/game-stats`)).json()).skyCrew, guestName);
     prof.flights >= 1 ? ok(`coop: guest profile stats ${JSON.stringify(prof)}`) : bad(`coop: profile stats ${JSON.stringify(prof)}`);
     await Bc.p.goto(`${B}/u/${guestName}`, { waitUntil: 'networkidle' });
@@ -474,7 +475,7 @@ async function coop() {
   } catch (e) { bad(`coop: guest never became host ${e.message}`); }
   // Developer dashboard: live room list -> join the (now locked) room hidden
   const D = await mk('dev-dashboard');
-  await login(D.p, 'test_dev', devPw);
+  await login(D.p, devUser, devPw);
   await Bc.p.evaluate(() => window.skyCrew.lockRoom(true));
   await sleep(500);
   await D.p.goto(`${B}/studio-console#rooms`, { waitUntil: 'networkidle' });
@@ -489,7 +490,7 @@ async function coop() {
     const ds = await D.p.evaluate(() => window.skyCrew.state());
     await sleep(800);
     const bSees = await Bc.p.evaluate(() => window.skyCrew.state().room.players.map((p) => p.username));
-    ds.room.hidden && ds.room.locked && !bSees.includes('test_dev') ? ok(`coop: Developer joined the LOCKED room ${code} hidden from the dashboard; host's player list: ${bSees.join(', ')}`) : bad(`coop: dev join ${JSON.stringify(ds.room)} B sees ${bSees}`);
+    ds.room.hidden && ds.room.locked && !bSees.includes(devUser) ? ok(`coop: Developer joined the LOCKED room ${code} hidden from the dashboard; host's player list: ${bSees.join(', ')}`) : bad(`coop: dev join ${JSON.stringify(ds.room)} B sees ${bSees}`);
     await D.p.screenshot({ path: `${OUT}/dev-hidden-spectate.png` });
   } catch (e) { bad(`coop: dev live-room join failed ${e.message}`); }
   await D.ctx.close();

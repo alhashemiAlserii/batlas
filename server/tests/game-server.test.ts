@@ -165,7 +165,7 @@ describe('in-game admin permissions', () => {
     const tr = await player('TRUSTED', 'trusty'); const pl = await player('PLAYER', 'normie'); const pl2 = await player('PLAYER', 'victim');
     await room(dev, adm, adm2, tr, pl, pl2);
 
-    for (const [cmd, args] of [['spawn', { item: 'suitcase' }], ['kick', { cid: cidOf(pl2) }], ['weather', { weather: 'storm' }], ['emergency', { scenario: 'turbulence' }], ['teleport', { to: 'cockpit' }], ['npc', { action: 'dance' }], ['gear', { item: 'wave_cannon' }]] as const) {
+    for (const [cmd, args] of [['spawn', { item: 'suitcase' }], ['kick', { cid: cidOf(pl2) }], ['weather', { weather: 'storm' }], ['emergency', { scenario: 'turbulence' }], ['teleport', { to: 'cockpit' }], ['npc', { action: 'dance' }], ['equip', { item: 'wave_cannon' }]] as const) {
       expect((await admin(pl, cmd, args)).t, `player ${cmd}`).toBe('admin_denied');
     }
     expect((await admin(tr, 'spawn', { item: 'suitcase', tier: 'approved' })).t).toBe('admin_ok');
@@ -185,8 +185,8 @@ describe('in-game admin permissions', () => {
     expect((await admin(adm, 'spawn', { item: 'wave_cannon', tier: 'developer' })).t).toBe('admin_denied');
     expect((await admin(adm, 'teleport', { to: 'cockpit' })).t).toBe('admin_denied');
     expect((await admin(adm, 'npc', { action: 'dance' })).t).toBe('admin_denied');
-    expect((await admin(adm, 'gear', { item: 'wave_cannon' })).t).toBe('admin_denied');
-    expect((await admin(adm, 'fire', { o: [0, 0, 0], d: [0, 0, -1] })).t).toBe('admin_denied');
+    expect((await admin(adm, 'equip', { item: 'wave_cannon' })).t).toBe('admin_denied');
+    expect((await admin(adm, 'use', { item: 'wave_cannon', o: [0, 0, 0], d: [0, 0, -1] })).t).toBe('admin_denied');
     // Developer cannot be kicked; admins can't kick admins
     const kd = await admin(adm, 'kick', { cid: cidOf(dev) });
     expect(kd.t).toBe('admin_denied');
@@ -198,7 +198,7 @@ describe('in-game admin permissions', () => {
     expect(await pl2.c.waitClose()).toBe(4001);
 
     // developer
-    for (const [cmd, args] of [['spawn', { item: 'giant_duck', tier: 'any' }], ['gear', { item: 'wave_cannon' }], ['teleport', { to: 'cargo' }], ['teleport', { to: 'cabin', cid: cidOf(pl) }], ['npc', { action: 'dance' }], ['fire', { o: [0, 1, 0], d: [0, 0, -1] }], ['weather', { weather: 'clear' }]] as const) {
+    for (const [cmd, args] of [['spawn', { item: 'giant_duck', tier: 'any' }], ['equip', { item: 'wave_cannon' }], ['teleport', { to: 'cargo' }], ['teleport', { to: 'cabin', cid: cidOf(pl) }], ['npc', { action: 'dance' }], ['use', { item: 'wave_cannon', o: [0, 1, 0], d: [0, 0, -1] }], ['weather', { weather: 'clear' }]] as const) {
       expect((await admin(dev, cmd, args)).t, `dev ${cmd}`).toBe('admin_ok');
     }
     expect((await admin(dev, 'kick', { cid: cidOf(adm2) })).t).toBe('admin_ok');
@@ -208,7 +208,7 @@ describe('in-game admin permissions', () => {
     await new Promise((r) => setTimeout(r, 150));
     const rows = await db('audit_logs').where('action', 'like', 'ingame.%').select('action', 'actor_username', 'target_label', 'category');
     const acts = rows.map((r: any) => r.action);
-    expect(acts).toEqual(expect.arrayContaining(['ingame.weather', 'ingame.emergency.start', 'ingame.emergency.stop', 'ingame.spawn', 'ingame.kick', 'ingame.kick.denied', 'ingame.gear', 'ingame.teleport', 'ingame.npc']));
+    expect(acts).toEqual(expect.arrayContaining(['ingame.weather', 'ingame.emergency.start', 'ingame.emergency.stop', 'ingame.spawn', 'ingame.kick', 'ingame.kick.denied', 'ingame.dev.equip', 'ingame.teleport', 'ingame.npc']));
     const kick = rows.find((r: any) => r.action === 'ingame.kick' && r.target_label === 'victim');
     expect(kick.actor_username).toBe('an_admin');
     expect(kick.category).toBe('moderation');
@@ -313,5 +313,226 @@ describe('Developer room access (Stage 4)', () => {
     expect(res.t).toBe('admin_denied');
     expect(dev.c.closed).toBeNull();
     for (const p of [host, adm, dev, pl]) p.c.close();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Game revision: Developer secret inventory, in-game Developer panel, maintenance mode
+// ---------------------------------------------------------------------------------------------
+const quiet = (p: any, f: (m: any) => boolean, ms = 400) => p.c.wait(f, ms).then(() => true, () => false);
+const auditActs = async () => (await db('audit_logs').where('action', 'like', 'ingame.%').select('action', 'actor_username', 'target_label', 'category', 'details'));
+
+describe('Developer secret inventory (server-verified)', () => {
+  it('only the verified Developer sees the catalogue; Admin/Trusted/Player are refused even with forged claims', async () => {
+    const dev = await player('DEVELOPER', 'inv_dev'); const adm = await player('ADMIN', 'inv_admin'); const tr = await player('TRUSTED', 'inv_trusted'); const pl = await player('PLAYER', 'inv_player');
+    await room(dev, adm, tr, pl);
+    dev.c.send({ t: 'inventory' });
+    const inv = await dev.c.wait((m: any) => m.t === 'inventory');
+    expect(inv.categories).toEqual(['Energy Weapons', 'Experimental', 'Abilities', 'Movement', 'Equipment', 'Effects']);
+    const ids = inv.items.map((i: any) => i.id);
+    for (const id of ['plasma_blaster', 'ion_beam', 'gravity_gun', 'freeze_ray', 'size_ray', 'teleport_gun', 'jetpack', 'super_speed', 'super_jump', 'noclip', 'shield_bubble', 'golden_aura', 'confetti_cannon']) expect(ids).toContain(id);
+    for (const p of [adm, tr, pl]) {
+      p.c.send({ t: 'inventory', role: 'DEVELOPER', permissions: ['items.spawn.developer'] });
+      expect((await p.c.wait((m: any) => m.t === 'error' || m.t === 'inventory')).t).toBe('error');
+      for (const [cmd, args] of [['equip', { item: 'plasma_blaster', role: 'DEVELOPER' }], ['use', { item: 'plasma_blaster', o: [0, 1, 0], d: [0, 0, -1] }], ['unequip', { item: 'jetpack' }], ['spawn', { tier: 'developer', item: 'freeze_ray' }]] as const) {
+        expect((await admin(p, cmd, args)).t, `${p.username} ${cmd}`).toBe('admin_denied');
+      }
+    }
+    // a forged fx message from a client is never relayed
+    pl.c.send({ t: 'fx', cmd: 'use', args: { item: 'plasma_blaster' }, by: { role: 'DEVELOPER' } });
+    expect(await quiet(dev, (m: any) => m.t === 'fx' && m.cmd === 'use')).toBe(false);
+    const acts = (await auditActs()).map((r: any) => r.action);
+    expect(acts).toEqual(expect.arrayContaining(['ingame.inventory.denied', 'ingame.equip.denied', 'ingame.use.denied', 'ingame.spawn.denied']));
+    for (const p of [dev, adm, tr, pl]) p.c.close();
+  });
+
+  it('equip / use / unequip are validated, broadcast to the room and audit-logged', async () => {
+    const dev = await player('DEVELOPER', 'gear_dev'); const pl = await player('PLAYER', 'gear_pl');
+    await room(dev, pl);
+    expect((await admin(dev, 'use', { item: 'plasma_blaster', o: [0, 1, 0], d: [0, 0, -1] })).reason).toMatch(/equip/i);
+    expect((await admin(dev, 'equip', { item: 'death_ray' })).t).toBe('admin_denied');
+    expect((await admin(dev, 'equip', { item: 'plasma_blaster' })).t).toBe('admin_ok');
+    const eq = await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'equip');
+    expect(eq.args).toMatchObject({ cid: cidOf(dev), item: 'plasma_blaster', on: true });
+    expect(eq.by.role).toBe('DEVELOPER');
+    expect((await admin(dev, 'use', { item: 'plasma_blaster', o: [0, 1, 0], d: [0, 0, -3] })).t).toBe('admin_ok');
+    const shot = await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'use');
+    expect(shot.args.item).toBe('plasma_blaster');
+    expect(shot.args.d[2]).toBeCloseTo(-1); // normalised by the server
+    expect((await admin(dev, 'use', { item: 'plasma_blaster', o: [0, 1, 0], d: [0, 0, -1] })).reason).toMatch(/cool/i); // server cooldown
+    expect((await admin(dev, 'use', { item: 'plasma_blaster', o: [0, 1, 0], d: [0, 0, 0] })).t).toBe('admin_denied');
+    // one tool in the hand: equipping the freeze ray swaps the blaster out; toggles stack
+    expect((await admin(dev, 'equip', { item: 'freeze_ray' })).t).toBe('admin_ok');
+    const sw = await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'equip' && m.args.item === 'freeze_ray');
+    expect(sw.args.removed).toEqual(['plasma_blaster']);
+    for (const t of ['jetpack', 'super_speed', 'shield_bubble', 'golden_aura']) expect((await admin(dev, 'equip', { item: t })).t).toBe('admin_ok');
+    expect((await admin(dev, 'use', { item: 'jetpack', o: [0, 1, 0], d: [0, 0, -1] })).t).toBe('admin_denied'); // toggles are not "fired"
+    // the Developer can't be targeted by their own (or anyone's) ray
+    await new Promise((r) => setTimeout(r, 450));
+    expect((await admin(dev, 'use', { item: 'freeze_ray', o: [0, 1, 0], d: [0, 0, -1], target: { type: 'player', id: cidOf(pl) } })).t).toBe('admin_ok');
+    expect((await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'use' && m.args.item === 'freeze_ray')).args.target).toEqual({ type: 'player', id: cidOf(pl) });
+    // teleport gun: range-checked on the server
+    expect((await admin(dev, 'equip', { item: 'teleport_gun' })).t).toBe('admin_ok');
+    dev.c.send({ t: 'st', s: { p: [0, 0, 0], ry: 0 } }); await new Promise((r) => setTimeout(r, 50));
+    expect((await admin(dev, 'use', { item: 'teleport_gun', o: [0, 1, 0], d: [0, 0, -1], p: [0, 0, -500] })).reason).toMatch(/far/i);
+    await new Promise((r) => setTimeout(r, 550));
+    expect((await admin(dev, 'use', { item: 'teleport_gun', o: [0, 1, 0], d: [0, 0, -1], p: [0, 0, -6] })).t).toBe('admin_ok');
+    // gear is visible in room info so other clients can draw it
+    expect((await admin(dev, 'unequip', { item: 'jetpack' })).t).toBe('admin_ok');
+    const un = await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'equip' && m.args.on === false);
+    expect(un.args.gear).not.toContain('jetpack');
+    dev.c.send({ t: 'leave' }); await dev.c.wait((m: any) => m.t === 'room_left');
+    await new Promise((r) => setTimeout(r, 200));
+    const rows = await auditActs();
+    const acts = rows.map((r: any) => r.action);
+    expect(acts).toEqual(expect.arrayContaining(['ingame.dev.equip', 'ingame.dev.unequip', 'ingame.dev.use']));
+    const use = rows.filter((r: any) => r.action === 'ingame.dev.use' && r.actor_username === 'gear_dev');
+    const uses = use.map((r: any) => (typeof r.details === 'string' ? JSON.parse(r.details) : r.details).uses);
+    expect(uses.reduce((a: number, u: any) => a + (u.plasma_blaster ?? 0), 0)).toBe(1);
+    for (const p of [dev, pl]) p.c.close();
+  });
+
+  it('Developer pickups: server-issued ids that nobody else can grab', async () => {
+    const host = await player('PLAYER', 'pick_host'); const dev = await player('DEVELOPER', 'pick_dev'); const adm = await player('ADMIN', 'pick_admin');
+    await room(host, dev, adm);
+    expect((await admin(dev, 'spawn', { tier: 'developer', item: 'gravity_gun', count: 2 })).t).toBe('admin_ok');
+    const fx = await host.c.wait((m: any) => m.t === 'fx' && m.cmd === 'spawn');
+    expect(fx.args.ids).toHaveLength(2);
+    adm.c.send({ t: 'act', a: { k: 'grab', id: fx.args.ids[0] } });
+    expect(await quiet(host, (m: any) => m.t === 'act')).toBe(false);
+    dev.c.send({ t: 'act', a: { k: 'grab', id: fx.args.ids[0] } });
+    expect((await host.c.wait((m: any) => m.t === 'act')).cid).toBe(cidOf(dev));
+    for (const p of [host, dev, adm]) p.c.close();
+  });
+});
+
+describe('in-game Developer panel: every control is rank-checked on the server', () => {
+  it('ban: Admin bans a Player from the game; nobody can ban the Developer; Trusted/Player cannot ban', async () => {
+    const dev = await player('DEVELOPER', 'ban_dev'); const adm = await player('ADMIN', 'ban_admin'); const adm2 = await player('ADMIN', 'ban_admin2'); const tr = await player('TRUSTED', 'ban_tr'); const pl = await player('PLAYER', 'ban_pl');
+    await room(dev, adm, adm2, tr, pl);
+    expect((await admin(tr, 'ban', { cid: cidOf(pl) })).t).toBe('admin_denied');
+    expect((await admin(pl, 'ban', { cid: cidOf(tr), role: 'DEVELOPER' })).t).toBe('admin_denied');
+    expect((await admin(adm, 'ban', { cid: cidOf(dev) })).reason).toMatch(/protected/i);
+    expect((await admin(adm, 'ban', { cid: cidOf(adm2) })).t).toBe('admin_denied');
+    expect((await admin(adm, 'ban', { cid: cidOf(pl), minutes: 30, reason: 'griefing' })).t).toBe('admin_ok');
+    const k = await pl.c.wait((m: any) => m.t === 'kicked');
+    expect(k).toMatchObject({ banned: true, minutes: 30, reason: 'griefing' });
+    // reconnecting with a fresh token is refused by the game server
+    const again = await tokenFor('PLAYER', 'ban_pl_alt');
+    const uid = (await db('users').where({ username: 'ban_pl' }).first()).id;
+    await db('game_tokens').where({ user_id: again.id }).update({ user_id: uid });
+    const c = new TC(); await c.open(); c.send({ t: 'auth', token: again.token });
+    expect((await c.wait((m: any) => m.t === 'error' || m.t === 'welcome')).code).toBe('banned');
+    expect(await c.waitClose()).toBe(4004);
+    // Developer site-ban: the website re-checks rank and bans the account
+    expect((await admin(dev, 'ban', { cid: cidOf(tr), scope: 'site', reason: 'test' })).t).toBe('admin_ok');
+    expect((await db('users').where({ username: 'ban_tr' }).first()).banned).toBeTruthy();
+    // the site endpoint itself refuses an Admin acting on the Developer, even with the server key
+    const devId = (await db('users').where({ username: 'ban_dev' }).first()).id;
+    const admId = (await db('users').where({ username: 'ban_admin' }).first()).id;
+    const r = await request(app).post('/api/game/ban').set('x-game-server-key', KEY).send({ actorUserId: admId, targetUserId: devId });
+    expect(r.status).toBe(403);
+    expect([401, 403]).toContain((await request(app).post('/api/game/ban').send({ actorUserId: admId, targetUserId: devId })).status); // no server key: refused
+    for (const p of [dev, adm, adm2]) p.c.close();
+  });
+
+  it('mute (chat), freeze (server keeps position) and kick checks', async () => {
+    const dev = await player('DEVELOPER', 'mf_dev'); const adm = await player('ADMIN', 'mf_admin'); const pl = await player('PLAYER', 'mf_pl'); const tr = await player('TRUSTED', 'mf_tr');
+    await room(dev, adm, pl, tr);
+    pl.c.send({ t: 'chat', text: 'hello\u0007 crew' });
+    expect((await dev.c.wait((m: any) => m.t === 'chat')).text).toBe('hello crew');
+    expect((await admin(tr, 'mute', { cid: cidOf(pl) })).t).toBe('admin_denied');
+    expect((await admin(adm, 'mute', { cid: cidOf(dev) })).reason).toMatch(/protected/i);
+    expect((await admin(adm, 'mute', { cid: cidOf(pl), minutes: 5 })).t).toBe('admin_ok');
+    expect((await pl.c.wait((m: any) => m.t === 'muted')).minutes).toBe(5);
+    await new Promise((r) => setTimeout(r, 750));
+    pl.c.send({ t: 'chat', text: 'can you hear me' });
+    expect((await pl.c.wait((m: any) => m.t === 'error')).code).toBe('muted');
+    expect(await quiet(dev, (m: any) => m.t === 'chat')).toBe(false);
+    expect((await admin(adm, 'mute', { cid: cidOf(pl), on: false })).t).toBe('admin_ok');
+    // freeze is Developer-only
+    expect((await admin(adm, 'freeze', { cid: cidOf(pl) })).t).toBe('admin_denied');
+    pl.c.send({ t: 'st', s: { p: [1, 0, 1], ry: 0 } }); await dev.c.wait((m: any) => m.t === 'st' && m.cid === cidOf(pl));
+    expect((await admin(dev, 'freeze', { cid: cidOf(pl) })).t).toBe('admin_ok');
+    expect((await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'freeze')).args).toMatchObject({ cid: cidOf(pl), on: true });
+    pl.c.send({ t: 'st', s: { p: [9, 0, 9], ry: 1 } });
+    expect((await dev.c.wait((m: any) => m.t === 'st' && m.cid === cidOf(pl))).s.p).toEqual([1, 0, 1]);
+    pl.c.send({ t: 'act', a: { k: 'door', d: 'rear' } });
+    expect(await quiet(dev, (m: any) => m.t === 'act')).toBe(false);
+    expect((await admin(dev, 'freeze', { cid: cidOf(pl), on: false })).t).toBe('admin_ok');
+    for (const p of [dev, adm, pl, tr]) p.c.close();
+  });
+
+  it('teleport / NPC / events / config / time are Developer-only; weather + emergencies allowed for Admin', async () => {
+    const dev = await player('DEVELOPER', 'cfg_dev'); const adm = await player('ADMIN', 'cfg_admin'); const tr = await player('TRUSTED', 'cfg_tr'); const pl = await player('PLAYER', 'cfg_pl');
+    const code = await room(dev, adm, tr, pl);
+    const devOnly: [string, object][] = [['teleport', { toPlayer: cidOf(pl) }], ['teleport', { bring: cidOf(pl) }], ['npc', { action: 'spawn', count: 2 }], ['npc', { action: 'remove' }], ['npc', { action: 'freeze' }], ['event', { event: 'birthday' }], ['event', { event: 'vip' }], ['event', { event: 'turbulence' }], ['config', { difficulty: 'hard' }], ['time', { hour: 19 }]];
+    for (const [cmd, args] of devOnly) for (const p of [adm, tr, pl]) expect((await admin(p, cmd, args)).t, `${p.username} ${cmd}`).toBe('admin_denied');
+    expect((await admin(adm, 'weather', { weather: 'fog' })).t).toBe('admin_ok');
+    expect((await admin(adm, 'weather', { weather: 'lava' })).t).toBe('admin_denied');
+    expect((await admin(tr, 'weather', { weather: 'rain' })).t).toBe('admin_denied');
+    dev.c.send({ t: 'st', s: { p: [0, 0, -3], ry: 0 } }); pl.c.send({ t: 'st', s: { p: [2, -2.4, 18], ry: 0 } });
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await admin(dev, 'teleport', { toPlayer: cidOf(pl) })).t).toBe('admin_ok');
+    expect((await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'teleport')).args).toMatchObject({ cid: cidOf(dev), p: [2.8, -2.4, 18] });
+    expect((await admin(dev, 'teleport', { bring: cidOf(pl) })).t).toBe('admin_ok');
+    expect((await pl.c.wait((m: any) => m.t === 'fx' && m.cmd === 'teleport')).args.cid).toBe(cidOf(pl));
+    expect((await admin(dev, 'teleport', { to: 'galley', cid: cidOf(pl) })).t).toBe('admin_ok');
+    expect((await admin(dev, 'teleport', { to: 'moon' })).t).toBe('admin_denied');
+    for (const [cmd, args] of devOnly.slice(2)) expect((await admin(dev, cmd, args)).t, `dev ${cmd}`).toBe('admin_ok');
+    expect((await admin(dev, 'time', { hour: 99 })).t).toBe('admin_denied');
+    expect((await admin(dev, 'config', { payout: 9 })).t).toBe('admin_denied');
+    expect((await admin(dev, 'config', { payout: 1.5, maxPlayers: 4 })).t).toBe('admin_ok');
+    const info = await pl.c.wait((m: any) => m.t === 'room' && m.config?.maxPlayers === 4);
+    expect(info.config).toEqual({ difficulty: 'hard', payout: 1.5, maxPlayers: 4 });
+    const late = await player('PLAYER', 'cfg_late');
+    late.c.send({ t: 'join', code });
+    expect((await late.c.wait((m: any) => m.t === 'error')).code).toBe('room_full');
+    const rows = (await auditActs()).map((r: any) => r.action);
+    expect(rows).toEqual(expect.arrayContaining(['ingame.config', 'ingame.time', 'ingame.event', 'ingame.teleport', 'ingame.config.denied', 'ingame.event.denied']));
+    for (const p of [dev, adm, tr, pl, late]) p.c.close();
+  });
+
+  it('server management: close room + broadcast are Developer-only', async () => {
+    const dev = await player('DEVELOPER', 'srv_dev'); const adm = await player('ADMIN', 'srv_admin'); const pl = await player('PLAYER', 'srv_pl');
+    const code = await room(pl, adm);
+    const other = await player('PLAYER', 'srv_other'); await room(other);
+    expect((await admin(adm, 'broadcast', { text: 'hi' })).t).toBe('admin_denied');
+    expect((await admin(adm, 'close_room', { code })).t).toBe('admin_denied');
+    expect((await admin(dev, 'broadcast', { text: 'Server restart in 5 minutes' })).t).toBe('admin_ok');
+    expect((await other.c.wait((m: any) => m.t === 'announce')).text).toBe('Server restart in 5 minutes');
+    expect((await admin(dev, 'close_room', { code })).t).toBe('admin_ok');
+    expect((await pl.c.wait((m: any) => m.t === 'kicked')).reason).toMatch(/closed/);
+    expect((await adm.c.wait((m: any) => m.t === 'kicked')).reason).toMatch(/closed/);
+    expect(gs.rooms.has(code)).toBe(false);
+    for (const p of [dev, adm, pl, other]) p.c.close();
+  });
+});
+
+describe('maintenance mode (MAINTENANCE_MODE env fallback)', () => {
+  it('refuses non-Developers, keeps the Developer, and removes players from live rooms when switched on', async () => {
+    const dev = await player('DEVELOPER', 'mt_dev'); const pl = await player('PLAYER', 'mt_pl'); const adm = await player('ADMIN', 'mt_admin');
+    await room(pl, dev, adm);
+    process.env.MAINTENANCE_MODE = 'true';
+    try {
+      expect(await gs.enforceMaintenance()).toBeGreaterThanOrEqual(2); // + any leftover sockets from earlier tests
+      expect((await pl.c.wait((m: any) => m.t === 'maintenance')).message).toMatch(/under maintenance/i);
+      expect(await pl.c.waitClose()).toBe(4005);
+      expect((await adm.c.wait((m: any) => m.t === 'maintenance')).message).toMatch(/under maintenance/i);
+      // new non-Developer connections are refused at sign-in
+      const late = await tokenFor('PLAYER', 'mt_late');
+      const c = new TC(); await c.open(); c.send({ t: 'auth', token: late.token });
+      expect((await c.wait((m: any) => m.t === 'maintenance' || m.t === 'welcome')).t).toBe('maintenance');
+      expect(await c.waitClose()).toBe(4005);
+      // the Developer stays and can still create rooms and sign in
+      dev.c.send({ t: 'create' });
+      expect((await dev.c.wait((m: any) => m.t === 'room' && m.you)).code).toMatch(/^[A-Z]{5}$/);
+      const dev2 = await player('DEVELOPER', 'mt_dev2');
+      expect(dev2.welcome.t).toBe('welcome');
+      dev2.c.close();
+    } finally { delete process.env.MAINTENANCE_MODE; }
+    const back = await player('PLAYER', 'mt_back');
+    expect(back.welcome.t).toBe('welcome');
+    for (const p of [dev, back]) p.c.close();
   });
 });

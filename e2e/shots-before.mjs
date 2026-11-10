@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const B = 'http://localhost:3200', OUT = '../docs/screenshots/revision';
+const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+await p.goto(`${B}/play/sky-crew`); await p.waitForFunction(() => window.skyCrew?.ready, null, { timeout: 60000 });
+await p.click('#bSolo'); await p.evaluate(() => window.skyCrew.debug.sitAll());
+const shot = async (n, pos, at) => { await p.evaluate(([a, c]) => window.skyCrew.debug.cam(a, c), [pos, at]); await p.waitForTimeout(1200); await p.screenshot({ path: `${OUT}/before-${n}.png` }); };
+await shot('cabin', [0, 1.6, 4], [0, 1.2, -8]);
+await shot('passengers', [0.2, 1.4, -6.5], [-1.2, 0.8, -9.5]);
+await shot('side-door', [0.8, 1.5, -9.5], [-1.9, 1.1, -12]);
+await shot('exterior', [-14, 3, 6], [0, 0, -2]);
+await b.close();

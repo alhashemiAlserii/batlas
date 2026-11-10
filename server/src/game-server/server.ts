@@ -15,22 +15,23 @@ import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { SiteBridge, VerifiedUser } from './bridge.js';
 import { canActOn, ITEM_TIERS, type ItemTier, type Permission } from '../lib/permissions.js';
+import { DEV_ITEMS, DEV_CATEGORIES, devItem, MAX_EQUIPPED, WEATHERS, SCENARIOS, TELEPORT_SPOTS, NPC_ACTIONS, ROOM_EVENTS, DIFFICULTIES, MUTE_MINUTES_MAX, BAN_MINUTES_MAX } from './catalog.js';
+import { envMaintenance, MAINTENANCE_MESSAGE, type MaintenanceCheck } from './maintenance.js';
 
+export { WEATHERS, SCENARIOS, TELEPORT_SPOTS, NPC_ACTIONS } from './catalog.js';
 export const WS_PATH = '/ws/sky-crew';
 export const MAX_PLAYERS = 8;
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
+/** Spawnable world items per tier. Developer-tier items are the secret inventory's tools, spawned as pickups only the Developer can take. */
 export const SPAWNABLE: Record<ItemTier, string[]> = {
   approved: ['suitcase', 'duffel', 'water', 'snack', 'blanket'],
   any: ['suitcase', 'duffel', 'water', 'snack', 'blanket', 'beach_ball', 'giant_duck', 'traffic_cone'],
-  developer: ['wave_cannon'],
+  developer: DEV_ITEMS.filter((i) => i.kind === 'tool').map((i) => i.id),
 };
-export const WEATHERS = ['clear', 'storm'] as const;
-export const SCENARIOS = ['engine_failure', 'turbulence', 'cabin_pressure', 'emergency_landing'] as const;
-export const TELEPORT_SPOTS = ['cockpit', 'cabin', 'cargo', 'apron'] as const;
-export const NPC_ACTIONS = ['sit', 'dance', 'panic', 'calm', 'respawn'] as const;
 export const CREW_ROLES = ['pilot', 'copilot', 'cabin', 'cargo'] as const;
 const UNIQUE_CREW = new Set(['pilot', 'copilot']); // one captain and one first officer per room
+const CHAT_MAX = 200;
 
 interface Client {
   cid: string;
@@ -43,7 +44,16 @@ interface Client {
   joinedAt: number;
   bucket: { tokens: number; last: number };
   authed: Promise<void> | null;
+  /** Developer secret inventory: what is equipped right now (server-side truth) */
+  equipped: Set<string>;
+  lastUse: Map<string, number>;
+  useCounts: Map<string, number>; // aggregated for the audit log (flushed every few seconds)
+  mutedUntil: number;
+  frozen: boolean;
+  lastChat: number;
 }
+
+interface RoomConfig { difficulty: (typeof DIFFICULTIES)[number]; payout: number; maxPlayers: number }
 
 interface Room {
   code: string;
@@ -51,16 +61,22 @@ interface Room {
   pilotCid: string | null;
   clients: Map<string, Client>;
   weather: (typeof WEATHERS)[number];
+  hour: number; // time of day (0..24), Developer-controlled
   createdAt: number;
   locked: boolean; // host closed the room to new players
   route: string | null; // last values seen in the host's world snapshot (for the staff room list)
   phase: string | null;
+  config: RoomConfig;
+  devItems: Set<string>; // ids of Developer-tier pickups spawned in this room
+  seq: number;
 }
 
 type Send = (c: Client, msg: unknown) => void;
 
 const isNum = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 const clampNum = (v: unknown, lim = 1e6) => (isNum(v) ? Math.max(-lim, Math.min(lim, v as number)) : 0);
+const vec3 = (v: unknown, lim = 1e5) => (Array.isArray(v) && v.length === 3 && v.every(isNum) ? (v as number[]).map((n) => clampNum(n, lim)) : null);
+const cleanText = (v: unknown, max = CHAT_MAX) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** Only well-formed numeric/short-string player state is relayed (no client-claimed ranks/names). */
 function sanitizeState(s: any): Record<string, unknown> | null {
@@ -73,27 +89,36 @@ function sanitizeState(s: any): Record<string, unknown> | null {
     held: typeof s.held === 'string' ? s.held.slice(0, 32) : null,
     mode: typeof s.mode === 'string' ? s.mode.slice(0, 16) : 'walk',
     moving: !!s.moving,
+    run: !!s.run,
+    fly: !!s.fly,
   };
 }
 
 export interface GameServerOptions {
   bridge: SiteBridge;
   log?: (msg: string) => void;
+  /** Shared site maintenance helper; defaults to the MAINTENANCE_MODE env fallback. */
+  isMaintenance?: MaintenanceCheck;
+  /** how often live rooms are checked for maintenance being switched on (ms) */
+  maintenancePollMs?: number;
 }
 
 export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions) {
   const { bridge } = opts;
   const log = opts.log ?? ((m: string) => console.log(`[game] ${m}`));
+  const isMaintenance = opts.isMaintenance ?? envMaintenance;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const rooms = new Map<string, Room>();
   const clients = new Set<Client>();
+  /** game-server bans (userId -> until ms), set by Admin/Developer "ban" from the in-game panel */
+  const gameBans = new Map<number, { until: number; by: string; reason: string }>();
 
   const send: Send = (c, msg) => {
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state });
+  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now() });
   // Hidden Developers are left out of everyone else's player list.
-  const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, locked: r.locked, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
+  const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, hour: r.hour, locked: r.locked, config: r.config, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
   const broadcastRoom = (r: Room, except?: Client) => { for (const c of r.clients.values()) if (c !== except) send(c, roomInfo(r, c)); };
   /** Developer rank, as verified by the website for this connection's game token (never client claims). */
   const isDev = (c: Client) => !!c.user && c.user.role === 'DEVELOPER';
@@ -102,6 +127,9 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     for (const c of r.clients.values()) if (c !== except && c.ws.readyState === WebSocket.OPEN) c.ws.send(data);
   };
   const can = (c: Client, p: Permission) => !!c.user && c.user.permissions.includes(p);
+  /** The secret inventory: verified Developer rank AND the developer item permission. Admin/Trusted never pass. */
+  const devInv = (c: Client) => isDev(c) && can(c, ITEM_TIERS.developer);
+  const actor = (c: Client) => ({ id: c.user!.userId, role: c.user!.role });
 
   function newCode() {
     for (;;) {
@@ -114,12 +142,15 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   function leaveRoom(c: Client, reason = 'left') {
     const r = c.room;
     if (!r) return;
+    flushUses(c);
     r.clients.delete(c.cid);
     const wasHidden = c.hidden;
     c.room = null;
     c.state = null;
     c.crew = null;
     c.hidden = false;
+    c.frozen = false;
+    c.equipped.clear();
     if (r.clients.size === 0) {
       rooms.delete(r.code);
       log(`room ${r.code} closed`);
@@ -140,7 +171,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     const dev = isDev(c);
     const visible = [...r.clients.values()].filter((o) => !o.hidden).length;
     const bypass: string[] = [];
-    if (!opts.created && visible >= MAX_PLAYERS) { if (!dev) return send(c, { t: 'error', code: 'room_full', message: 'That room is full.' }); bypass.push('full'); }
+    if (!opts.created && visible >= r.config.maxPlayers) { if (!dev) return send(c, { t: 'error', code: 'room_full', message: 'That room is full.' }); bypass.push('full'); }
     if (!opts.created && r.locked) { if (!dev) return send(c, { t: 'error', code: 'room_locked', message: 'That room is locked by its host.' }); bypass.push('locked'); }
     if (c.room) leaveRoom(c);
     c.hidden = dev && !!opts.hidden && !opts.created;
@@ -158,9 +189,9 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       const host = r.clients.get(r.hostCid);
       const ps = [...r.clients.values()];
       return {
-        code: r.code, host: host?.user?.username ?? null, locked: r.locked, route: r.route, phase: r.phase, weather: r.weather, createdAt: new Date(r.createdAt).toISOString(),
-        count: ps.filter((p) => !p.hidden).length, max: MAX_PLAYERS,
-        players: ps.map((p) => ({ username: p.user!.username, role: p.user!.role, crew: p.crew, hidden: p.hidden, host: p.cid === r.hostCid })),
+        code: r.code, host: host?.user?.username ?? null, locked: r.locked, route: r.route, phase: r.phase, weather: r.weather, hour: r.hour, config: r.config, createdAt: new Date(r.createdAt).toISOString(),
+        count: ps.filter((p) => !p.hidden).length, max: r.config.maxPlayers,
+        players: ps.map((p) => ({ cid: p.cid, username: p.user!.username, role: p.user!.role, crew: p.crew, hidden: p.hidden, host: p.cid === r.hostCid })),
       };
     });
   }
@@ -178,90 +209,240 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       log(`audit error: ${(e as Error).message}`);
     }
   }
+  /** Weapon/ability uses are summed and written to the audit log in batches (one row per item per flush). */
+  function flushUses(c: Client) {
+    if (!c.user || !c.useCounts.size) return;
+    const uses = Object.fromEntries(c.useCounts);
+    c.useCounts.clear();
+    void audit(c, 'dev.use', { uses });
+  }
+
+  /** Removes a client from the game with a reason screen (kick / ban / maintenance / room closed). */
+  function eject(c: Client, t: 'kicked' | 'maintenance', payload: Record<string, unknown>, code = 4001) {
+    send(c, { t, ...payload });
+    leaveRoom(c, t === 'maintenance' ? 'maintenance' : 'kicked');
+    setTimeout(() => c.ws.close(code, t), 50);
+  }
+
+  /** Rank-checked action on another player in the room. Logs denials. */
+  async function guardTarget(c: Client, cmd: string, target: Client | undefined): Promise<string | null> {
+    if (!target) return 'Player not found in this room.';
+    if (isDev(target)) { await audit(c, `${cmd}.denied`, { reason: 'developer' }, target); return 'The Developer is protected.'; }
+    const g = canActOn(actor(c), actor(target));
+    if (!g.ok) { await audit(c, `${cmd}.denied`, { reason: g.reason }, target); return g.reason; }
+    return null;
+  }
 
   /** Validates and applies an admin command. Returns an error string or null on success. */
   async function adminCommand(c: Client, cmd: string, args: any): Promise<string | null> {
     const r = c.room;
-    if (!r) return 'Join a room first.';
     args = args && typeof args === 'object' ? args : {};
-    const fx = (extra: Record<string, unknown> = {}) => broadcast(r, { t: 'fx', cmd, args: { ...args, ...extra }, by: { cid: c.cid, username: c.user!.username, role: c.user!.role } });
+    // server-wide Developer tools work outside a room too
+    if (cmd === 'broadcast') {
+      if (!isDev(c) || !can(c, 'dev.commands')) { await audit(c, 'broadcast.denied', {}); return 'Only the Developer can broadcast.'; }
+      const text = cleanText(args.text);
+      if (!text) return 'Write a message first.';
+      for (const o of clients) if (o.user) send(o, { t: 'announce', text, by: c.user!.username });
+      await audit(c, 'broadcast', { text, rooms: rooms.size });
+      return null;
+    }
+    if (cmd === 'close_room') {
+      if (!isDev(c) || !can(c, 'dev.commands')) { await audit(c, 'close_room.denied', {}); return 'Only the Developer can close rooms.'; }
+      const room = rooms.get(String(args.code ?? '').toUpperCase());
+      if (!room) return 'No room with that code.';
+      const ps = [...room.clients.values()];
+      for (const o of ps) {
+        if (o === c) { leaveRoom(o, 'closed'); send(o, { t: 'room_left', reason: 'closed' }); continue; }
+        send(o, { t: 'kicked', by: c.user!.username, reason: 'The Developer closed this room.' });
+        leaveRoom(o, 'closed');
+      }
+      rooms.delete(room.code);
+      await audit(c, 'close_room', { code: room.code, players: ps.length });
+      return null;
+    }
+    if (!r) return 'Join a room first.';
+    const by = { cid: c.cid, username: c.user!.username, role: c.user!.role };
+    const fx = (extra: Record<string, unknown> = {}, base = args) => broadcast(r, { t: 'fx', cmd, args: { ...base, ...extra }, by });
     const target = typeof args.cid === 'string' ? r.clients.get(args.cid) : undefined;
 
     switch (cmd) {
       case 'spawn': {
         const tier = (['approved', 'any', 'developer'] as const).includes(args.tier) ? (args.tier as ItemTier) : 'approved';
-        if (!can(c, ITEM_TIERS[tier])) return 'Your rank cannot spawn that.';
+        if (tier === 'developer' ? !devInv(c) : !can(c, ITEM_TIERS[tier])) { await audit(c, 'spawn.denied', { tier, item: String(args.item ?? '').slice(0, 32) }); return 'Your rank cannot spawn that.'; }
         if (!SPAWNABLE[tier].includes(args.item)) return 'Unknown item for that tier.';
         const count = Math.max(1, Math.min(5, Math.floor(Number(args.count) || 1)));
-        fx({ tier, item: args.item, count });
+        // Developer pickups get server-issued ids so the server can refuse anyone else grabbing them.
+        const ids = tier === 'developer' ? Array.from({ length: count }, () => { const id = `dv${++r.seq}`; r.devItems.add(id); return id; }) : undefined;
+        fx({ tier, item: args.item, count, ids }, { tier, item: args.item });
         await audit(c, 'spawn', { tier, item: args.item, count });
         return null;
       }
       case 'kick': {
-        if (!can(c, 'players.kick')) return 'Your rank cannot kick players.';
-        if (!target) return 'Player not found in this room.';
-        if (isDev(target)) { await audit(c, 'kick.denied', { reason: 'developer' }, target); return 'The Developer is protected and cannot be kicked.'; }
-        const g = canActOn({ id: c.user!.userId, role: c.user!.role }, { id: target.user!.userId, role: target.user!.role });
-        if (!g.ok) {
-          await audit(c, 'kick.denied', { reason: g.reason }, target);
-          return g.reason;
-        }
-        await audit(c, 'kick', { reason: String(args.reason ?? '').slice(0, 200) }, target);
-        send(target, { t: 'kicked', by: c.user!.username, reason: String(args.reason ?? '').slice(0, 200) });
-        leaveRoom(target, 'kicked');
-        setTimeout(() => target.ws.close(4001, 'kicked'), 50);
+        if (!can(c, 'players.kick')) { await audit(c, 'kick.denied', { reason: 'rank' }, target); return 'Your rank cannot kick players.'; }
+        const g = await guardTarget(c, 'kick', target); if (g) return g;
+        const reason = cleanText(args.reason);
+        await audit(c, 'kick', { reason }, target);
+        eject(target!, 'kicked', { by: c.user!.username, reason });
+        return null;
+      }
+      case 'ban': {
+        if (!can(c, 'players.ban')) { await audit(c, 'ban.denied', { reason: 'rank' }, target); return 'Your rank cannot ban players.'; }
+        const g = await guardTarget(c, 'ban', target); if (g) return g;
+        const reason = cleanText(args.reason);
+        const minutes = Math.max(1, Math.min(BAN_MINUTES_MAX, Math.floor(Number(args.minutes) || 60)));
+        const site = args.scope === 'site';
+        if (site) {
+          // account ban on the website: the site re-checks the actor's rank against its own database
+          if (!bridge.ban) return 'Site bans are not available on this server.';
+          const res = await bridge.ban({ actorUserId: c.user!.userId, targetUserId: target!.user!.userId, reason });
+          if (!res.ok) return res.reason ?? 'The website refused the ban.';
+        } else gameBans.set(target!.user!.userId, { until: Date.now() + minutes * 60_000, by: c.user!.username, reason });
+        await audit(c, 'ban', { reason, scope: site ? 'site' : 'game', minutes: site ? null : minutes }, target);
+        eject(target!, 'kicked', { by: c.user!.username, reason, banned: true, minutes: site ? null : minutes });
+        return null;
+      }
+      case 'mute': {
+        if (!can(c, 'players.kick')) { await audit(c, 'mute.denied', { reason: 'rank' }, target); return 'Your rank cannot mute players.'; }
+        const g = await guardTarget(c, 'mute', target); if (g) return g;
+        const minutes = args.on === false ? 0 : Math.max(1, Math.min(MUTE_MINUTES_MAX, Math.floor(Number(args.minutes) || 10)));
+        target!.mutedUntil = minutes ? Date.now() + minutes * 60_000 : 0;
+        send(target!, { t: 'muted', minutes, by: c.user!.username });
+        broadcastRoom(r);
+        await audit(c, minutes ? 'mute' : 'unmute', { minutes }, target);
+        return null;
+      }
+      case 'freeze': {
+        if (!can(c, 'dev.commands')) { await audit(c, 'freeze.denied', { reason: 'rank' }, target); return 'Only the Developer can freeze players.'; }
+        const g = await guardTarget(c, 'freeze', target); if (g) return g;
+        target!.frozen = args.on !== false;
+        fx({ cid: target!.cid, on: target!.frozen });
+        broadcastRoom(r);
+        await audit(c, target!.frozen ? 'freeze' : 'unfreeze', {}, target);
         return null;
       }
       case 'weather': {
-        if (!can(c, 'weather.change')) return 'Your rank cannot change the weather.';
+        if (!can(c, 'weather.change')) { await audit(c, 'weather.denied', {}); return 'Your rank cannot change the weather.'; }
         if (!WEATHERS.includes(args.weather)) return 'Unknown weather.';
         r.weather = args.weather;
-        fx();
+        fx({ weather: r.weather }, {});
         await audit(c, 'weather', { weather: args.weather });
         return null;
       }
+      case 'time': {
+        if (!can(c, 'environment.control')) { await audit(c, 'time.denied', {}); return 'Only the Developer can change the time of day.'; }
+        const hour = Number(args.hour);
+        if (!Number.isFinite(hour) || hour < 0 || hour > 24) return 'Hour must be between 0 and 24.';
+        r.hour = Math.round(hour * 4) / 4;
+        fx({ hour: r.hour }, {});
+        await audit(c, 'time', { hour: r.hour });
+        return null;
+      }
       case 'emergency': {
-        if (!can(c, 'emergency.trigger')) return 'Your rank cannot trigger emergencies.';
+        if (!can(c, 'emergency.trigger')) { await audit(c, 'emergency.denied', {}); return 'Your rank cannot trigger emergencies.'; }
         if (!SCENARIOS.includes(args.scenario)) return 'Unknown scenario.';
         const action = args.action === 'stop' ? 'stop' : 'start';
         if (action === 'stop' && !can(c, 'emergency.manage')) return 'Your rank cannot stop emergencies.';
-        fx({ action });
+        fx({ scenario: args.scenario, action }, {});
         await audit(c, `emergency.${action}`, { scenario: args.scenario });
         return null;
       }
+      case 'event': {
+        if (!can(c, 'events.control')) { await audit(c, 'event.denied', {}); return 'Only the Developer can start events.'; }
+        if (!ROOM_EVENTS.includes(args.event)) return 'Unknown event.';
+        fx({ event: args.event }, {});
+        await audit(c, 'event', { event: args.event });
+        return null;
+      }
+      case 'config': {
+        if (!can(c, 'games.manage')) { await audit(c, 'config.denied', {}); return 'Only the Developer can change the game config.'; }
+        const next = { ...r.config };
+        if (args.difficulty !== undefined) { if (!DIFFICULTIES.includes(args.difficulty)) return 'Unknown difficulty.'; next.difficulty = args.difficulty; }
+        if (args.payout !== undefined) { const p = Number(args.payout); if (!Number.isFinite(p) || p < 0.5 || p > 3) return 'Payout multiplier must be 0.5 to 3.'; next.payout = Math.round(p * 4) / 4; }
+        if (args.maxPlayers !== undefined) { const m = Math.floor(Number(args.maxPlayers)); if (!Number.isFinite(m) || m < 1 || m > MAX_PLAYERS) return `Max players must be 1 to ${MAX_PLAYERS}.`; next.maxPlayers = m; }
+        r.config = next;
+        fx({ config: next }, {});
+        broadcastRoom(r);
+        await audit(c, 'config', { ...next });
+        return null;
+      }
       case 'teleport': {
-        if (!can(c, 'teleport')) return 'Only the Developer can teleport.';
-        if (!TELEPORT_SPOTS.includes(args.to)) return 'Unknown destination.';
-        const who = target ?? c;
-        if (who !== c) {
-          const g = canActOn({ id: c.user!.userId, role: c.user!.role }, { id: who.user!.userId, role: who.user!.role });
-          if (!g.ok) return g.reason;
+        if (!can(c, 'teleport')) { await audit(c, 'teleport.denied', {}); return 'Only the Developer can teleport.'; }
+        // modes: { to: spot [, cid] } | { toPlayer: cid } (me -> them) | { bring: cid } (them -> me)
+        let who = c, p: number[] | null = null, to: string | null = null;
+        const other = (id: unknown) => (typeof id === 'string' ? r.clients.get(id) : undefined);
+        if (args.toPlayer !== undefined) {
+          const t = other(args.toPlayer); if (!t || t === c) return 'Player not found in this room.';
+          p = vec3(t.state?.p); if (!p) return 'That player has no position yet.';
+        } else if (args.bring !== undefined) {
+          const t = other(args.bring); if (!t || t === c) return 'Player not found in this room.';
+          const g = canActOn(actor(c), actor(t)); if (!g.ok) return g.reason;
+          who = t; p = vec3(c.state?.p); if (!p) return 'You have no position yet.';
+        } else {
+          if (!(TELEPORT_SPOTS as readonly string[]).includes(args.to)) return 'Unknown destination.';
+          to = args.to;
+          if (target && target !== c) { const g = canActOn(actor(c), actor(target)); if (!g.ok) return g.reason; who = target; }
         }
-        fx({ cid: who.cid });
-        await audit(c, 'teleport', { to: args.to }, who === c ? undefined : who);
+        if (p) p = [p[0] + 0.8, p[1], p[2]]; // land beside them, not inside them
+        fx({ cid: who.cid, to, p }, {});
+        await audit(c, 'teleport', { to: to ?? 'player', mode: args.toPlayer ? 'to_player' : args.bring ? 'bring' : 'spot' }, who === c ? (args.toPlayer ? other(args.toPlayer) : undefined) : who);
         return null;
       }
       case 'npc': {
-        if (!can(c, 'npc.control')) return 'Only the Developer can control NPCs.';
+        if (!can(c, 'npc.control')) { await audit(c, 'npc.denied', {}); return 'Only the Developer can control NPCs.'; }
         if (!NPC_ACTIONS.includes(args.action)) return 'Unknown NPC action.';
-        fx();
-        await audit(c, 'npc', { action: args.action });
+        const count = Math.max(1, Math.min(8, Math.floor(Number(args.count) || 1)));
+        fx({ action: args.action, count }, {});
+        await audit(c, 'npc', { action: args.action, count });
         return null;
       }
-      case 'gear': {
-        if (!can(c, 'items.spawn.developer')) return 'Developer-only equipment.';
-        if (args.item !== 'wave_cannon') return 'Unknown gear.';
-        fx({ cid: c.cid });
-        await audit(c, 'gear', { item: args.item });
+      case 'equip':
+      case 'unequip': {
+        if (!devInv(c)) { await audit(c, `${cmd}.denied`, { item: String(args.item ?? '').slice(0, 32) }); return 'Unknown command.'; }
+        const it = devItem(args.item); if (!it) return 'Unknown item.';
+        const removed: string[] = [];
+        if (cmd === 'equip') {
+          if (c.equipped.has(it.id)) return null;
+          if (it.kind === 'tool') for (const e of c.equipped) if (devItem(e)?.kind === 'tool') { c.equipped.delete(e); removed.push(e); } // one tool in the hand
+          if (c.equipped.size >= MAX_EQUIPPED) return 'Too many items equipped.';
+          c.equipped.add(it.id);
+        } else {
+          if (!c.equipped.delete(it.id)) return null;
+          flushUses(c);
+        }
+        broadcast(r, { t: 'fx', cmd: 'equip', args: { cid: c.cid, item: it.id, on: cmd === 'equip', removed, gear: [...c.equipped] }, by });
+        await audit(c, `dev.${cmd}`, { item: it.id, gear: [...c.equipped] });
         return null;
       }
-      case 'fire': {
-        // Firing the fictional Wave Cannon. Gear grant is audited; individual shots are not (spam).
-        if (!can(c, 'items.spawn.developer')) return 'Developer-only equipment.';
-        const o = Array.isArray(args.o) ? args.o.slice(0, 3).map((n: unknown) => clampNum(n, 1e5)) : null;
-        const d = Array.isArray(args.d) ? args.d.slice(0, 3).map((n: unknown) => clampNum(n, 2)) : null;
-        if (!o || !d) return 'Bad shot.';
-        broadcast(r, { t: 'fx', cmd: 'fire', args: { o, d }, by: { cid: c.cid, username: c.user!.username, role: c.user!.role } });
+      case 'use': {
+        if (!devInv(c)) { await audit(c, 'use.denied', { item: String(args.item ?? '').slice(0, 32) }); return 'Unknown command.'; }
+        const it = devItem(args.item); if (!it || it.kind !== 'tool') return 'Unknown item.';
+        if (!c.equipped.has(it.id)) return 'Equip it first.';
+        const now = Date.now(), last = c.lastUse.get(it.id) ?? 0;
+        if (now - last < it.cooldown * 1000 * 0.9) return 'Cooling down.';
+        c.lastUse.set(it.id, now);
+        const o = vec3(args.o), d = vec3(args.d, 2);
+        if (!o || !d) return 'Bad aim.';
+        const len = Math.hypot(d[0], d[1], d[2]); if (len < 0.5) return 'Bad aim.';
+        const dir = d.map((v) => v / len);
+        const out: Record<string, unknown> = { cid: c.cid, item: it.id, o, d: dir, mode: args.mode === 'grow' ? 'grow' : args.mode === 'shrink' ? 'shrink' : args.mode === 'launch' ? 'launch' : null, n: now % 100000 };
+        // optional target (a passenger id, an item id or a player cid)
+        if (args.target && typeof args.target === 'object') {
+          const kind = ['pax', 'item', 'player'].includes(args.target.type) ? args.target.type : null;
+          if (kind === 'player') {
+            const t = r.clients.get(String(args.target.id));
+            if (!t || t === c) return 'Player not found in this room.';
+            if (isDev(t)) return 'The Developer is protected.';
+            out.target = { type: 'player', id: t.cid };
+          } else if (kind) out.target = { type: kind, id: kind === 'pax' ? Math.floor(Number(args.target.id)) || 0 : String(args.target.id).slice(0, 32) };
+        }
+        if (it.id === 'teleport_gun') {
+          const p = vec3(args.p); if (!p) return 'Aim at a spot.';
+          const from = vec3(c.state?.p) ?? o;
+          if (Math.hypot(p[0] - from[0], p[1] - from[1], p[2] - from[2]) > 80) return 'Too far.';
+          out.p = p;
+        } else if (args.p) out.p = vec3(args.p);
+        broadcast(r, { t: 'fx', cmd: 'use', args: out, by });
+        c.useCounts.set(it.id, (c.useCounts.get(it.id) ?? 0) + 1);
         return null;
       }
       default:
@@ -277,6 +458,10 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     if (b.tokens < 1) return false;
     b.tokens -= 1;
     return true;
+  }
+
+  async function maintenanceOn() {
+    try { return !!(await isMaintenance()); } catch (e) { log(`maintenance check failed: ${(e as Error).message}`); return false; }
   }
 
   async function onMessage(c: Client, raw: string) {
@@ -300,6 +485,17 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
           log(`verify error ${(e as Error).message}`);
         }
         if (!u) return fail('auth_failed');
+        if (u.role !== 'DEVELOPER' && (await maintenanceOn())) {
+          send(c, { t: 'maintenance', message: MAINTENANCE_MESSAGE });
+          setTimeout(() => c.ws.close(4005, 'maintenance'), 20);
+          return;
+        }
+        const ban = gameBans.get(u.userId);
+        if (ban && ban.until > Date.now() && u.role !== 'DEVELOPER') {
+          send(c, { t: 'error', code: 'banned', message: `You are banned from Sky Crew for ${Math.ceil((ban.until - Date.now()) / 60000)} more minute(s).${ban.reason ? ` Reason: ${ban.reason}` : ''}` });
+          setTimeout(() => c.ws.close(4004, 'banned'), 20);
+          return;
+        }
         c.user = u; // the ONLY source of name/rank/permissions
         send(c, { t: 'welcome', you: { cid: c.cid, username: u.username, displayName: u.displayName, role: u.role, permissions: u.permissions, avatarUrl: u.avatarUrl } });
       })();
@@ -312,12 +508,14 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'ping':
         return send(c, { t: 'pong', at: m.at });
       case 'create': {
-        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', createdAt: Date.now(), locked: false, route: null, phase: null };
+        if (!isDev(c) && (await maintenanceOn())) return send(c, { t: 'maintenance', message: MAINTENANCE_MESSAGE });
+        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0 };
         rooms.set(room.code, room);
         log(`room ${room.code} created by ${c.user.username}`);
         return joinRoom(c, room, { created: true });
       }
       case 'join': {
+        if (!isDev(c) && (await maintenanceOn())) return send(c, { t: 'maintenance', message: MAINTENANCE_MESSAGE });
         const code = String(m.code ?? '').toUpperCase().trim();
         const room = rooms.get(code);
         if (!room) return send(c, { t: 'error', code: 'no_room', message: 'No room with that code.' });
@@ -328,6 +526,11 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         // Live room list: Developer only, decided by the rank the website verified for this socket.
         if (!isDev(c)) { void audit(c, 'rooms.denied', {}); return send(c, { t: 'error', code: 'forbidden', message: 'Only the Developer can see every room.' }); }
         return send(c, { t: 'rooms', rooms: roomList() });
+      }
+      case 'inventory': {
+        // The secret inventory catalogue is only ever sent to the verified Developer.
+        if (!devInv(c)) { void audit(c, 'inventory.denied', {}); return send(c, { t: 'error', code: 'forbidden', message: 'Unknown command.' }); }
+        return send(c, { t: 'inventory', categories: DEV_CATEGORIES, items: DEV_ITEMS, equipped: [...c.equipped] });
       }
       case 'lock': {
         if (!r || r.hostCid !== c.cid) return send(c, { t: 'error', code: 'not_host', message: 'Only the host can lock the room.' });
@@ -341,9 +544,19 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         if (!r) return;
         const s = sanitizeState(m.s);
         if (!s) return;
+        // frozen by the Developer: the server keeps the old position (only looking around is relayed)
+        if (c.frozen && c.state) { s.p = c.state.p; s.moving = false; s.run = false; s.fly = false; }
         c.state = s;
         if (c.hidden) return; // invisible spectator: nobody sees them move
         return broadcast(r, { t: 'st', cid: c.cid, s }, c);
+      }
+      case 'chat': {
+        if (!r) return;
+        if (c.mutedUntil > Date.now()) return send(c, { t: 'error', code: 'muted', message: `You are muted for ${Math.ceil((c.mutedUntil - Date.now()) / 60000)} more minute(s).` });
+        const now = Date.now(); if (now - c.lastChat < 700) return; c.lastChat = now;
+        const text = cleanText(m.text);
+        if (!text || c.hidden) return;
+        return broadcast(r, { t: 'chat', cid: c.cid, username: c.user.username, role: c.user.role, text });
       }
       case 'world':
         if (!r || r.hostCid !== c.cid) return; // only the host's simulation counts
@@ -353,6 +566,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'pilot': {
         if (!r || c.hidden) return;
         if (m.on) {
+          if (c.frozen) return send(c, { t: 'error', code: 'frozen', message: 'You are frozen.' });
           if (r.pilotCid && r.pilotCid !== c.cid) return send(c, { t: 'error', code: 'seat_taken', message: 'Someone else is flying.' });
           r.pilotCid = c.cid;
         } else if (r.pilotCid === c.cid) r.pilotCid = null;
@@ -373,6 +587,9 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'act': {
         // gameplay requests (grab/drop/serve/door/fix) go to the host who owns the simulation
         if (!r || c.hidden) return; // spectators don't touch the world
+        if (c.frozen) return; // frozen players can't interact
+        // Developer pickups: nobody else may take them (the server checks the id it issued)
+        if (m.a && typeof m.a === 'object' && typeof m.a.id === 'string' && r.devItems.has(m.a.id) && !devInv(c)) { void audit(c, 'grab.denied', { item: m.a.id }); return; }
         const host = r.clients.get(r.hostCid);
         if (host && host !== c) send(host, { t: 'act', cid: c.cid, a: m.a });
         return;
@@ -382,7 +599,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         if (!r || r.hostCid !== c.cid) return;
         return broadcast(r, { t: 'event', e: m.e }, c);
       case 'admin': {
-        const err = await adminCommand(c, String(m.cmd ?? ''), m.args);
+        const err = await adminCommand(c, String(m.cmd ?? '').slice(0, 32), m.args);
         return send(c, err ? { t: 'admin_denied', cmd: m.cmd, reason: err } : { t: 'admin_ok', cmd: m.cmd });
       }
       default:
@@ -396,7 +613,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   }
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null };
+    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0 };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4003, 'auth_timeout'); }, 10_000);
     ws.on('message', (data) => {
@@ -422,6 +639,24 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     }
   }, 15_000);
   hb.unref();
+  // Weapon-use audit batches.
+  const auditTimer = setInterval(() => { for (const c of clients) flushUses(c); }, 10_000);
+  auditTimer.unref();
+
+  /** When maintenance switches on, everyone except the Developer is removed with the maintenance screen. */
+  async function enforceMaintenance() {
+    if (!(await maintenanceOn())) return 0;
+    let n = 0;
+    for (const c of clients) {
+      if (!c.user || isDev(c)) continue;
+      eject(c, 'maintenance', { message: MAINTENANCE_MESSAGE }, 4005);
+      n++;
+    }
+    if (n) log(`maintenance: removed ${n} player(s)`);
+    return n;
+  }
+  const maintTimer = setInterval(() => void enforceMaintenance(), opts.maintenancePollMs ?? 5000);
+  maintTimer.unref();
 
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://x');
@@ -440,6 +675,8 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     wss,
     rooms,
     clients,
-    close: () => { clearInterval(hb); for (const c of clients) c.ws.terminate(); wss.close(); },
+    gameBans,
+    enforceMaintenance,
+    close: () => { clearInterval(hb); clearInterval(auditTimer); clearInterval(maintTimer); for (const c of clients) c.ws.terminate(); wss.close(); },
   };
 }

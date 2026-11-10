@@ -1,6 +1,6 @@
 // Sky Crew v0 — bootstrap, input, player controller, camera, networking glue.
 import * as THREE from '../../vendor/three.module.js';
-import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, setRoute } from './world.js';
+import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, setRoute, Z_TAIL, Z_NOSE } from './world.js';
 import { Sim, ITEM_DEFS } from './sim.js';
 import { stepFlight, KT, FT, distTo, relBearing, glidePath } from './flight.js';
 import { Audio } from './audio.js';
@@ -31,6 +31,9 @@ const env = buildWorld(scene, { quality });
 if (Q.shadow) { env.sun.castShadow = true; env.sun.shadow.mapSize.set(Q.shadow, Q.shadow); }
 const SUN_OFF = new THREE.Vector3(350, 550, 250).normalize().multiplyScalar(600);
 const ship = buildPlane();
+// cabin key light: soft shadows from seats/bins/people (1024 map on iPad 'medium', 2048 on desktop 'high')
+if (Q.shadow) { const k = ship.cabin.key; k.castShadow = true; k.shadow.mapSize.set(Q.shadow, Q.shadow / 2); if (quality !== 'high') k.shadow.autoUpdate = false; }
+let keyShadowT = 0; // medium (iPad): the cabin shadow map is refreshed at ~12 Hz instead of every frame
 const audio = new Audio();
 scene.add(ship.plane);
 ship.plane.add(camera);
@@ -45,8 +48,8 @@ sim.onRoute = () => refreshRouteUi();
 
 // ---------------- player ----------------
 const R = 0.3, H = 1.7, EYE = 1.58, STEP = 0.45;
-const SPAWN = new THREE.Vector3(10.5, -GEAR_H, 5.5);
-const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: Math.PI / 2 - 0.25, pitch: -0.12, onGround: false, mode: 'walk', third: false, cannon: false, moving: false };
+const SPAWN = new THREE.Vector3(7.5, -GEAR_H, 17.5); // on the apron, behind and right of the aircraft, facing the rear door
+const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, cannon: false, moving: false };
 let myAvatar = makeCharacter({ uniform: 'cabin' });
 ship.plane.add(myAvatar);
 let myCrew = null; // lobby pick: pilot | copilot | cabin | cargo (solo: null = do everything)
@@ -154,6 +157,7 @@ function updatePlayer(dt) {
   fx += touch.mx; fz += touch.my;
   const L = Math.hypot(fx, fz); if (L > 1) { fx /= L; fz /= L; }
   const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4;
+  me.sprint = speed > 5 && L > 0.1;
   const s = Math.sin(me.yaw), c = Math.cos(me.yaw);
   const wx = (fx * c + fz * s) * speed, wz = (-fx * s + fz * c) * speed;
   const a = Math.min(1, dt * (me.onGround ? 14 : 3));
@@ -181,7 +185,7 @@ function updatePlayer(dt) {
   // safety nets: fell out of the world, or left outside at departure
   if (me.pos.y < -GEAR_H - 6 || (!sim.groundOn && !sim.inCabin(me.pos))) { teleport('cabin'); UI.toast('You hopped aboard just in time.'); }
 }
-const SPOTS = { cockpit: [0, 0, -12.2], cabin: [0, 0, -3], cargo: [0, 0, 8], apron: [SPAWN.x, SPAWN.y, SPAWN.z] };
+const SPOTS = { cockpit: [0, 0, -12.2], cargo: [0, 0, -10.5], cabin: [0, 0, 0], galley: [0, 0, 10.4], apron: [SPAWN.x, SPAWN.y, SPAWN.z] };
 function teleport(spot) {
   if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat();
   const p = spot === 'apron' && !sim.groundOn ? SPOTS.cabin : SPOTS[spot] || SPOTS.cabin;
@@ -254,7 +258,7 @@ function dropHeld(dist, throwSpeed) {
   const p = eye.clone().addScaledVector(dir, dist); p.y = Math.max(p.y - 0.2, me.pos.y + 0.25);
   if (sim.inCabin(me.pos)) { // never drop through the fuselage wall
     p.x = Math.max(-HALF_W + 0.35, Math.min(HALF_W - 0.35, p.x));
-    p.z = Math.max(-15.6, Math.min(12.6, p.z));
+    p.z = Math.max(Z_NOSE + 0.4, Math.min(Z_TAIL - 0.4, p.z));
     p.y = Math.min(p.y, CEIL - 0.35);
   }
   const v = dir.clone().multiplyScalar(throwSpeed); v.y += throwSpeed ? 1.5 : 0;
@@ -267,7 +271,11 @@ function dropPax(dist, speed) {
   const p = heldPax(); if (!p) return;
   const dir = lookDir();
   const at = me.pos.clone().add(new THREE.Vector3(dir.x, 0, dir.z).normalize().multiplyScalar(dist)); at.y = me.pos.y + 0.9;
-  if (sim.inCabin(me.pos)) { at.z = Math.max(-15.4, Math.min(12.4, at.z)); if (!sim.openDoorAt(at)) at.x = Math.max(-HALF_W + 0.35, Math.min(HALF_W - 0.35, at.x)); }
+  if (sim.inCabin(me.pos)) { // only an OPEN door lets a passenger out: the rear door (aft wall) or the cargo door (hold, right side)
+    const door = sim.openDoorAt(at);
+    at.z = Math.max(Z_NOSE + 0.6, door === 'rear' ? at.z : Math.min(Z_TAIL - 0.45, at.z));
+    if (door !== 'cargo') at.x = Math.max(-HALF_W + 0.35, Math.min(HALF_W - 0.35, at.x));
+  }
   const v = dir.clone().multiplyScalar(speed); v.y += speed ? 2.2 : 0;
   audio.play(speed ? 'drop' : 'click');
   act({ k: 'dropPax', id: p.id, p: [at.x, at.y, at.z], v: [v.x, v.y, v.z] });
@@ -299,7 +307,7 @@ function applyAct(cid, a) {
       if (sim.serve(Number(a.pax), it ? it.type : null) && it) sim.removeItem(it.id);
       break;
     }
-    case 'door': if (['front', 'cargo'].includes(a.d) && sim.phase !== 'taxi') sim.setDoor(a.d, !ship.doors[a.d].open); break;
+    case 'door': if (['rear', 'cargo'].includes(a.d) && sim.phase !== 'taxi') sim.setDoor(a.d, !ship.doors[a.d].open); break;
     case 'fix': sim.fixPanel(); break;
     case 'disp': {
       if (!['water', 'snack', 'blanket'].includes(a.item) || holderOf(cid)) break;
@@ -404,7 +412,8 @@ function updateRemotes(dt) {
     r.mesh.position.lerp(r.target, Math.min(1, dt * 12));
     let d = r.ry - r.mesh.rotation.y; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
     r.mesh.rotation.y += d * Math.min(1, dt * 12);
-    animateCharacter(r.mesh, dt, { moving: r.moving, sitting: r.mode === 'pilot' || r.mode === 'copilot', carrying: !!r.held });
+    const seated = r.mode === 'pilot' || r.mode === 'copilot';
+    animateCharacter(r.mesh, dt, { moving: r.moving, running: r.moving && r.run, sitting: seated, pilot: seated, carrying: !!r.held, jumping: r.target.y - r.mesh.position.y > 0.25 });
   }
 }
 
@@ -426,7 +435,7 @@ net.addEventListener('room', (e) => {
   if (me.mode === 'pilot' && room.pilotCid !== myId()) me.mode = 'walk';
   if (!$('#admin').classList.contains('hidden')) renderAdmin();
 });
-net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.mode = s.mode; r.moving = s.moving; r.held = s.held; });
+net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.mode = s.mode; r.moving = s.moving; r.run = !!s.run; r.held = s.held; });
 let freshJoin = true; // a flight that had already ended when we joined is not ours to report
 net.addEventListener('world', (e) => {
   if (sim.host) return;
@@ -471,7 +480,7 @@ function netTick(dt) {
   if (sendT > 1 / 15) {
     sendT = 0;
     const held = heldItem();
-    net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving } });
+    net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint } });
     if (amPilot()) net.send({ t: 'plane', s: sim.planeState() });
   }
   if (net.isHost && worldT > 0.1) { worldT = 0; net.send({ t: 'world', w: sim.snapshot(!net.room.pilotCid) }); }
@@ -650,9 +659,9 @@ function updateHud() {
     rows.push({ text: `Fly to ${DEST.name} (${DEST.code}): ${(distTo(f, DEST) / 1000).toFixed(1)} km` });
     if (!sim.cabin.gearDown) rows.push({ text: 'Landing gear is UP (G to lower before landing)', state: sim.phase === 'approach' ? 'warn' : '' });
     const reqs = sim.pax.filter((p) => p.request).length;
-    rows.push({ text: reqs ? `${reqs} passenger request${reqs > 1 ? 's' : ''} waiting (galley up front)` : 'Passengers are content', state: reqs ? '' : 'done' });
+    rows.push({ text: reqs ? `${reqs} passenger request${reqs > 1 ? 's' : ''} waiting (galley at the back)` : 'Passengers are content', state: reqs ? '' : 'done' });
     if (c.lost) rows.push({ text: `🪂 ${c.lost} passenger${c.lost > 1 ? 's' : ''} parachuted out (refund + fine)`, state: 'warn' });
-    if (!f.onGround && (ship.doors.front.open || ship.doors.cargo.open)) rows.push({ text: 'A DOOR IS OPEN IN FLIGHT', state: 'warn' });
+    if (!f.onGround && (ship.doors.rear.open || ship.doors.cargo.open)) rows.push({ text: 'A DOOR IS OPEN IN FLIGHT', state: 'warn' });
     if (c.loose) rows.push({ text: `${c.loose} loose bag${c.loose > 1 ? 's' : ''} in the cabin`, state: 'warn' });
     for (const [id] of evs) {
       if (id === 'engine_warning') rows.push({ text: 'ENGINE WARNING: fix at the panel (cargo hold)', state: 'warn' });
@@ -696,7 +705,7 @@ function roleTasks() {
   const T = {
     pilot: ph === 'boarding' ? 'Take the captain\'s seat; throttle up when the checklist is done' : ph === 'approach' ? `Follow the landing guide to ${DEST.code}, gear down` : `Fly to ${DEST.name}`,
     copilot: ph === 'boarding' ? (sim.cabin.announced ? 'Seatbelt sign ON, then sit in the right seat' : 'Make the welcome announcement (galley PA or right seat)') : ph === 'approach' ? (sim.cabin.gearDown ? 'Gear is down. Call out the landing guide!' : 'Lower the landing gear (G)') : 'Watch systems: lights, seatbelt sign, gear',
-    cabin: ph === 'boarding' ? `Get everyone seated (${c.boarded}/${c.pax}) and close the front door` : 'Serve requests and calm passengers',
+    cabin: ph === 'boarding' ? `Get everyone seated (${c.boarded}/${c.pax}) and close the rear door` : 'Serve requests and calm passengers',
     cargo: ph === 'boarding' ? `Load the bags (${c.loaded}/${c.bags}) and close the cargo door` : 'Catch loose bags, fix warnings at the cargo panel',
   };
   out.push({ text: `Your job (${label}): ${T[job]}` });
@@ -743,7 +752,7 @@ $('#bAgain').addEventListener('click', () => { UI.show('#results', false); if (!
 $('#bResMenu').addEventListener('click', () => quitToMenu());
 
 function restartFlight() { const c = sim.contract; for (const p of sim.pax) sim.stopEjectFx(p); sim.host = !net.inRoom || net.isHost; sim.reset(Math.floor(Math.random() * 1e9)); sim.contract = c || 'standard'; }
-function respawn() { if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); me.pos.copy(SPAWN); me.vel.set(0, 0, 0); me.yaw = Math.PI / 2 - 0.25; me.pitch = -0.12; resultsShown = false; UI.show('#results', false); }
+function respawn() { if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); me.pos.copy(SPAWN); me.vel.set(0, 0, 0); me.yaw = 0.45; me.pitch = -0.05; resultsShown = false; UI.show('#results', false); }
 function quitToMenu(msg) {
   if (net.inRoom) net.leave();
   syncRemotes(null); UI.roomInfo(null); UI.show('#lobby', false); myCrew = null; dressMe();
@@ -871,25 +880,29 @@ if (qs.get('room') && user) $('#joinCode').value = qs.get('room').toUpperCase().
 if (qs.get('devjoin') && user) setTimeout(() => devJoin(qs.get('devjoin').toUpperCase().slice(0, 5), qs.get('hidden') === '1'), 50);
 
 // ---------------- sound per frame ----------------
-const lastDoors = { front: ship.doors.front.open, cargo: ship.doors.cargo.open };
+const lastDoors = { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open };
 let lastTd = null;
 function updateAudio() {
   const f = sim.flight;
   const inside = me.mode !== 'walk' || sim.inCabin(me.pos);
   audio.update({ engines: sim.phase !== 'boarding' || f.throttle > 0, throttle: Math.max(f.throttle, sim.phase === 'boarding' ? 0 : 0.15), speed: f.speed, onGround: f.onGround, inside, storm: sim.weather === 'storm', turb: sim.turb });
-  for (const n of ['front', 'cargo']) if (ship.doors[n].open !== lastDoors[n]) { lastDoors[n] = ship.doors[n].open; audio.play('door'); }
+  for (const n of ['rear', 'cargo']) if (ship.doors[n].open !== lastDoors[n]) { lastDoors[n] = ship.doors[n].open; audio.play('door'); }
   if (f.touchdown && f.touchdown.at !== lastTd) { lastTd = f.touchdown.at; audio.play(f.touchdown.crash ? 'crash' : 'thump', { hard: f.touchdown.hard ? 0.6 : 0 }); }
 }
 
 // ---------------- main loop ----------------
 const clock = new THREE.Clock();
+const perfStat = { frames: 0, t0: performance.now(), fps: 0 };
 function frame() {
+  perfStat.frames++; { const n = performance.now(); if (n - perfStat.t0 > 1000) { perfStat.fps = perfStat.frames * 1000 / (n - perfStat.t0); perfStat.frames = 0; perfStat.t0 = n; } }
   const dt = Math.min(0.05, clock.getDelta());
   if (sim.seed !== seenSeed) { seenSeed = sim.seed; if (playing) respawn(); }
   if (playing && !paused) updatePlayer(dt);
   updateFlight(dt);
   if (sim.host) sim.update(dt, { onDepart() {} });
   else sim.follow(dt);
+  ship.update(dt); // eased door animation (both directions) + cabin details
+  if (Q.shadow && quality !== 'high' && (keyShadowT += dt) > 0.083) { keyShadowT = 0; ship.cabin.key.shadow.needsUpdate = true; }
   sim.animate(dt);
   placeHeld();
   updateRemotes(dt);
@@ -898,7 +911,7 @@ function frame() {
   // my own body (visible in third person)
   myAvatar.visible = me.third && me.mode === 'walk';
   myAvatar.position.copy(me.pos); myAvatar.rotation.y = me.yaw;
-  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, carrying: !!heldItem() });
+  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk' });
   updateCamera();
   if (playing) { updateHud(); netTick(dt); updateAudio(); }
   renderer.render(scene, camera);
@@ -910,7 +923,7 @@ requestAnimationFrame(frame);
 // ---------------- test / debug hooks (used by the automated browser tests) ----------------
 window.skyCrew = {
   ready: true,
-  state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { front: ship.doors.front.open, cargo: ship.doors.cargo.open }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, hidden: !!net.room.hidden, locked: !!net.room.locked, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
+  state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, rearT: +ship.doors.rear.t.toFixed(3), cargoT: +ship.doors.cargo.t.toFixed(3), rearPassable: ship.doors.rear.passable }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, hidden: !!net.room.hidden, locked: !!net.room.locked, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
   teleport: (x, y, z) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); },
   look: (yaw, pitch) => { me.yaw = yaw; me.pitch = pitch; },
   lookAt: (x, y, z) => { const e = eyePos(); const d = new THREE.Vector3(x, y, z).sub(e); me.yaw = Math.atan2(-d.x, -d.z); me.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); },
@@ -941,6 +954,11 @@ window.skyCrew = {
   contract: (c) => { if (c) { if (net.inRoom && net.isHost) applyAct(myId(), { k: 'contract', c }); else sim.contract = c; } return sim.contract; },
   debug: {
     sitAll: () => sim.npcAction('sit'),
+    tris: () => { const out = []; scene.traverse((o) => { if (o.isMesh && o.geometry) { const g = o.geometry, n = (g.index ? g.index.count : g.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1); let k = o, path = []; while (k && k !== scene) { path.push(k.name || k.type); k = k.parent; } out.push([path.reverse().join('/'), Math.round(n)]); } }); const agg = {}; for (const [p, n] of out) { const key = p.split('/').slice(0, 3).join('/'); agg[key] = (agg[key] || 0) + n; } return Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 25); },
+    planeTris: () => ship.plane.children.filter((o) => o.isMesh).map((o) => [o.name || '?', o.material?.type, Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3)]).sort((a, b) => b[2] - a[2]).slice(0, 12),
+    perf: () => ({ fps: Math.round(perfStat.fps * 10) / 10, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, quality, shadows: renderer.shadowMap.enabled }),
+    door: (name, open) => { if (sim.host) sim.setDoor(name, open); return { open: ship.doors[name].open, t: ship.doors[name].t }; },
+    setPos: (x, y, z, yaw) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); if (yaw != null) me.yaw = yaw; },
     trigger: (id) => sim.trigger(id),
     request: (i, item) => { const p = sim.pax[i]; p.request = item; p.reqT = 0; return { x: p.mesh.position.x, z: p.mesh.position.z }; },
     score: () => ({ ...sim.score }),
