@@ -26,6 +26,11 @@ export async function seed(db: Knex) {
   const m2 = await storeMedia(db, { kind: 'video', contentType: 'video/mp4', data: MP4, gameId: g, userId: users[0], filename: 'trailer.mp4' });
   await db('site_settings').insert({ key: 'maintenance', value: JSON.stringify({ on: false }), updated_by: users[0], updated_at: iso(17) });
   await db('site_events').insert({ title: 'Launch', announce_at: iso(18), starts_at: iso(19), ends_at: iso(20), created_by: users[0], game_id: g, created_at: iso(18), updated_at: iso(18) });
+  // Sky Crew outfits + economy (game-revision tables)
+  await db('game_profiles').insert({ user_id: users[2], game_slug: 'sky-crew', outfit: JSON.stringify({ body: 'a' }), updated_at: iso(21) });
+  await db('wallets').insert({ user_id: users[2], balance: 120, updated_at: iso(22) });
+  for (const [i, d] of [200, -80].entries()) await db('wallet_ledger').insert({ user_id: users[2], delta: d, balance_after: [200, 120][i], kind: i ? 'purchase' : 'salary', ref: `r${i}`, details: '{}', created_at: iso(22 + i) });
+  await db('owned_items').insert({ user_id: users[2], item_key: 'outfit:test', source: 'purchase', created_at: iso(23) });
   for (let i = 0; i < 7; i++) await db('audit_logs').insert({ actor_id: users[0], actor_username: 'u0', actor_role: 'DEVELOPER', action: `test.${i}`, category: 'admin', created_at: iso(30 + i) });
   return { users, media: [m1, m2] };
 }
