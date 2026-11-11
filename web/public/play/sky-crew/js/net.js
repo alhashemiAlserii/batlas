@@ -34,7 +34,7 @@ export class Net extends EventTarget {
   }
 
   onMsg(m) {
-    if (m.t === 'room') { this.room = { code: m.code, hostCid: m.hostCid, pilotCid: m.pilotCid, weather: m.weather, players: m.players, locked: !!m.locked, hour: m.hour, config: m.config, hidden: m.you ? !!m.hidden : this.room?.hidden || false }; }
+    if (m.t === 'room') { this.room = { code: m.code, hostCid: m.hostCid, pilotCid: m.pilotCid, weather: m.weather, players: m.players, locked: !!m.locked, hour: m.hour, config: m.config, airport: m.airport !== false, hidden: m.you ? !!m.hidden : this.room?.hidden || false }; }
     if (m.t === 'room_left') this.room = null;
     this.dispatchEvent(new CustomEvent(m.t, { detail: m }));
     this.dispatchEvent(new CustomEvent('any', { detail: m }));

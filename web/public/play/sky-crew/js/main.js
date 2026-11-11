@@ -941,7 +941,7 @@ async function goOnline(code) {
   const err = $('#menuErr'); UI.show('#menuErr', false);
   try {
     if (!net.connected) await net.connect();
-    if (code) { sim.host = false; sim.seed = -1; await net.join(code); } else { setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; await net.create(); }
+    if (code) { sim.host = false; sim.seed = -1; await net.join(code); } else { setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; await net.create(); if (localStorage.getItem(SKIP_KEY) === '1') net.send({ t: 'airport', skip: true }); }
     openLobby();
     if (myClass) pickClass(myClass); // carry my class pick into the room (the server re-checks ownership)
   } catch (e) { if (e.maintenance) return showMaintenance(e.message); err.textContent = e.message || String(e); UI.show('#menuErr', true); }
@@ -1281,7 +1281,7 @@ requestAnimationFrame(frame);
 // ---------------- test / debug hooks (used by the automated browser tests) ----------------
 window.skyCrew = {
   ready: true,
-  state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, rearT: +ship.doors.rear.t.toFixed(3), cargoT: +ship.doors.cargo.t.toFixed(3), rearPassable: ship.doors.rear.passable }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, hidden: !!net.room.hidden, locked: !!net.room.locked, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
+  state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, rearT: +ship.doors.rear.t.toFixed(3), cargoT: +ship.doors.cargo.t.toFixed(3), rearPassable: ship.doors.rear.passable }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, hidden: !!net.room.hidden, locked: !!net.room.locked, airport: net.room.airport, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
   teleport: (x, y, z) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); },
   look: (yaw, pitch) => { me.yaw = yaw; me.pitch = pitch; },
   lookAt: (x, y, z) => { const e = eyePos(); const d = new THREE.Vector3(x, y, z).sub(e); me.yaw = Math.atan2(-d.x, -d.z); me.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); },

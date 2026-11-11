@@ -162,6 +162,14 @@ dep = await tryDepart(H, 4000);
 check(dep.phase !== 'boarding' || dep.speed > 0.5, `co-op: with everyone aboard the plane departs (${JSON.stringify(dep)})`);
 const au = await api(H.p, 'GET', '/api/admin/audit?limit=5');
 check(au.status === 403, 'co-op: (players cannot read the audit log)');
+// the host's saved "Skip the airport" carries into a new room, and every client sees it
+await G.p.evaluate(() => localStorage.setItem('skycrew.skipAirport', '1'));
+await G.p.reload(); await G.p.waitForSelector('#bJoin:not([disabled])');
+await tap(G, '#bCreate'); await G.p.waitForFunction(() => window.skyCrew.state().room?.code, null, { polling: 250, timeout: 15000 });
+await sleep(800);
+const T2 = await SC(G, () => window.skyCrew.term());
+const r2 = await st(G);
+check(r2.room.airport === false && T2.airport === false && await G.p.$eval('#lobSkipAirport', (e) => e.checked), `co-op: host's saved "Skip the airport" applies to the new room (room.airport=${r2.room.airport})`);
 for (const e of [...errs]) if (/403/.test(e)) errs.splice(errs.indexOf(e), 1);
 
 console.log(`\n${report.length} passed, ${fail.length} failed`);
