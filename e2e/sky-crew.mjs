@@ -64,20 +64,25 @@ async function paxChaos(page, name) {
   await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
   await sleep(150); await page.keyboard.press('KeyE');
   await page.waitForFunction(() => window.skyCrew.state().doors.rearPassable, null, { timeout: 15000 }).catch(() => {});
-  const p2 = (await page.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated').sort((a, b) => a.z - b.z)[0];
-  await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, p2);
-  await sleep(150); await page.keyboard.press('KeyE'); await sleep(300);
-  const h2 = await page.evaluate(() => window.skyCrew.heldPax());
+  let h2 = null;
+  for (const p2 of (await page.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated').sort((a, b) => a.z - b.z).slice(0, 4)) {
+    // same as the first pickup: wait until the aim is really on this passenger (a seat back can block it), else try the next
+    await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, p2);
+    let t2 = null; for (let i = 0; i < 30 && !(t2 && t2.kind === 'grabPax'); i++) { await sleep(150); t2 = await page.evaluate(() => window.skyCrew.target()); }
+    if (!t2 || t2.kind !== 'grabPax') continue;
+    await page.keyboard.press('KeyE'); await sleep(300);
+    h2 = await page.evaluate(() => window.skyCrew.heldPax()); if (h2) break;
+  }
   await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.6); window.skyCrew.look(Math.PI, 0.1); }, d); // facing aft, in front of the rear doorway
   await sleep(100); await page.keyboard.press('KeyQ');
   try {
-    await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'lost', h2, { timeout: 8000 });
+    await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id)?.state === 'lost', h2, { timeout: 8000 });
     await page.evaluate(() => window.skyCrew.debug.watchEject(true));
-    await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).chute, h2, { timeout: 15000 });
+    await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id)?.chute, h2, { timeout: 15000 });
     await sleep(700);
     ok(`${name}: passenger thrown out of the open door in flight -> parachute, lost count ${(await page.evaluate(() => window.skyCrew.debug.score())).paxLost}`);
     await page.screenshot({ path: `${OUT}/${name}-desktop-passenger-parachute.png` });
-  } catch { bad(`${name}: eject failed ${JSON.stringify((await page.evaluate(() => window.skyCrew.pax())).find((x) => x.id === h2))}`); }
+  } catch { bad(`${name}: eject failed (held ${h2}) ${JSON.stringify((await page.evaluate(() => window.skyCrew.pax())).find((x) => x.id === h2))}`); }
   await page.evaluate(() => window.skyCrew.debug.watchEject(false));
   // close the door, land, check the payout charges the refund + fine
   await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
@@ -374,9 +379,11 @@ async function coop() {
   await A.p.keyboard.press('F2'); await sleep(300);
   const admOpen = await A.p.isVisible('#admin');
   admOpen ? ok('coop: F2 staff overlay opens for Developer') : bad('coop: overlay not open');
-  await A.p.click('#admBody button:has-text("Beach ball")'); await sleep(1200);
-  const balls = await Bc.p.evaluate(() => window.skyCrew.items().filter((i) => i.type === 'beach_ball').length);
-  balls >= 1 ? ok('coop: Developer spawned a beach ball, guest sees it') : bad('coop: spawned item not seen by guest');
+  await A.p.click('#admBody button:has-text("Beach ball")');
+  const hostBalls = await A.p.waitForFunction(() => window.skyCrew.items().filter((i) => i.type === 'beach_ball').length, null, { timeout: 10000 }).then((h) => h.jsonValue()).catch(() => 0);
+  // the guest gets it with the next world snapshot: poll (a starved guest can lag a few seconds)
+  const balls = await Bc.p.waitForFunction(() => window.skyCrew.items().filter((i) => i.type === 'beach_ball').length, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => 0);
+  balls >= 1 ? ok(`coop: Developer spawned a beach ball, guest sees it (host ${hostBalls}, guest ${balls})`) : bad(`coop: spawned item not seen by guest (host has ${hostBalls})`);
   await A.p.screenshot({ path: `${OUT}/coop-dev-admin-overlay.png` });
   await A.p.keyboard.press('F2');
   // player cannot open the overlay; forged admin command is denied server-side
