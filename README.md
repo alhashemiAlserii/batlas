@@ -325,6 +325,12 @@ New permissions: `players.edit`, `players.online` (Admin + Developer), `media.up
 - **Desktop / mobile wrappers**: `apps/desktop` (Electron) and `apps/mobile` (Capacitor). How to build and what was verified: [docs/BUILDING.md](docs/BUILDING.md).
 - Tests: `tests/restore.test.ts`, `tests/pwa.test.ts`; Playwright `e2e/pwa.mjs` (`BASE=http://127.0.0.1:3400 node pwa.mjs`).
 
+## Account self-delete and restore endpoint (branch `account-restore`, builds on `data-safety`)
+
+- **Delete my account** (`/settings` → Delete account, `POST /api/me/delete`): needs the current password **and** the exact username typed, and a website session (a game token isn't enough). It is refused server-side for every Developer and rate-limited (5 per 15 min per account). One transaction: the user row, sessions, tokens, flight scores and avatar are deleted. News posts, uploads, events and contact messages are kept but unlinked/anonymised. Audit rows are all kept, with the person's name replaced by `deleted-user-<id>` (also inside details), and a new `account.self_delete` entry is added. Code: `src/lib/account-delete.ts`.
+- **Restore over HTTPS** (`POST /api/internal/restore`): off (404) unless `RESTORE_TOKEN` (32+ chars, different from `BACKUP_TOKEN`) is set. Works only in maintenance mode, only into an empty DB unless `force=1&confirm=<db name>`. Streams the upload (tested up to a 1.6 GB backup at < 400 MB RSS). Client: `npx tsx scripts/restore-remote.ts --url https://<site> --file <backup.json> [--preflight|--dry-run]` (token from `server/data/restore-token.txt`). The full Option B move runbook is in [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md).
+- Tests: `tests/account-delete.test.ts`, `tests/restore-endpoint.test.ts`, `tests/restore-memory.test.ts`; Playwright `e2e/account-delete.mjs` (`BASE=http://127.0.0.1:3500 node account-delete.mjs`).
+
 ## Browser testing
 
 - Automated API tests: `cd server && npm test`.
