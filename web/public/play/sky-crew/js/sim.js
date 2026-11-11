@@ -696,7 +696,14 @@ export class Sim {
       if (state === 'lost' && p.state !== 'lost') { p.state = 'lost'; if (p.mesh.parent === this.ship.plane && p.target) p.mesh.position.copy(p.target); this.startEjectFx(p); }
       if (state !== 'lost' && p.fx) { this.stopEjectFx(p); p.mesh.visible = true; }
       // guests predict their own carry: ignore the host until it agrees
-      if (p.predictT > 0 && state !== 'lost') { p.predictT -= 0.1; p.mood = mood; continue; }
+      // guests predict their own carry/throw: keep the prediction only until the host agrees or a real-time deadline
+      // passes (not a snapshot count: a slow host must not leave the guest holding someone the host never gave them)
+      if (p.predictT > 0 && state !== 'lost') {
+        const agrees = p.state === 'carried' ? state === 'carried' && carrier === p.carriedBy : state !== 'carried';
+        if (!agrees && performance.now() < (p.predictUntil || 0)) { p.mood = mood; continue; }
+        if (!agrees && p.state === 'carried' && p.predictMine) this.toast('The passenger wriggled free! (the host was quicker)', 'warn');
+        p.predictT = 0; p.predictMine = false;
+      }
       p.carriedBy = carrier || null;
       if (state === 'lost') { p.state = state; continue; }
       p.target = new THREE.Vector3(x, y, z); if (state !== 'thrown') { p.mesh.rotation.y = ry; p.mesh.rotation.x = 0; } p.state = state; p.request = req || null; p.mood = mood;

@@ -349,12 +349,14 @@ function dropPax(dist, speed) {
 }
 
 /** Apply a gameplay action. Host resolves locally; guests ask the host (and predict grabs/drops). */
+/** How long a guest trusts its own prediction (pick up / throw a passenger) before the host's word wins. */
+const PREDICT_MS = 1500;
 function act(a) {
   if (net.inRoom && !net.isHost) {
     net.send({ t: 'act', a });
     if (a.k === 'grab') { const it = sim.items.get(a.id); if (it && !it.heldBy && !ITEM_DEFS[it.type].gadget) it.heldBy = myId(); }
-    if (a.k === 'grabPax') { const p = sim.pax.find((q) => q.id === a.id); if (p && !p.carriedBy && !heldPax() && !heldItem()) { p.carriedBy = myId(); p.state = 'carried'; p.predictT = 0.6; } }
-    if (a.k === 'dropPax') { const p = sim.pax.find((q) => q.id === a.id); if (p) { p.carriedBy = null; p.state = 'thrown'; p.mesh.position.set(...a.p); p.target = p.mesh.position.clone(); p.predictT = 0.3; } }
+    if (a.k === 'grabPax') { const p = sim.pax.find((q) => q.id === a.id); if (p && !p.carriedBy && !heldPax() && !heldItem()) { p.carriedBy = myId(); p.state = 'carried'; p.predictT = 0.6; p.predictMine = true; p.predictUntil = performance.now() + PREDICT_MS; } }
+    if (a.k === 'dropPax') { const p = sim.pax.find((q) => q.id === a.id); if (p) { p.carriedBy = null; p.state = 'thrown'; p.mesh.position.set(...a.p); p.target = p.mesh.position.clone(); p.predictT = 0.3; p.predictMine = true; p.predictUntil = performance.now() + PREDICT_MS / 2; } }
     if (a.k === 'drop') { const it = sim.items.get(a.id); if (it) { it.heldBy = null; it.mesh.position.set(...a.p); it.target = { p: it.mesh.position.clone(), q: it.mesh.quaternion.clone() }; } }
     return;
   }
