@@ -379,9 +379,11 @@ async function coop() {
   await A.p.keyboard.press('F2'); await sleep(300);
   const admOpen = await A.p.isVisible('#admin');
   admOpen ? ok('coop: F2 staff overlay opens for Developer') : bad('coop: overlay not open');
-  await A.p.click('#admBody button:has-text("Beach ball")'); await sleep(1200);
-  const balls = await Bc.p.evaluate(() => window.skyCrew.items().filter((i) => i.type === 'beach_ball').length);
-  balls >= 1 ? ok('coop: Developer spawned a beach ball, guest sees it') : bad('coop: spawned item not seen by guest');
+  await A.p.click('#admBody button:has-text("Beach ball")');
+  const hostBalls = await A.p.waitForFunction(() => window.skyCrew.items().filter((i) => i.type === 'beach_ball').length, null, { timeout: 10000 }).then((h) => h.jsonValue()).catch(() => 0);
+  // the guest gets it with the next world snapshot: poll (a starved guest can lag a few seconds)
+  const balls = await Bc.p.waitForFunction(() => window.skyCrew.items().filter((i) => i.type === 'beach_ball').length, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => 0);
+  balls >= 1 ? ok(`coop: Developer spawned a beach ball, guest sees it (host ${hostBalls}, guest ${balls})`) : bad(`coop: spawned item not seen by guest (host has ${hostBalls})`);
   await A.p.screenshot({ path: `${OUT}/coop-dev-admin-overlay.png` });
   await A.p.keyboard.press('F2');
   // player cannot open the overlay; forged admin command is denied server-side
