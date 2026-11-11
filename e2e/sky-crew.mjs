@@ -37,14 +37,13 @@ async function paxChaos(page, name) {
   const near = (await page.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated').sort((a, b) => a.z - b.z);
   const px = near[2];
   await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, px);
-  await sleep(150);
-  const t = await page.evaluate(() => window.skyCrew.target());
+  let t = null; for (let i = 0; i < 30 && !t; i++) { await sleep(150); t = await page.evaluate(() => window.skyCrew.target()); } // slow software GL: wait for the aim to update
   await page.keyboard.press('KeyE'); await sleep(400);
   const held = await page.evaluate(() => window.skyCrew.heldPax());
   const all = await page.evaluate(() => window.skyCrew.pax());
   const carried = all.find((x) => x.id === held);
   const panicky = all.filter((x) => x.id !== held && x.panic).length;
-  held && carried.state === 'carried' && panicky >= 1 ? ok(`${name}: picked up a passenger ("${t?.label}"); ${panicky} nearby passengers panic`) : bad(`${name}: pax pickup ${JSON.stringify({ t, held, carried, panicky })}`);
+  held && carried.state === 'carried' && panicky >= 1 ? ok(`${name}: picked up a passenger ("${t?.label}"); ${panicky} nearby passengers panic`) : bad(`${name}: pax pickup ${JSON.stringify({ t, held, carried, panicky, px, st: await st(page) })}`);
   await page.evaluate((z) => window.skyCrew.debug.cam([0.5, 1.95, z + 3.6], [0, 1.0, z + 0.3]), px.z);
   await page.evaluate(() => window.skyCrew.third(true)); await sleep(500);
   await page.screenshot({ path: `${OUT}/${name}-desktop-carry-passenger.png` });
@@ -53,7 +52,7 @@ async function paxChaos(page, name) {
   await page.evaluate(() => window.skyCrew.look(Math.PI, 0.2));
   await page.keyboard.press('KeyQ'); await sleep(200);
   const st1 = (await page.evaluate(() => window.skyCrew.pax())).find((x) => x.id === held).state;
-  await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'seated', held, { timeout: 40000 }).catch(() => {});
+  await page.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id).state === 'seated', held, { timeout: 90000, polling: 500 }).catch(() => {});
   const st2 = (await page.evaluate(() => window.skyCrew.pax())).find((x) => x.id === held).state;
   ['thrown', 'return'].includes(st1) && st2 === 'seated' ? ok(`${name}: thrown passenger (${st1}) landed in the aisle and walked back to their seat`) : bad(`${name}: throw states ${st1} -> ${st2}`);
   // open the rear door mid-flight, carry a passenger there and throw them out
@@ -228,11 +227,11 @@ async function singlePlayer(name, type) {
   await sleep(150); await page.keyboard.press('KeyE'); await sleep(200);
   const evLeft = await page.evaluate(() => window.skyCrew.debug.events());
   !evLeft.includes('engine_warning') ? ok(`${name}: engine warning fixed at the maintenance panel`) : bad(`${name}: panel fix failed ${evLeft}`);
+  await paxChaos(page, name); // before the turbulence: shaking passengers ask to be calmed, which outranks "pick up"
   await page.evaluate(() => window.skyCrew.debug.trigger('turbulence'));
   await page.evaluate(() => { window.skyCrew.teleport(0.2, 0, 0); window.skyCrew.look(0, -0.1); });
   await sleep(1200);
   await page.screenshot({ path: `${OUT}/${name}-desktop-turbulence.png` });
-  await paxChaos(page, name);
   // other destinations: Pine Ridge (mountains) and Dune Bay (desert) on short final, chase camera
   for (const [code, shot] of [['PNR', 'pine-ridge'], ['DNB', 'dune-bay']]) {
     if (await page.isVisible('#results')) await page.click('#bResMenu'); else { await page.click('#btnPause'); await page.click('#bQuit'); }

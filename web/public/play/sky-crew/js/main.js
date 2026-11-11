@@ -1334,6 +1334,7 @@ window.skyCrew = {
   contract: (c) => { if (c) { if (net.inRoom && net.isHost) applyAct(myId(), { k: 'contract', c }); else sim.contract = c; } return sim.contract; },
   debug: {
     sitAll: () => sim.npcAction('sit'),
+    pax: () => sim.pax.map((q) => ({ state: q.state, x: +q.mesh.position.x.toFixed(2), y: +q.mesh.position.y.toFixed(2), z: +q.mesh.position.z.toFixed(2), visible: q.mesh.visible })),
     tris: () => { const out = []; scene.traverse((o) => { if (o.isMesh && o.geometry) { const g = o.geometry, n = (g.index ? g.index.count : g.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1); let k = o, path = []; while (k && k !== scene) { path.push(k.name || k.type); k = k.parent; } out.push([path.reverse().join('/'), Math.round(n)]); } }); const agg = {}; for (const [p, n] of out) { const key = p.split('/').slice(0, 3).join('/'); agg[key] = (agg[key] || 0) + n; } return Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 25); },
     planeTris: () => ship.plane.children.filter((o) => o.isMesh).map((o) => [o.name || '?', o.material?.type, Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3)]).sort((a, b) => b[2] - a[2]).slice(0, 12),
     perf: () => ({ fps: Math.round(perfStat.fps * 10) / 10, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, quality, shadows: renderer.shadowMap.enabled }),

@@ -257,6 +257,50 @@ The overlay shows only the tools your rank allows. **The game server re-checks e
   - Every Developer join is audit-logged as `ingame.dev.join`, with what was bypassed.
   - Admins and Players keep the normal full/locked rules.
 
+## Sky Crew game revision (branch `game-revision`)
+
+All designs below are original to Sky Crew (see `docs/ASSETS.md`). Nothing is copied from another game.
+
+- **Crew characters:** round, friendly "bean" crew with faces, little arms and feet, idle wobble, walk, run, sit, wave and cheer animations.
+  - 7 outfits (captain, attendant, mechanic, hoodie, explorer, dino suit, astronaut), 9 hats (or none), 10 colours and 7 skin tones.
+  - Choose them in the **Shop & locker**. The choice is saved to your account (`PUT /api/game/sky-crew/outfit`) and synced to everyone in the room. The server only accepts whitelisted values.
+- **Passengers:** comedic NPCs with personalities, requests, reactions and seeded looks (everyone in a room sees the same people).
+- **Airport terminal (pre-flight):** you spawn in a colourful terminal behind the plane.
+  - The walk: check-in desk (hand over the passport, get a boarding pass) → security (bag on the X-ray belt, walk through the scanner arch with a beep, plus a rare, purely cosmetic "random check") → Gate A1 (show the boarding pass) → walkway down to the plane's **rear door**.
+  - Every step uses **E**, or the touch **E** button, with on-screen prompts and a documents chip (Passport / Boarding pass / Aboard).
+  - The server checks every step (`server/src/game-server/terminal.ts`): they must happen in order, at the right desk (using the position the server last received) and at human speed. Forged steps are refused (`term_order`, `term_far`, `term_fast`) and logged. The barriers in the hall are only the visible side of that server state.
+  - **Co-op:** each player does their own checks, and the HUD shows "Crew aboard n/m". The plane can't leave the gate until everyone is aboard. Crew who weren't aboard at takeoff get no salary (audit `terminal.depart_unboarded`).
+  - Passengers queue at the entrance and walk through check-in, security and the gate a few at a time, then board.
+  - **Skip the airport:** a setting for quick rounds. In co-op only the host decides, and the server enforces it. The host's saved choice applies to new rooms. The Developer can teleport past the terminal (the server marks them boarded and logs `terminal.dev_skip`).
+- **Salary, shop and classes:** signed-in crew on an online flight get a salary when they land. The game server works it out from the flight it tracked itself (route length, minimum believable flight time, landing grade, passengers delivered), not from numbers the browser reports.
+  - Limits: at most ₵1500 per flight and 8 paid flights per hour.
+  - Each flight is paid once (idempotent).
+  - Solo flights and guests are not paid.
+  - Purchases (`POST /api/game/sky-crew/shop/buy`) are checked against the balance and the catalog on the server and are idempotent per `purchaseId`.
+  - The 6 classes (Ace Pilot, Cabin Pro, Mechanic, Navigator, Security Chief, Baggage Master) each have a real in-game perk.
+  - The Developer can grant or take credits and items from F2 → **Wallet**. Every grant is audit-logged.
+- **Phones and tablets:**
+  - Phones play in landscape; phone portrait shows a "turn your phone sideways" hint. iPad works in both orientations.
+  - Layouts respect the notch and home-bar safe areas.
+  - There is a touch **sprint** toggle (🏃).
+- **Edit controls (Settings → 🎮 Edit controls, touch devices):** drag any on-screen control to a new place: joystick, interact, jump, sprint, camera, chat, gadget buttons, flight buttons, the Dev/staff panel button, pause.
+  - Pick a size (S/M/L) for the selected control and an opacity for all of them.
+  - The layout is saved on the device (localStorage `skycrew.controls.v1`), separately for landscape and portrait.
+  - Controls are kept inside the safe area. While editing, the game ignores input. **Reset to default** restores the built-in layout.
+- **Maintenance:** when the site is in maintenance mode, the game server refuses new joins and removes non-Developers from live rooms. The Developer always gets through.
+
+### Tests (game revision)
+
+- Unit (`cd server && npm test`, and `npm run test:pg`): `economy.test.ts`, `perks.test.ts`, `terminal.test.ts`, plus the earlier suites.
+- E2E (Playwright, local server on :3200):
+  - `e2e/terminal.mjs`: solo and co-op airport flow, forged steps, departure hold, Skip airport.
+  - `e2e/economy.mjs`: salary, shop, classes, Developer wallet grants.
+  - `e2e/controls.mjs`: WebKit at iPhone 844×390 and 932×430 and iPad: drag, resize, opacity, clamping, no gameplay while editing, reload persistence, per-orientation layouts, reset.
+  - `e2e/mobile.mjs`: WebKit phone landscape, iPad landscape and portrait, phone-portrait rotate hint, terminal views, passengers walking through, HUD overlap, FPS sample.
+  - `e2e/sky-crew.mjs` and `e2e/dev-tools.mjs`: the cabin and flight suites. They skip the airport because it has its own suite.
+- Screenshots: `docs/screenshots/revision/` (`terminal/`, `controls/`, `mobile/`, `economy/`, `dev/`, `e2e/`, and the `before-*.png` shots).
+- FPS numbers in the tests come from software GL (SwiftShader) in a container, so they are a floor, not what a real iPad does. Check on a real device.
+
 ## Website upgrade (branch `website-upgrade`)
 
 **Homepage:** branded hero with Play / Browse / Create-account buttons, a **featured game** (the one marked *Featured* in the dashboard, else the newest released game) with a muted `playsinline` autoplay trailer preview, **Coming soon** cards with release date + countdown, **Latest news** cards, and a sign-up band (hidden when signed in). A site-wide **event banner** (see Events) shows on every page, below the sticky header, at most two at a time, dismissible.
