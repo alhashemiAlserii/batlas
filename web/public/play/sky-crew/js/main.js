@@ -1389,6 +1389,7 @@ window.skyCrew = {
     request: (i, item) => { const p = sim.pax[i]; p.request = item; p.reqT = 0; return { x: p.mesh.position.x, z: p.mesh.position.z }; },
     score: () => ({ ...sim.score }),
     events: () => sim.events.filter((e) => !e.done).map((e) => e.id),
+    emerg: () => ({ engineFail: !!sim.flight.engineFail, masks: !!ship.masks.visible, landing: sim.emergencyLanding ? Math.round(sim.emergencyLanding.limit - sim.emergencyLanding.t) : null, hud: [...document.querySelectorAll('#hud *')].some((n) => /EMERGENCY LANDING/.test(n.textContent || '')) }),
     cam: (pos, at) => { camOverride = pos ? { pos, at } : null; },
     watchEject: (on = true) => { camOverride = on ? { eject: true } : null; },
     colsAt: (x, y, z) => solids().filter((c) => overlaps({ x, y, z }, c, H)).map((c) => ({ min: c.min, max: c.max, tag: c.tag })),
