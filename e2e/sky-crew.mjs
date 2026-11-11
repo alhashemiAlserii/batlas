@@ -35,9 +35,13 @@ async function paxChaos(page, name) {
   await page.evaluate(() => { window.skyCrew.leaveSeat(); window.skyCrew.setFlight({ y: 600, speed: 90, throttle: 0.6, onGround: false, airborneOnce: true, pitch: 0 }); });
   await sleep(600);
   const near = (await page.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated').sort((a, b) => a.z - b.z);
-  const px = near[2];
-  await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, px);
-  let t = null; for (let i = 0; i < 30 && !t; i++) { await sleep(150); t = await page.evaluate(() => window.skyCrew.target()); } // slow software GL: wait for the aim to update
+  let px = null, t = null;
+  for (const q of near.slice(2, 6)) { // a seat back or a walking passenger can block the aim: try the next seated one
+    px = q;
+    await page.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, px);
+    for (let i = 0; i < 30 && !t; i++) { await sleep(150); t = await page.evaluate(() => window.skyCrew.target()); } // slow software GL: wait for the aim to update
+    if (t && (t.kind === 'grabPax' || /^Pick up the passenger/.test(t.label || ''))) break; t = null;
+  }
   await page.keyboard.press('KeyE'); await sleep(400);
   const held = await page.evaluate(() => window.skyCrew.heldPax());
   const all = await page.evaluate(() => window.skyCrew.pax());
@@ -96,8 +100,10 @@ async function singlePlayer(name, type) {
   const ctx = await skipAp(await browser.newContext({ viewport: { width: 1280, height: 800 } }));
   const page = await ctx.newPage(); watch(page, `${name}-desktop`, errs);
   await page.goto(`${B}/games/sky-crew`, { waitUntil: 'networkidle' });
-  const early = page.locator('a:has-text("Play early build")');
-  (await early.count()) && (await early.getAttribute('href')) === '/play/sky-crew' && (await page.textContent('body')).includes('Upcoming') ? ok(`${name}: game page is Upcoming with "Play early build" -> /play/sky-crew`) : bad(`${name}: Play early build button missing`);
+  // the status depends on what earlier suites did (website.mjs publishes it): Upcoming -> "Play early build", Published -> a Play link
+  const gst = await page.evaluate(async () => (await (await fetch('/api/games')).json()).games?.find((g) => g.slug === 'sky-crew')?.status ?? null);
+  const early = page.locator(gst === 'upcoming' ? 'a:has-text("Play early build")' : 'a[href="/play/sky-crew"]').first();
+  (await early.count()) && (await early.getAttribute('href')) === '/play/sky-crew' && (gst !== 'upcoming' || (await page.textContent('body')).includes('Upcoming')) ? ok(`${name}: game page (${gst}) links to /play/sky-crew ("${(await early.textContent()).trim()}")`) : bad(`${name}: play button missing (status ${gst})`);
   (await page.locator('section.leaderboard h2:has-text("Leaderboard")').count()) ? ok(`${name}: Sky Crew leaderboard section on the game page`) : bad(`${name}: leaderboard section missing`);
   if (name === 'chromium') await page.screenshot({ path: `${OUT}/game-page-leaderboard.png`, fullPage: true });
   await boot(page, false);
