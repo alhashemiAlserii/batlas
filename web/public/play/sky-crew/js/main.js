@@ -611,8 +611,7 @@ function netTick(dt) {
   sendT += dt; worldT += dt;
   if (sendT > 1 / 15) {
     sendT = 0;
-    const held = heldItem();
-    net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint, fly: !!me.flying } });
+    sendState();
     if (amPilot()) net.send({ t: 'plane', s: sim.planeState() });
   }
   if (net.isHost && worldT > 0.1) { worldT = 0; net.send({ t: 'world', w: sim.snapshot(!net.room.pilotCid) }); }
@@ -1036,6 +1035,10 @@ function markReported(at) {
   try { localStorage.setItem('skycrew.reported', JSON.stringify([...reportedFlights].slice(-30))); } catch { /* private mode */ }
 }
 
+function sendState() {
+  const held = heldItem();
+  net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint, fly: !!me.flying } });
+}
 // ---------------- pre-flight airport terminal ----------------
 // Solo: steps are local. Co-op: the GAME SERVER owns each player's step (in order, at the desk, at human speed);
 // the host refuses to leave the gate until every visible crew member is aboard.
@@ -1086,10 +1089,14 @@ function termStep(step) {
   if (termLocal.pending && performance.now() - termLocal.pendingAt < 4000) return;
   if (!net.inRoom) { termLocal.step = step; STEP_DONE[step]?.(); return; }
   termLocal.pending = step; termLocal.pendingAt = performance.now();
+  sendState(); // the server checks where I am: give it my position right now
   net.send({ t: 'term', step });
 }
-net.addEventListener('term', (e) => { if (e.detail.cid !== net.cid) return; const p = net.room?.players.find((q) => q.cid === net.cid); if (p) p.term = e.detail.step; termLocal.pending = null; STEP_DONE[e.detail.step]?.(); });
-net.addEventListener('error', (e) => { if (!/^term_/.test(e.detail.code || '')) return; termLocal.pending = null; if (e.detail.code !== 'term_fast') UI.toast(e.detail.message, 'warn'); });
+net.addEventListener('term', (e) => { if (e.detail.cid !== net.cid) return; const p = net.room?.players.find((q) => q.cid === net.cid); if (p) p.term = e.detail.step; termLocal.pending = null; termLocal.retries = 0; STEP_DONE[e.detail.step]?.(); });
+net.addEventListener('error', (e) => { if (!/^term_/.test(e.detail.code || '')) return; const step = termLocal.pending; termLocal.pending = null; termLocal.lastErr = e.detail.code;
+  // "too fast" is just the human-speed rule: try once more a moment later (I'm still at the desk)
+  if (e.detail.code === 'term_fast' && step && (termLocal.retries = (termLocal.retries || 0) + 1) <= 3) { setTimeout(() => { if (stepIdx(myStep()) === stepIdx(step) - 1) termStep(step); }, 1200); return; }
+  termLocal.retries = 0; UI.toast(e.detail.message, 'warn'); });
 let secCheckAt = 0;
 function updateTerminal(dt) {
   terminal.update(dt, { dest: DEST, visible: sim.groundOn });
@@ -1298,7 +1305,7 @@ window.skyCrew = {
   lastReport: () => lastReport,
   paxLooks: () => sim.pax.map((p) => p.look || null),
   pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible, frozen: (p.frozenT || 0) > 0, sizeK: p.sizeK || 1, cheer: (p.cheerT || 0) > 0, vip: p.id >= 900 })),
-  term: () => ({ step: myStep(), local: termLocal.step, airport: airportOn(), active: terminalActive(), bag: termLocal.bag, bagDone: terminal.bagDone(), crew: crewStatus(), docs: $('#docs').textContent, solids: solids().filter((c) => c.tag?.startsWith('term:')).map((c) => c.tag), paxInTerminal: sim.pax.filter((p) => p.mesh.position.z > STATIONS.gate.z && p.mesh.position.y < -1).length }),
+  term: () => ({ step: myStep(), local: termLocal.step, lastErr: termLocal.lastErr || null, airport: airportOn(), active: terminalActive(), bag: termLocal.bag, bagDone: terminal.bagDone(), crew: crewStatus(), docs: $('#docs').textContent, solids: solids().filter((c) => c.tag?.startsWith('term:')).map((c) => c.tag), paxInTerminal: sim.pax.filter((p) => p.mesh.position.z > STATIONS.gate.z && p.mesh.position.y < -1).length }),
   useE: () => interact(),
   locker: () => ({ outfit: myOutfit, klass: myClass, balance: wallet.balance, owned: [...wallet.owned], ownsAll: wallet.ownsAll, signedIn: wallet.signedIn, remotes: [...remotes].map(([, r]) => ({ username: r.info.username, key: r.key, klass: r.info.klass || null })), crewClasses: sim.classes(), hud: $('#hudWallet').textContent, salary: $('#resSalary').textContent, avatarOutfit: myAvatar.userData.look?.crew || null }),
   openShop: (t) => openShop(t),

@@ -147,7 +147,7 @@ e1 = await raw(G, { t: 'term', step: 'gate' });
 check(e1?.code === 'term_order', `co-op: forged "gate" step without check-in -> ${e1?.code}`);
 e1 = await raw(G, { t: 'term', step: 'boarded' });
 check(e1?.code === 'term_order', `co-op: forged "boarded" -> ${e1?.code}`);
-await at(G, 0, 58); e1 = await raw(G, { t: 'term', step: 'checkin' });
+await at(G, 0, 58); await sleep(1800); e1 = await raw(G, { t: 'term', step: 'checkin' });
 check(e1?.code === 'term_far', `co-op: check-in from across the hall -> ${e1?.code}`);
 await walkThrough(H, 'coop-host');
 const rows = await H.p.$$eval('#obj .o', (els) => els.map((e) => e.textContent));
