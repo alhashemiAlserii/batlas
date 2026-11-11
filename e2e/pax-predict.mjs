@@ -25,7 +25,11 @@ await G.fill('#joinCode', code); await G.click('#bJoin'); await G.waitForFunctio
 await H.click('#bBoard'); await G.click('#bBoard');
 await G.waitForFunction(() => window.skyCrew.state().playing && window.skyCrew.state().remotes.length === 1, null, { timeout: 30000 });
 await H.evaluate(() => window.skyCrew.debug.sitAll());
-await G.waitForFunction(() => window.skyCrew.pax().filter((x) => x.state === 'seated').length >= 10, null, { timeout: 15000 });
+// guest passengers glide to the host's positions: wait until both agree (every passenger seated in the cabin)
+const inCabin = () => window.skyCrew.pax().filter((x) => x.state === 'seated' && Math.abs(x.y) < 0.2 && x.z < 12).length;
+await H.waitForFunction(inCabin, null, { timeout: 15000 });
+const nH = await H.evaluate(inCabin);
+await G.waitForFunction((n) => window.skyCrew.pax().filter((x) => x.state === 'seated' && Math.abs(x.y) < 0.2 && x.z < 12).length >= n, nH, { timeout: 20000 });
 // guest network hooks: drop / delay its grab requests, throttle host snapshots
 await G.evaluate(() => {
   const net = window.skyCrew.net, send = net.send.bind(net), on = net.onMsg.bind(net);
@@ -40,18 +44,20 @@ const pick = async (q) => {
     if (i % 5 === 0) await G.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, q);
     await sleep(150); t = await G.evaluate(() => window.skyCrew.target());
   }
+  await G.evaluate(() => document.activeElement?.blur()); // focus left in the room-code field must not eat the key
   await G.keyboard.press('KeyE');
   return t?.kind;
 };
-const seated = async () => (await G.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && Math.abs(x.x) < 1.2).sort((a, b) => a.z - b.z);
+const seated = async () => (await G.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && Math.abs(x.x) < 1.2 && Math.abs(x.y) < 0.2 && x.z < 12).sort((a, b) => a.z - b.z);
 const view = (p, id) => p.evaluate((id) => window.skyCrew.pax().find((x) => x.id === id), id);
 
 // 1) refused + slow host: prediction shows, then visibly drops within ~2.5 s, with a message; host never carried
 await G.evaluate(() => { window.__mode = 'refuse'; window.__slow = true; });
 let q = (await seated())[2];
+await G.evaluate((id) => { window.__seen = []; setInterval(() => { const p = window.skyCrew.pax().find((x) => x.id === id); const t = `${p.state}@${Math.round(performance.now())}`; if (!window.__seen.length || !window.__seen.at(-1).startsWith(p.state)) window.__seen.push(t); }, 20); }, q.id);
 const k1 = await pick(q); check(k1 === 'grabPax', `refused: guest aimed at a passenger (${k1}; me ${JSON.stringify(await G.evaluate(() => ({ ...window.skyCrew.state().me, held: window.skyCrew.heldPax(), term: window.skyCrew.term().step, tgt: window.skyCrew.target() })))})`);
-let pred = false; for (let i = 0; i < 30 && !pred; i++) { pred = (await view(G, q.id)).state === 'carried'; if (!pred) await sleep(50); }
-check(pred, 'refused: guest predicts the pickup (shows them carried before the host answers)');
+await sleep(300); const seen = await G.evaluate(() => window.__seen); const pred = seen.some((x) => x.startsWith('carried'));
+check(pred, `refused: guest predicts the pickup (shows them carried before the host answers) [${seen.join(' ')}]`);
 const t0 = Date.now(); let v;
 for (let i = 0; i < 60; i++) { v = await view(G, q.id); if (v.state !== 'carried') break; await sleep(100); }
 const ms = Date.now() - t0;
