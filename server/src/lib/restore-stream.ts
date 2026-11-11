@@ -19,6 +19,8 @@ import { RestoreError, type RowSource } from './restore.js';
  *
  * Reading back (RowSource.rows) yields one row at a time with media as a Buffer loaded from its
  * file, so peak memory is about one media file plus the database driver's copy of it.
+ * IMPORTANT: media Buffers share one reusable buffer and are only valid until the next row is
+ * requested (restoreFromSource inserts each blob row before reading the next).
  *
  * The staged files hold the same data as the backup (password hashes, user data): directory
  * 0700, files 0600, removed by cleanup(). Nothing here logs row contents.
@@ -266,15 +268,26 @@ export async function stageBackup(input: Readable, opts: { maxBytes: number; tmp
     throw new RestoreError(`could not read the backup JSON: ${msg.slice(0, 200)}`);
   }
 
+  let pool = Buffer.alloc(0);
   /** {"$file": ...} references back to Buffers (checked against the size/sha256 recorded while staging). */
   const revive = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(revive);
     if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>;
       if (typeof o.$file === 'string' && Object.keys(o).length === 3 && /^blob-\d+\.bin$/.test(o.$file)) {
-        const buf = fs.readFileSync(path.join(dir, o.$file));
-        if (buf.length !== o.size) throw new RestoreError('staged media file changed size');
-        return buf;
+        const file = path.join(dir, o.$file);
+        const size = fs.statSync(file).size;
+        if (size !== o.size) throw new RestoreError('staged media file changed size');
+        // One reusable buffer for all media: fresh 40 MB Buffers per row pile up as external memory
+        // faster than V8 collects them. Safe because the restore core is done with a blob row
+        // (validated, or inserted and awaited) before it asks for the next row.
+        if (pool.length < size) pool = Buffer.allocUnsafe(Math.max(size, pool.length * 2, 1 << 20));
+        const fd = fs.openSync(file, 'r');
+        try {
+          let off = 0;
+          while (off < size) { const n = fs.readSync(fd, pool, off, size - off, off); if (!n) throw new RestoreError('staged media file is short'); off += n; }
+        } finally { fs.closeSync(fd); }
+        return pool.subarray(0, size);
       }
       for (const k of Object.keys(o)) o[k] = revive(o[k]);
     }

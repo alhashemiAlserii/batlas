@@ -9,7 +9,7 @@ import { testDb } from './helpers.js';
 import { seed, iso } from './restore-seed.js';
 import { createDb, insertId, migrate } from '../src/db/index.js';
 import { dumpDatabase } from '../src/lib/backup.js';
-import { restoreDump, parseDump, rowCounts, RestoreError, topoOrder, targetName, describeTarget, isLocalTarget } from '../src/lib/restore.js';
+import { BLOB_CHUNK, restoreDump, parseDump, rowCounts, RestoreError, topoOrder, targetName, describeTarget, isLocalTarget } from '../src/lib/restore.js';
 import { SERVER_ROOT } from '../src/config.js';
 
 const open: Knex[] = [];
@@ -172,4 +172,19 @@ describe('npm run restore (CLI, SQLite file target)', () => {
     expect(bad.stderr).toMatch(/not valid JSON/);
     fs.rmSync(dir, { recursive: true, force: true });
   }, 60000);
+});
+
+describe('restore: large media', () => {
+  it('writes a media file bigger than BLOB_CHUNK intact (Postgres appends it in pieces)', async () => {
+    const src = await fresh();
+    await seed(src);
+    const big = crypto.randomBytes(BLOB_CHUNK * 2 + 12345);
+    const sha = crypto.createHash('sha256').update(big).digest('hex');
+    const id = await insertId(src('media').insert({ kind: 'video', content_type: 'video/mp4', size: big.length, sha256: sha, data: big, created_at: iso(50) }));
+    const dst = await fresh();
+    await restoreDump(dst, await asFile(src));
+    const row = await dst('media').where({ id }).first();
+    expect(Buffer.from(row.data).length).toBe(big.length);
+    expect(crypto.createHash('sha256').update(row.data).digest('hex')).toBe(sha);
+  }, 60_000);
 });

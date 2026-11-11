@@ -20,6 +20,9 @@ export const SKIP_TABLES = new Set(['knex_migrations', 'knex_migrations_lock']);
 
 export class RestoreError extends Error {}
 
+/** Postgres blobs larger than this are written in pieces of this size. */
+export const BLOB_CHUNK = 16 * 1024 * 1024;
+
 const isPg = (db: Knex) => String(db.client.config.client).includes('pg');
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -240,7 +243,28 @@ export async function restoreFromSource(db: Knex, src: RowSource, opts: RestoreO
       const flush = async () => { if (batch.length) { await trx(t).insert(batch); restored[t] += batch.length; batch = []; } };
       for await (const r of src.rows(t)) {
         const row = prepareRow(t, r, i++, cols.get(t)!);
-        if (Object.values(row).some((v) => Buffer.isBuffer(v))) { await flush(); limit = 1; }
+        if (Object.values(row).some((v) => Buffer.isBuffer(v))) {
+          await flush();
+          limit = 1;
+          const big = Object.entries(row).filter(([, v]) => Buffer.isBuffer(v) && v.length > BLOB_CHUNK);
+          if (pg && big.length && row.id != null) {
+            // Large media on Postgres: insert the first 16 MB, then append the rest in 16 MB pieces, so the
+            // driver never serialises a whole 40 MB video into one query (keeps a 512 MB instance safe).
+            const first: Record<string, unknown> = { ...row };
+            for (const [k, v] of big) first[k] = (v as Buffer).subarray(0, BLOB_CHUNK);
+            await trx(t).insert(first);
+            for (const [k, v] of big) {
+              const b = v as Buffer;
+              for (let off = BLOB_CHUNK; off < b.length; off += BLOB_CHUNK) {
+                await trx.raw(`update ${q(t)} set ${q(k)} = ${q(k)} || ? where id = ?`, [b.subarray(off, off + BLOB_CHUNK), row.id as number]);
+              }
+              const len = Number((await trx.raw(`select octet_length(${q(k)}) as n from ${q(t)} where id = ?`, [row.id as number])).rows[0].n);
+              if (len !== b.length) throw new RestoreError(`table ${t} row ${i - 1}: ${k} is ${len} bytes after writing, expected ${b.length}`);
+            }
+            restored[t] += 1;
+            continue;
+          }
+        }
         batch.push(row);
         if (batch.length >= limit) await flush();
       }
