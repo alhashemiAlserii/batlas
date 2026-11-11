@@ -25,6 +25,7 @@ import crypto from 'node:crypto';
 import { siteRoutes, type LiveRoomsProvider } from './routes/site.js';
 import { serveMedia } from './lib/media.js';
 import { getMaintenance } from './lib/maintenance.js';
+import { mountRestoreEndpoint } from './routes/restore-endpoint.js';
 
 /** Paths that keep working in maintenance mode for everyone (static assets for the maintenance page). */
 const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/(favicon\.ico|sw\.js|manifest\.webmanifest|offline\.html|apple-touch-icon\.png)$/;
@@ -76,6 +77,9 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
       next(e);
     }
   });
+
+  // Restore over HTTPS (moving to a new database). 404 unless RESTORE_TOKEN is set; see routes/restore-endpoint.ts.
+  mountRestoreEndpoint(app, ctx);
 
   app.use(
     helmet({

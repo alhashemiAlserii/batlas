@@ -20,6 +20,9 @@ export const SKIP_TABLES = new Set(['knex_migrations', 'knex_migrations_lock']);
 
 export class RestoreError extends Error {}
 
+/** Postgres blobs larger than this are written in pieces of this size. */
+export const BLOB_CHUNK = 16 * 1024 * 1024;
+
 const isPg = (db: Knex) => String(db.client.config.client).includes('pg');
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -114,6 +117,7 @@ const isBase64Box = (v: unknown): v is { $base64: string } =>
   !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as any).$base64 === 'string' && Object.keys(v as object).length === 1;
 
 function convert(value: unknown, colType: string, where: string): unknown {
+  if (Buffer.isBuffer(value)) return value; // already binary (streamed restore stages media as files)
   if (isBase64Box(value)) {
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value.$base64)) throw new RestoreError(`${where}: invalid base64`);
     return Buffer.from(value.$base64, 'base64');
@@ -135,47 +139,93 @@ export interface RestoreResult {
   /** tables in the target that the backup does not mention (left empty). */
   notInBackup: string[];
   wiped: { table: string; rows: number }[];
+  /** true when nothing was written (dryRun). */
+  dryRun: boolean;
+}
+
+/**
+ * Where restore rows come from. The CLI uses an in-memory dump (memorySource); the restore
+ * endpoint streams the upload to per-table temp files and reads them back (one row at a time),
+ * so a large media backup never sits in memory whole. rows() may be called twice per table
+ * (validate pass, then write pass).
+ */
+export interface RowSource {
+  /** Table names present in the backup (Knex bookkeeping tables may be included; they are skipped). */
+  tables(): string[];
+  count(table: string): number;
+  rows(table: string): AsyncIterable<Record<string, unknown>>;
+}
+
+export function memorySource(dump: DatabaseDump): RowSource {
+  return {
+    tables: () => Object.keys(dump.tables),
+    count: (t) => dump.tables[t]?.length ?? 0,
+    async *rows(t) { for (const r of dump.tables[t] ?? []) yield r as Record<string, unknown>; },
+  };
+}
+
+export interface RestoreOptions {
+  force?: boolean;
+  /** Validate everything (columns, base64, media size/sha256) but write nothing. */
+  dryRun?: boolean;
+  /** Runs inside the restore transaction after the rows are in and counted (e.g. an audit entry). Throwing rolls everything back. */
+  beforeCommit?: (trx: Knex.Transaction, result: RestoreResult) => Promise<void>;
 }
 
 /**
  * Restores `dump` into `db` (already migrated). Refuses a non-empty target unless `force`
  * (then every app table is emptied first, inside the same transaction).
  */
-export async function restoreDump(db: Knex, dump: DatabaseDump, opts: { force?: boolean } = {}): Promise<RestoreResult> {
+export async function restoreDump(db: Knex, dump: DatabaseDump, opts: RestoreOptions = {}): Promise<RestoreResult> {
   parseDump(dump);
+  return restoreFromSource(db, memorySource(dump), opts);
+}
+
+function prepareRow(t: string, r: Record<string, unknown>, i: number, cols: Map<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(r)) {
+    if (!cols.has(k)) throw new RestoreError(`table ${t} row ${i}: column "${k}" does not exist in the target schema`);
+    out[k] = convert(v, cols.get(k)!, `table ${t} row ${i} column ${k}`);
+  }
+  if (t === 'media' && Buffer.isBuffer(out.data)) {
+    if (out.size != null && Number(out.size) !== out.data.length) throw new RestoreError(`table media row ${i}: data is ${out.data.length} bytes but size says ${out.size}`);
+    if (out.sha256 && crypto.createHash('sha256').update(out.data).digest('hex') !== out.sha256) throw new RestoreError(`table media row ${i}: sha256 mismatch (corrupt media)`);
+  }
+  return out;
+}
+
+/** The restore core shared by `npm run restore` and POST /api/internal/restore. */
+export async function restoreFromSource(db: Knex, src: RowSource, opts: RestoreOptions = {}): Promise<RestoreResult> {
   const existing = await nonEmptyTables(db);
-  if (existing.length && !opts.force) {
+  if (existing.length && !opts.force && !opts.dryRun) {
     throw new RestoreError(`target database is not empty (${existing.map((e) => `${e.table}: ${e.rows}`).join(', ')}); refusing without --force`);
   }
   const pg = isPg(db);
   return db.transaction(async (trx) => {
     const tables = await listTables(trx);
     const order = topoOrder(await foreignKeys(trx, tables));
-    const inDump = Object.keys(dump.tables).filter((t) => !SKIP_TABLES.has(t));
+    const inDump = src.tables().filter((t) => !SKIP_TABLES.has(t));
+    if (!inDump.includes('users')) throw new RestoreError('not a Batlas backup: no users table');
     const unknown = inDump.filter((t) => !tables.includes(t));
     if (unknown.length) throw new RestoreError(`backup has tables the target schema does not: ${unknown.join(', ')} (run migrations / use a newer app version)`);
+    const todo = order.filter((t) => inDump.includes(t));
+    const cols = new Map<string, Map<string, string>>();
+    for (const t of todo) cols.set(t, await columns(trx, t));
 
-    // Validate + convert everything before writing a single row.
-    const prepared = new Map<string, Record<string, unknown>[]>();
-    for (const t of order) {
-      const rows = dump.tables[t];
-      if (!rows) continue;
-      const cols = await columns(trx, t);
-      prepared.set(t, rows.map((r: any, i) => {
-        const out: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(r)) {
-          if (!cols.has(k)) throw new RestoreError(`table ${t} row ${i}: column "${k}" does not exist in the target schema`);
-          out[k] = convert(v, cols.get(k)!, `table ${t} row ${i} column ${k}`);
-        }
-        if (t === 'media' && Buffer.isBuffer(out.data)) {
-          if (out.size != null && Number(out.size) !== out.data.length) throw new RestoreError(`table media row ${i}: data is ${out.data.length} bytes but size says ${out.size}`);
-          if (out.sha256 && crypto.createHash('sha256').update(out.data).digest('hex') !== out.sha256) throw new RestoreError(`table media row ${i}: sha256 mismatch (corrupt media)`);
-        }
-        return out;
-      }));
+    // Pass 1: validate + convert every row (one at a time) before writing a single one.
+    for (const t of todo) {
+      let i = 0;
+      for await (const r of src.rows(t)) prepareRow(t, r, i++, cols.get(t)!);
+      if (i !== src.count(t)) throw new RestoreError(`table ${t}: backup said ${src.count(t)} rows but ${i} were read`);
     }
 
-    const wiped = opts.force ? (await nonEmptyTables(trx as unknown as Knex)) : [];
+    const wiped = opts.force && !opts.dryRun ? (await nonEmptyTables(trx as unknown as Knex)) : [];
+    const restored: Record<string, number> = {};
+    const base = { order, sequences: {} as Record<string, number>, notInBackup: order.filter((t) => !inDump.includes(t)), wiped };
+    if (opts.dryRun) {
+      for (const t of todo) restored[t] = src.count(t);
+      return { ...base, restored, dryRun: true };
+    }
     if (opts.force) {
       for (const t of [...order].reverse()) await trx(t).del();
       if (!pg && (await trx.raw(`select 1 from sqlite_master where name = 'sqlite_sequence'`)).length) {
@@ -183,40 +233,64 @@ export async function restoreDump(db: Knex, dump: DatabaseDump, opts: { force?: 
       }
     }
 
-    const restored: Record<string, number> = {};
-    for (const t of order) {
-      const rows = prepared.get(t);
-      if (!rows) continue;
+    // Pass 2: write. Blob tables one row at a time, others in chunks.
+    for (const t of todo) {
       restored[t] = 0;
-      if (!rows.length) continue;
-      const width = Math.max(1, Object.keys(rows[0]).length);
-      const hasBlob = rows.some((r) => Object.values(r).some((v) => Buffer.isBuffer(v)));
-      const size = hasBlob ? 1 : Math.max(1, Math.floor(5000 / width));
-      for (let i = 0; i < rows.length; i += size) {
-        await trx(t).insert(rows.slice(i, i + size));
+      const width = Math.max(1, cols.get(t)!.size);
+      let batch: Record<string, unknown>[] = [];
+      let limit = Math.max(1, Math.floor(5000 / width));
+      let i = 0;
+      const flush = async () => { if (batch.length) { await trx(t).insert(batch); restored[t] += batch.length; batch = []; } };
+      for await (const r of src.rows(t)) {
+        const row = prepareRow(t, r, i++, cols.get(t)!);
+        if (Object.values(row).some((v) => Buffer.isBuffer(v))) {
+          await flush();
+          limit = 1;
+          const big = Object.entries(row).filter(([, v]) => Buffer.isBuffer(v) && v.length > BLOB_CHUNK);
+          if (pg && big.length && row.id != null) {
+            // Large media on Postgres: insert the first 16 MB, then append the rest in 16 MB pieces, so the
+            // driver never serialises a whole 40 MB video into one query (keeps a 512 MB instance safe).
+            const first: Record<string, unknown> = { ...row };
+            for (const [k, v] of big) first[k] = (v as Buffer).subarray(0, BLOB_CHUNK);
+            await trx(t).insert(first);
+            for (const [k, v] of big) {
+              const b = v as Buffer;
+              for (let off = BLOB_CHUNK; off < b.length; off += BLOB_CHUNK) {
+                await trx.raw(`update ${q(t)} set ${q(k)} = ${q(k)} || ? where id = ?`, [b.subarray(off, off + BLOB_CHUNK), row.id as number]);
+              }
+              const len = Number((await trx.raw(`select octet_length(${q(k)}) as n from ${q(t)} where id = ?`, [row.id as number])).rows[0].n);
+              if (len !== b.length) throw new RestoreError(`table ${t} row ${i - 1}: ${k} is ${len} bytes after writing, expected ${b.length}`);
+            }
+            restored[t] += 1;
+            continue;
+          }
+        }
+        batch.push(row);
+        if (batch.length >= limit) await flush();
       }
-      restored[t] = rows.length;
+      await flush();
     }
 
     const sequences: Record<string, number> = {};
     if (pg) {
+      const schema = (await trx.raw('select current_schema() as s')).rows[0].s;
       for (const t of order) {
-        const cols = await columns(trx, t);
-        if (!cols.has('id')) continue;
-        const qualified = `${q((await trx.raw('select current_schema() as s')).rows[0].s)}.${q(t)}`;
-        const seq = (await trx.raw(`select pg_get_serial_sequence(?, 'id') as s`, [qualified])).rows[0]?.s;
+        if (!(cols.get(t) ?? (await columns(trx, t))).has('id')) continue;
+        const seq = (await trx.raw(`select pg_get_serial_sequence(?, 'id') as s`, [`${q(schema)}.${q(t)}`])).rows[0]?.s;
         if (!seq) continue;
         const r = await trx.raw(`select setval(?::regclass, coalesce((select max(id) from ${q(t)}), 1), (select max(id) from ${q(t)}) is not null) as v`, [seq]);
         sequences[t] = Number(r.rows[0].v);
       }
     }
 
-    // Final in-transaction check: what is in the DB now equals what the file says.
+    // Final in-transaction check: what is in the DB now equals what the backup says.
     const now = await rowCounts(trx, order);
-    for (const [t, n] of Object.entries(restored)) {
-      if (now[t] !== n) throw new RestoreError(`table ${t}: expected ${n} rows after restore, found ${now[t]}`);
+    for (const t of todo) {
+      if (restored[t] !== src.count(t) || now[t] !== src.count(t)) throw new RestoreError(`table ${t}: expected ${src.count(t)} rows after restore, found ${now[t]}`);
     }
-    return { order, restored, sequences, notInBackup: order.filter((t) => !(t in dump.tables)), wiped };
+    const result: RestoreResult = { ...base, sequences, restored, dryRun: false };
+    if (opts.beforeCommit) await opts.beforeCommit(trx, result);
+    return result;
   });
 }
 

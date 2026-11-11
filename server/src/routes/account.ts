@@ -15,6 +15,8 @@ import { audit } from '../lib/audit.js';
 import { passwordSchema, optionalEmail } from '../lib/schemas.js';
 import { IMAGE_TYPES } from './games.js';
 import { storeMedia, mediaIdFromUrl } from '../lib/media.js';
+import { deleteOwnAccount } from '../lib/account-delete.js';
+import { cookieNames } from '../lib/session.js';
 
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -123,6 +125,40 @@ export function accountRoutes(ctx: Ctx) {
     const nu = (await ctx.db<UserRow>('users').where({ id: u.id }).first())!;
     if (changed && email && ctx.config.emailEnabled) await sendVerificationEmail(ctx, nu).catch(() => {});
     res.json({ user: selfUser(nu) });
+  });
+
+  // ---- delete my own account ----
+  // Needs the current password AND the exact username typed. Never for a Developer (also re-checked
+  // inside the transaction). Website session only (not a game token). Limited per account and per IP.
+  const deleteLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: Number(process.env.ACCOUNT_DELETE_RATE_LIMIT ?? 5),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req) => `u:${req.user?.id ?? 'anon'}`,
+    message: { error: 'Too many attempts. Please wait 15 minutes and try again.', code: 'rate_limited' },
+  });
+  r.post('/me/delete', requireAuth, limiter, deleteLimiter, async (req, res) => {
+    const u = req.user!;
+    if (req.authVia !== 'session') throw new HttpError(403, 'Delete your account from the website.', 'forbidden');
+    const body = parse(z.object({ password: z.string().min(1).max(200), username: z.string().max(64) }), req.body);
+    const deny = async (reason: string) => audit(ctx.db, req, { action: 'account.self_delete.denied', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: u.username, details: { reason } });
+    if (u.role === 'DEVELOPER') {
+      await deny('developer');
+      throw new HttpError(403, 'Developer accounts cannot be deleted. Transfer the Developer rank first.', 'protected');
+    }
+    if (!(await verifyPassword(u.password_hash, body.password))) {
+      await deny('wrong_password');
+      throw new HttpError(403, 'Your password is incorrect.', 'bad_credentials');
+    }
+    if (body.username !== u.username) {
+      await deny('wrong_username');
+      throw new HttpError(400, `Type your username exactly ("${u.username}") to confirm.`, 'confirm_required');
+    }
+    const r = await deleteOwnAccount(ctx.db, u.id, { uploadDir: ctx.config.uploadDir });
+    const names = cookieNames(ctx.config.cookieSecure);
+    res.clearCookie(names.session, { path: '/', httpOnly: true, secure: ctx.config.cookieSecure, sameSite: 'lax' });
+    res.json({ ok: true, deleted: r.anon, removed: r.removed });
   });
 
   // ---- avatars ----

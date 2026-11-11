@@ -18,6 +18,13 @@ export interface AppConfig {
   /** Bearer token for GET /api/internal/backup. The endpoint does not exist (404) unless this is 32+ chars. */
   backupToken: string | null;
   backupRateLimit: number;
+  /** Bearer token for POST /api/internal/restore. Separate from BACKUP_TOKEN; the endpoint is 404 unless this is 32+ chars. */
+  restoreToken: string | null;
+  restoreRateLimit: number;
+  /** Largest restore upload accepted, in bytes. */
+  restoreMaxBytes: number;
+  /** Where uploads are staged during a restore (default: the OS temp dir). */
+  restoreTmpDir: string | null;
   trustProxy: boolean;
   rateLimit: { windowMs: number; max: number };
   studioName: string;
@@ -41,6 +48,10 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sessionSecret: process.env.SESSION_SECRET || null,
     backupToken: process.env.BACKUP_TOKEN || null,
     backupRateLimit: Number(process.env.BACKUP_RATE_LIMIT ?? 12), // per IP per hour
+    restoreToken: process.env.RESTORE_TOKEN || null,
+    restoreRateLimit: Number(process.env.RESTORE_RATE_LIMIT ?? 10), // per IP per hour
+    restoreMaxBytes: Number(process.env.RESTORE_MAX_BYTES ?? 2 * 1024 * 1024 * 1024),
+    restoreTmpDir: process.env.RESTORE_TMP_DIR || null,
     // Behind Render's (or any) HTTPS proxy, so req.ip / secure cookies see the real client.
     trustProxy: process.env.TRUST_PROXY ? process.env.TRUST_PROXY === 'true' : prod,
     rateLimit: { windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT ?? 20) },

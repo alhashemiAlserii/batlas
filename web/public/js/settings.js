@@ -53,11 +53,45 @@ else {
     catch (err) { showError(pMsg, err); }
   });
 
+  // delete account (danger zone)
+  const dMsg = h('div', { 'aria-live': 'polite' });
+  let del;
+  if (u.role === 'DEVELOPER') {
+    del = h('section', { class: 'card danger-zone', id: 'delete-account' }, h('h2', {}, 'Delete account'),
+      h('p', { class: 'small muted' }, 'Developer accounts can\'t be deleted. Give the Developer rank to someone else first.'));
+  } else {
+    const dUser = h('input', { id: 'del-user', name: 'username', type: 'text', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false', inputmode: 'text', placeholder: u.username });
+    const dPw = h('input', { id: 'del-pw', name: 'password', type: 'password', autocomplete: 'current-password' });
+    const dOk = h('input', { id: 'del-ok', type: 'checkbox' });
+    const dBtn = h('button', { class: 'btn danger', type: 'submit', disabled: true }, 'Delete my account forever');
+    const ready = () => { dBtn.disabled = !(dUser.value === u.username && dPw.value && dOk.checked); };
+    for (const el of [dUser, dPw, dOk]) { el.addEventListener('input', ready); el.addEventListener('change', ready); }
+    del = h('form', { class: 'card danger-zone', id: 'delete-account', novalidate: true }, h('h2', {}, 'Delete account'),
+      h('p', { class: 'small' }, 'This permanently deletes your Batlas account: your profile, avatar, flight scores and sign-ins on every device. It cannot be undone, and nobody (not even staff) can bring it back.'),
+      h('p', { class: 'small muted' }, 'News posts or uploads you made stay on the site without your name. Staff records of past actions are kept but your name in them is replaced with "deleted-user".'),
+      h('div', { class: 'field' }, h('label', { for: 'del-user' }, 'Type your username ', h('strong', {}, u.username), ' to confirm'), dUser),
+      h('div', { class: 'field' }, h('label', { for: 'del-pw' }, 'Current password'), dPw),
+      h('label', { class: 'checks small', for: 'del-ok' }, dOk, ' I understand my account will be gone for good.'),
+      dMsg, dBtn);
+    del.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (dUser.value !== u.username) return showError(dMsg, new Error(`Type your username exactly: ${u.username}`));
+      if (!window.confirm(`Really delete the account "${u.username}"? This cannot be undone.`)) return;
+      dBtn.disabled = true;
+      try {
+        await api('POST', '/api/me/delete', { username: dUser.value, password: dPw.value });
+        root.replaceChildren(h('div', { class: 'alert ok', role: 'status' }, 'Your account has been deleted. Goodbye from Batlas.'), h('p', {}, h('a', { class: 'btn', href: '/' }, 'Back to the home page')));
+        setTimeout(() => { location.href = '/'; }, 4000);
+      } catch (err) { dPw.value = ''; ready(); showError(dMsg, err); }
+    });
+  }
+
   const forced = !!u.mustChangePassword;
   if (forced) {
     pf.querySelector('label[for=cp]').textContent = 'Temporary password (the one staff gave you)';
     root.replaceChildren(h('div', { class: 'alert error', role: 'alert' }, 'A Batlas staff member reset your password. Choose your own new password to continue.'), pf);
   } else root.replaceChildren(
     h('p', { class: 'muted' }, 'Signed in as ', h('strong', {}, u.username), ' ', rankBadge(u.role), ' · ', h('a', { href: '/profile' }, 'Edit profile')),
-    h('div', { class: 'settings-grid' }, av, h('div', { class: 'settings-grid' }, verify, pf)));
+    h('div', { class: 'settings-grid' }, av, h('div', { class: 'settings-grid' }, verify, pf)),
+    del);
 }
