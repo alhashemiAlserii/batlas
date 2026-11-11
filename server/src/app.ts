@@ -22,11 +22,19 @@ import { dumpDatabase } from './lib/backup.js';
 import { audit } from './lib/audit.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
+import { siteRoutes, type LiveRoomsProvider } from './routes/site.js';
+import { serveMedia } from './lib/media.js';
+import { getMaintenance } from './lib/maintenance.js';
+
+/** Paths that keep working in maintenance mode for everyone (static assets for the maintenance page). */
+const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/favicon\.ico$/;
+/** API calls that keep working in maintenance mode (login itself refuses non-Developers with 503). */
+const MAINT_API_OPEN = new Set(['GET /api/csrf', 'GET /api/site', 'GET /api/maintenance', 'GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/game/verify', 'POST /api/game/audit', 'GET /api/internal/backup']);
 
 /** Unlisted route for the Developer dashboard. Not linked anywhere public; protected server-side regardless. */
 export const DEV_DASHBOARD_PATH = '/studio-console';
 
-export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, deps: { mailer?: Mailer } = {}) {
+export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, deps: { mailer?: Mailer; liveRooms?: LiveRoomsProvider } = {}) {
   const config = loadConfig(configOverrides);
   const ctx: Ctx = { db, config, mailer: deps.mailer ?? new FileMailer(config.outboxDir) };
   const app = express();
@@ -103,6 +111,28 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.use(express.json({ limit: '200kb' }));
   app.use(loadUser(ctx));
 
+  // ---------- Maintenance mode ----------
+  // Everyone except a signed-in DEVELOPER gets the maintenance page (pages) or 503 (API).
+  // /healthz and /api/internal/backup are registered above this, so they are never affected.
+  app.use(async (req, res, next) => {
+    try {
+      if (req.user?.role === 'DEVELOPER' || MAINT_ASSET.test(req.path) || req.path === '/healthz') return next();
+      const m = await getMaintenance(db);
+      if (!m.on) return next();
+      res.set('Cache-Control', 'no-store');
+      res.set('Retry-After', String(m.eta ? Math.max(60, Math.round((Date.parse(m.eta) - Date.now()) / 1000)) : 600));
+      if (req.path.startsWith('/api/')) {
+        if (MAINT_API_OPEN.has(`${req.method} ${req.path}`)) return next();
+        return res.status(503).json({ error: 'Batlas is under maintenance. Please try again later.', code: 'maintenance', message: m.message, eta: m.eta });
+      }
+      if (req.path === '/login' && req.method === 'GET') return next(); // so the Developer can still sign in
+      issueCsrf(ctx, res, false, req);
+      return res.status(503).sendFile(path.join(WEB_ROOT, 'public', 'maintenance.html'));
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // ---------- API ----------
   const api = express.Router();
   api.use(csrfProtect(ctx));
@@ -118,6 +148,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   api.use(newsRoutes(ctx));
   api.use(contactRoutes(ctx));
   api.use(statsRoutes(ctx));
+  api.use(siteRoutes(ctx, { liveRooms: deps.liveRooms }));
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found')));
   api.use(errorHandler);
   app.use('/api', (req, res, next) => {
@@ -167,6 +198,8 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.get(DEV_DASHBOARD_PATH, gated('dev.menu', 'console.html', true));
   app.get(`${DEV_DASHBOARD_PATH}/app.js`, gated('dev.menu', 'console.js', true));
 
+  // Database-backed uploads (images, trailers, avatars) with Range support for iOS Safari video.
+  app.get('/media/:id', (req, res, next) => { serveMedia(db, req, res).catch(next); });
   app.use('/uploads', express.static(config.uploadDir, { index: false, dotfiles: 'deny', maxAge: '7d' }));
   app.use(express.static(pub, { index: false, extensions: [] }));
 

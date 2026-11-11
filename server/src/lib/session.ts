@@ -68,6 +68,7 @@ export function loadUser(ctx: Ctx): RequestHandler {
           if (user && !user.banned) {
             req.user = user;
             req.authVia = 'game-token';
+            await touchLastSeen(ctx, user);
           }
         }
         return next(); // bearer requests never fall back to cookies
@@ -87,11 +88,22 @@ export function loadUser(ctx: Ctx): RequestHandler {
       req.user = user;
       req.sessionHash = idHash;
       req.authVia = 'session';
+      await touchLastSeen(ctx, user);
       next();
     } catch (e) {
       next(e);
     }
   };
+}
+
+/** "Online" = seen in the last few minutes. Written at most once a minute per user. */
+const SEEN_EVERY_MS = 60_000;
+async function touchLastSeen(ctx: Ctx, user: UserRow) {
+  const last = user.last_seen_at ? Date.parse(user.last_seen_at) : 0;
+  if (Date.now() - last < SEEN_EVERY_MS) return;
+  const now = new Date().toISOString();
+  user.last_seen_at = now;
+  await ctx.db('users').where({ id: user.id }).update({ last_seen_at: now }).catch(() => {});
 }
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);

@@ -14,6 +14,7 @@ import { issueToken, consumeToken } from '../lib/tokens.js';
 import { audit } from '../lib/audit.js';
 import { passwordSchema, optionalEmail } from '../lib/schemas.js';
 import { IMAGE_TYPES } from './games.js';
+import { storeMedia, mediaIdFromUrl } from '../lib/media.js';
 
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -128,7 +129,11 @@ export function accountRoutes(ctx: Ctx) {
   const avatarDir = path.join(ctx.config.uploadDir, 'avatars');
   fs.mkdirSync(avatarDir, { recursive: true });
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: AVATAR_MAX_BYTES, files: 1 } });
+  // Avatars are stored in the database (media table): Render's free-plan disk is wiped on deploy.
+  // Old on-disk avatars (/uploads/avatars/...) from before the upgrade are still cleaned up.
   const removeOld = async (url: string | null) => {
+    const mid = mediaIdFromUrl(url);
+    if (mid) { await ctx.db('media').where({ id: mid, kind: 'avatar' }).delete().catch(() => {}); return; }
     if (!url?.startsWith('/uploads/avatars/')) return;
     await fs.promises.unlink(path.join(avatarDir, path.basename(url))).catch(() => {});
   };
@@ -149,10 +154,9 @@ export function accountRoutes(ctx: Ctx) {
     } catch {
       throw new HttpError(400, 'That image could not be read.', 'bad_image');
     }
-    const name = `${req.user!.id}-${randomToken(9)}.webp`;
-    await fs.promises.writeFile(path.join(avatarDir, name), out, { flag: 'wx' });
+    const m = await storeMedia(ctx.db, { kind: 'avatar', contentType: 'image/webp', data: out, userId: req.user!.id });
     await removeOld(req.user!.avatar_url);
-    const url = `/uploads/avatars/${name}`;
+    const url = m.url;
     await ctx.db('users').where({ id: req.user!.id }).update({ avatar_url: url });
     const u = (await ctx.db<UserRow>('users').where({ id: req.user!.id }).first())!;
     res.status(201).json({ user: selfUser(u) });
