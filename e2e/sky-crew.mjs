@@ -20,8 +20,8 @@ function watch(page, label, errs) {
   page.on('console', (m) => { if (m.type() === 'error' && !NOISE.test(m.text())) errs.push(`[${label}] ${m.text()}`); });
   page.on('pageerror', (e) => errs.push(`[${label}] pageerror ${e.message}`));
 }
-async function boot(page, solo = true) {
-  await page.goto(`${B}/play/sky-crew`, { waitUntil: 'load' });
+async function boot(page, solo = true, q = '') {
+  await page.goto(`${B}/play/sky-crew${q}`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.skyCrew?.ready, null, { timeout: 30000 });
   if (solo) { await page.click('#bSolo'); await page.waitForFunction(() => window.skyCrew.state().playing); }
 }
@@ -330,7 +330,9 @@ async function coop() {
   const Cc = await mk('coop-player2'); const name3 = `e2e_crew${Date.now() % 100000}`;
   await login(Cc.p, name3, 'Sky-crew-test-pass-1', true);
   await A.p.click('#bLock'); await A.p.waitForFunction(() => window.skyCrew.state().room?.locked, null, { timeout: 5000 });
-  await boot(Cc.p, false); await Cc.p.fill('#joinCode', code); await Cc.p.click('#bJoin');
+  // 3rd software-GL page next to two full-speed ones: cap its frame rate and allow for a starved main thread
+  // (the join field is visible and free when this used to time out; 3-4 friend joins are covered in polish/dev-tools)
+  await boot(Cc.p, false, '?fps=2'); await Cc.p.fill('#joinCode', code, { timeout: 90000 }); await Cc.p.click('#bJoin', { timeout: 90000 });
   await Cc.p.waitForSelector('#menuErr:not(.hidden)', { timeout: 8000 }).catch(() => {});
   const lockErr = await Cc.p.textContent('#menuErr');
   /locked/i.test(lockErr) ? ok(`coop: host locked the room; Player join refused ("${lockErr}")`) : bad(`coop: locked join result "${lockErr}"`);
