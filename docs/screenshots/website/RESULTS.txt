@@ -1,11 +1,11 @@
-Website e2e (2026-11-10T12:21:47.029Z)
+Website e2e (2026-11-11T15:59:20.261Z)
 136 passed, 0 problems, 3 notes
 
 ✓ developer login
 ✓ screenshots uploaded into the gallery list
 ✓ screenshot remove + reorder buttons
 ✓ save Sky Crew (cover, 5 screenshots, MP4 trailer, poster, featured)
-✓ publish update v0.4.479 with news post
+✓ publish update v0.4.356 with news post
 ✓ create upcoming game with release date + YouTube trailer
 ✓ status buttons (draft → upcoming)
 ✓ schedule event
