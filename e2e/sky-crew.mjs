@@ -102,7 +102,7 @@ async function singlePlayer(name, type) {
   await page.goto(`${B}/games/sky-crew`, { waitUntil: 'networkidle' });
   // the status depends on what earlier suites did (website.mjs publishes it): Upcoming -> "Play early build", Published -> a Play link
   const gst = await page.evaluate(async () => (await (await fetch('/api/games')).json()).games?.find((g) => g.slug === 'sky-crew')?.status ?? null);
-  const early = page.locator(gst === 'upcoming' ? 'a:has-text("Play early build")' : 'a[href="/play/sky-crew"]').first();
+  const early = page.locator(gst === 'upcoming' ? 'a:has-text("Play early build")' : 'a[href="/play/sky-crew"]:not(.site-banners *)').first(); // not an event banner's link
   (await early.count()) && (await early.getAttribute('href')) === '/play/sky-crew' && (gst !== 'upcoming' || (await page.textContent('body')).includes('Upcoming')) ? ok(`${name}: game page (${gst}) links to /play/sky-crew ("${(await early.textContent()).trim()}")`) : bad(`${name}: play button missing (status ${gst})`);
   (await page.locator('section.leaderboard h2:has-text("Leaderboard")').count()) ? ok(`${name}: Sky Crew leaderboard section on the game page`) : bad(`${name}: leaderboard section missing`);
   if (name === 'chromium') await page.screenshot({ path: `${OUT}/game-page-leaderboard.png`, fullPage: true });
