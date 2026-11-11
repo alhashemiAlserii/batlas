@@ -1,0 +1,39 @@
+✓ iPhone 13 (WebKit): registered Del_iPhone1334891 (201)
+✓ iPhone 13 (WebKit): delete button disabled at first
+✓ iPhone 13 (WebKit): still disabled when the username case differs
+✓ iPhone 13 (WebKit): username field has autocapitalize=none autocorrect=off
+✓ iPhone 13 (WebKit): input font-size 16px (16px avoids iOS zoom)
+✓ iPhone 13 (WebKit): enabled once username, password and checkbox are right
+✓ iPhone 13 (WebKit): cancelling the confirm dialog keeps the account
+✓ iPhone 13 (WebKit): wrong password shows an error
+✓ iPhone 13 (WebKit): password cleared and button disabled again after an error
+✓ iPhone 13 (WebKit): success message shown
+✓ iPhone 13 (WebKit): signed out
+✓ iPhone 13 (WebKit): cannot sign in again (401)
+✓ iPad (WebKit): registered Del_iPadWebK57939 (201)
+✓ iPad (WebKit): delete button disabled at first
+✓ iPad (WebKit): still disabled when the username case differs
+✓ iPad (WebKit): username field has autocapitalize=none autocorrect=off
+✓ iPad (WebKit): input font-size 16px (16px avoids iOS zoom)
+✓ iPad (WebKit): enabled once username, password and checkbox are right
+✓ iPad (WebKit): cancelling the confirm dialog keeps the account
+✓ iPad (WebKit): wrong password shows an error
+✓ iPad (WebKit): password cleared and button disabled again after an error
+✓ iPad (WebKit): success message shown
+✓ iPad (WebKit): signed out
+✓ iPad (WebKit): cannot sign in again (401)
+✓ Desktop Chromium: registered Del_DesktopC73742 (201)
+✓ Desktop Chromium: delete button disabled at first
+✓ Desktop Chromium: still disabled when the username case differs
+✓ Desktop Chromium: username field has autocapitalize=none autocorrect=off
+✓ Desktop Chromium: input font-size 16px (16px avoids iOS zoom)
+✓ Desktop Chromium: enabled once username, password and checkbox are right
+✓ Desktop Chromium: cancelling the confirm dialog keeps the account
+✓ Desktop Chromium: wrong password shows an error
+✓ Desktop Chromium: password cleared and button disabled again after an error
+✓ Desktop Chromium: success message shown
+✓ Desktop Chromium: signed out
+✓ Desktop Chromium: cannot sign in again (401)
+
+36 passed, 0 failed
+
