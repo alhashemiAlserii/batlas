@@ -32,6 +32,13 @@ const server = app.listen(port, host, () => {
   if (!config.cookieSecure) console.log('WARNING: COOKIE_SECURE is off (local http dev). Use HTTPS + NODE_ENV=production for real deployments.');
 });
 
+// A restore upload (POST /api/internal/restore) can take longer than Node's default 5-minute request
+// timeout. Only while RESTORE_TOKEN is configured (the restore window) allow up to 2 hours.
+if (config.restoreToken && config.restoreToken.length >= 32) {
+  server.requestTimeout = Number(process.env.RESTORE_REQUEST_TIMEOUT_MS ?? 2 * 60 * 60 * 1000);
+  console.log('RESTORE_TOKEN is set: POST /api/internal/restore is enabled (only works in maintenance mode). Unset it when the restore is done.');
+}
+
 if (config.gameServerKey) {
   // The game server verifies players through the site's HTTP API (same as a separate process would).
   gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey) });
