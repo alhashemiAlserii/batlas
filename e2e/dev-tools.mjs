@@ -45,6 +45,8 @@ const tap = async (c, sel) => { await c.p.waitForSelector(sel, { state: 'visible
 const SC = (c, fn, arg) => c.p.evaluate(fn, arg);
 const st = (c) => SC(c, () => window.skyCrew.state());
 const gd = (c) => SC(c, () => window.skyCrew.gadgets());
+// poll a passenger until a predicate holds (server round trip + host sim tick; software GL runs in slow motion)
+const paxUntil = async (c, id, pred, ms = 6000) => { const t0 = Date.now(); let x; while (Date.now() - t0 < ms) { x = (await SC(c, () => window.skyCrew.pax())).find((y) => y.id === id); if (x && pred(x)) return x; await sleep(200); } return x; };
 const admin = (c, cmd, args) => SC(c, ({ cmd, args }) => window.skyCrew.admin(cmd, args).then((r) => r.t, (e) => `denied: ${e.message}`), { cmd, args });
 const shot = async (c, name) => { await c.p.evaluate(() => window.skyCrew?.draw?.()).catch(() => {}); await sleep(400); await c.p.screenshot({ path: `${OUT}/${name}.png` }); };
 /** send a raw (possibly forged) message and collect the server's direct answer */
@@ -139,6 +141,7 @@ const seated = async () => (await SC(A, () => window.skyCrew.pax())).filter((x) 
 async function equip(item) { const r = await admin(A, 'equip', { item }); await A.p.waitForFunction((i) => window.skyCrew.gadgets().mine.includes(i), item, { polling: 250, timeout: 8000 }).catch(() => {}); return r; }
 async function aimPax(q, dz = 2.2) { await SC(A, ({ q, dz }) => { window.skyCrew.teleport(0, 0, q.z + dz); window.skyCrew.lookAt(q.x, q.y + 0.75, q.z); }, { q, dz }); await sleep(250); }
 const fire = async (alt = false) => { await SC(A, (alt) => window.skyCrew.fire(alt), alt); await sleep(900); };
+const fireAt = async (q, pred, dz) => { let x; for (let i = 0; i < 3; i++) { await aimPax(q, dz); await SC(A, () => window.skyCrew.fire(false)); x = await paxUntil(A, q.id, pred, 2500); if (pred(x)) return x; await sleep(600); } return x; };
 // panel Equip button (real click) for the first one
 await SC(A, () => window.skyCrew.openPanel(true)); await tap(A, '#admTabs [data-tab="inventory"]');
 await tap(A, '[data-gadget="freeze_ray"] button[data-act="equip"]');
@@ -149,26 +152,28 @@ await SC(A, () => window.skyCrew.openPanel(false));
 await P.p.waitForFunction((u) => (window.skyCrew.gadgets().remoteAttach[u] || []).includes('tool'), devUser, { polling: 250, timeout: 8000 }).then(() => ok('Player sees the Freeze Ray model in the Developer\'s hand (co-op sync)'), () => bad('remote tool model missing'));
 let s = await seated(); let q = s[3];
 await aimPax(q); await fire();
-let pq = (await SC(A, () => window.skyCrew.pax())).find((x) => x.id === q.id);
+let pq = await paxUntil(A, q.id, (x) => x.frozen);
 check(pq.frozen, `Freeze Ray froze passenger ${q.id}`); await shot(A, 'gadget-freeze');
-const pSees = (await SC(P, () => window.skyCrew.pax())).find((x) => x.id === q.id); await sleep(600);
-check((await SC(P, () => window.skyCrew.pax())).find((x) => x.id === q.id)?.frozen, 'frozen passenger synced to the Player\'s client', JSON.stringify(pSees));
+const pSees = await paxUntil(P, q.id, (x) => x.frozen);
+check(pSees?.frozen, 'frozen passenger synced to the Player\'s client', JSON.stringify(pSees));
 // freeze ray on a player
 const pPos = (await st(P)).me;
 await SC(A, (p) => { window.skyCrew.teleport(p.x, p.y, p.z + 2.5); window.skyCrew.lookAt(p.x, p.y + 0.9, p.z); }, pPos); await sleep(400); await fire();
 await P.p.waitForFunction(() => window.skyCrew.gadgets().frozenT > 0, null, { polling: 250, timeout: 5000 }).then(() => ok('Freeze Ray on the Player: their client is frozen (ice block)'), () => bad('player freeze ray failed'));
 await shot(A, 'gadget-freeze-player');
 // size ray
-await equip('size_ray'); s = await seated(); q = s[5]; await aimPax(q); await fire();
-pq = (await SC(A, () => window.skyCrew.pax())).find((x) => x.id === q.id); check(pq.sizeK === 0.5, `Shrink Ray shrank passenger ${q.id} (sizeK ${pq.sizeK})`); await sleep(800); await shot(A, 'gadget-shrink');
+// aim at aisle-seat passengers: from the aisle, a window-seat passenger is (correctly) shielded by their neighbour
+const clear = async () => (await seated()).filter((x) => Math.abs(x.x) < 1.2 && !x.frozen && x.sizeK === 1);
+await equip('size_ray'); s = await clear(); q = s[1];
+pq = await fireAt(q, (x) => x.sizeK === 0.5); check(pq.sizeK === 0.5, `Shrink Ray shrank passenger ${q.id} (sizeK ${pq.sizeK})`); await sleep(800); await shot(A, 'gadget-shrink');
 await fire(true); check((await gd(A)).mode === 'grow', 'alt fire switches the ray to GROW');
-q = s[6]; await aimPax(q); await fire(); pq = (await SC(A, () => window.skyCrew.pax())).find((x) => x.id === q.id); check(pq.sizeK === 1.6, `Grow Ray grew passenger ${q.id} (sizeK ${pq.sizeK})`); await sleep(800); await shot(A, 'gadget-grow');
-await sleep(500); check((await SC(P, () => window.skyCrew.pax())).find((x) => x.id === q.id)?.sizeK === 1.6, 'size change synced to the Player');
+s = await clear(); q = s[3]; pq = await fireAt(q, (x) => x.sizeK === 1.6); check(pq.sizeK === 1.6, `Grow Ray grew passenger ${q.id} (sizeK ${pq.sizeK})`, pq.sizeK === 1.6 ? '' : JSON.stringify({ mode: (await gd(A)).mode, q, changed: (await SC(A, () => window.skyCrew.pax())).filter((x) => x.sizeK !== 1).map((x) => [x.id, x.sizeK, x.x, x.z]), me: (await st(A)).me })); await sleep(800); await shot(A, 'gadget-grow');
+check((await paxUntil(P, q.id, (x) => x.sizeK === 1.6))?.sizeK === 1.6, 'size change synced to the Player');
 // plasma / ion on a passenger: knocked out of the seat
 for (const [item, idx] of [['plasma_blaster', 8], ['ion_beam', 10]]) {
-  await equip(item); s = await seated(); q = s[Math.min(idx, s.length - 1)]; await aimPax(q, 2.6);
-  await SC(A, () => window.skyCrew.fire(false)); await sleep(item === 'plasma_blaster' ? 250 : 120); await shot(A, `gadget-${item}`); await sleep(1000);
-  pq = (await SC(A, () => window.skyCrew.pax())).find((x) => x.id === q.id);
+  await equip(item); s = await clear(); q = s[Math.min(idx - 4, s.length - 1)];
+  const knocked = (x) => x.state !== 'seated' || Math.hypot(x.x - q.x, x.z - q.z) > 0.3;
+  pq = await fireAt(q, knocked, 2.6); await shot(A, `gadget-${item}`);
   check(pq.state !== 'seated' || Math.hypot(pq.x - q.x, pq.z - q.z) > 0.3, `${item} knocked passenger ${q.id} (${pq.state})`);
 }
 // wave cannon + confetti
@@ -182,7 +187,8 @@ let ball = (await SC(A, () => window.skyCrew.items())).find((i) => i.type === 'b
 await SC(A, (b) => { window.skyCrew.teleport(b.x, b.y < -1 ? -2.4 : 0, b.z + 2.5); window.skyCrew.lookAt(b.x, b.y, b.z); }, ball); await sleep(300); await fire();
 check((await gd(A)).grav, 'Gravity Gun lifted the beach ball'); await sleep(600); await shot(A, 'gadget-gravity-hold');
 const held = (await SC(A, () => window.skyCrew.items())).find((i) => i.id === ball.id);
-await fire(); await sleep(400);
+await fire();
+await A.p.waitForFunction((h) => { const b = window.skyCrew.items().find((i) => i.id === h.id); return b && Math.hypot(b.x - h.x, b.z - h.z) > 0.5; }, held, { polling: 200, timeout: 5000 }).catch(() => {});
 const thrown = (await SC(A, () => window.skyCrew.items())).find((i) => i.id === ball.id);
 check(!(await gd(A)).grav && Math.hypot(thrown.x - held.x, thrown.z - held.z) > 0.5, `Gravity Gun launched it (moved ${Math.hypot(thrown.x - held.x, thrown.z - held.z).toFixed(1)} m)`);
 // teleport gun
@@ -230,8 +236,10 @@ const pT = await SC(P, () => window.skyCrew.target());
 check(!pT || !/Plasma/i.test(pT.label || ''), `Player gets no pickup prompt for the gadget case (${pT?.label || 'none'})`);
 await P.p.keyboard.press('KeyE'); await sleep(1200);
 check(!(await SC(A, () => window.skyCrew.items())).find((i) => i.id === cs.id)?.heldBy, 'Player cannot carry the gadget case');
-await SC(A, (c) => { window.skyCrew.teleport(c.x - 1.2, 0, c.z); window.skyCrew.lookAt(c.x, c.y, c.z); }, cs); await sleep(400);
-const aT = await SC(A, () => window.skyCrew.target());
+for (const item of ['super_speed', 'super_jump', 'shield_bubble', 'golden_aura']) await admin(A, 'unequip', { item });
+// walk up from the aisle side (the case can drop into a seat row; teleporting past it would put the Developer in the wall)
+await SC(A, (c) => { window.skyCrew.teleport(Math.sign(c.x) * Math.max(0, Math.abs(c.x) - 1.2), 0, c.z); window.skyCrew.lookAt(c.x, c.y, c.z); }, cs); await sleep(400);
+let aT = null; for (let i = 0; i < 6 && !aT; i++) { await SC(A, (c) => { window.skyCrew.teleport(Math.sign(c.x) * Math.max(0, Math.abs(c.x) - 1.2), 0, c.z); window.skyCrew.lookAt(c.x, c.y, c.z); }, (await SC(A, () => window.skyCrew.items())).find((i) => i.id === cs.id) || cs); await sleep(500); aT = await SC(A, () => window.skyCrew.target()); if (aT && aT.kind !== 'grab') aT = null; }
 await A.p.keyboard.press('KeyE');
 await A.p.waitForFunction(() => window.skyCrew.gadgets().tool === 'plasma_blaster', null, { polling: 250, timeout: 8000 }).then(() => ok(`Developer picked up the case ("${aT?.label}") and it equipped the Plasma Blaster`), async () => bad(`dev pickup did not equip (target was ${JSON.stringify(aT)}, case ${JSON.stringify((await SC(A, () => window.skyCrew.items())).find((i) => i.id === cs.id))}, me ${JSON.stringify((await st(A)).me)})`));
 await sleep(800); check(!(await SC(A, () => window.skyCrew.items())).find((i) => i.id === cs.id), 'the case is consumed');
@@ -259,7 +267,8 @@ await tap(A, '#admTabs [data-tab="events"]'); await tap(A, '[data-event="vip"]')
 check((await SC(A, () => window.skyCrew.pax())).some((x) => x.vip), 'panel VIP event adds a VIP passenger');
 await tap(A, '[data-event="birthday"]'); await sleep(700); await SC(A, () => window.skyCrew.openPanel(false)); await sleep(300); await shot(A, 'event-birthday'); await SC(A, () => window.skyCrew.openPanel(true));
 await tap(A, '#admTabs [data-tab="world"]'); await tap(A, '[data-weather="storm"]'); await sleep(500);
-await SC(A, () => window.skyCrew.admin('time', { hour: 21 })); await sleep(1000);
+await SC(A, () => window.skyCrew.admin('time', { hour: 21 }));
+await P.p.waitForFunction(() => window.skyCrew.hour() === 21, null, { polling: 200, timeout: 6000 }).catch(() => {});
 check((await SC(P, () => window.skyCrew.hour())) === 21, 'panel time of day reaches other clients (21:00)');
 await SC(P, () => { window.skyCrew.teleport(8, -2.4, 22); window.skyCrew.lookAt(0, 1, 0); }); await sleep(800); await shot(P, 'world-night-storm');
 await admin(A, 'time', { hour: 13 }); await admin(A, 'weather', { weather: 'clear' });
