@@ -2,6 +2,8 @@
 // Usage: node sky-crew.mjs [chromium|webkit|coop|all]
 import { chromium, webkit, devices } from 'playwright';
 import fs from 'node:fs';
+// these suites test the cabin and flight; the airport terminal has its own suite (terminal.mjs)
+const skipAp = async (ctx) => { await ctx.addInitScript(() => { try { localStorage.setItem('skycrew.skipAirport', '1'); } catch { /* ignore */ } }); return ctx; };
 const B = process.env.BASE || 'http://localhost:3200';
 const OUT = new URL('../docs/screenshots/revision/e2e', import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
@@ -92,7 +94,7 @@ async function singlePlayer(name, type) {
   const browser = await type.launch();
   const errs = [];
   // ---------- desktop ----------
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const ctx = await skipAp(await browser.newContext({ viewport: { width: 1280, height: 800 } }));
   const page = await ctx.newPage(); watch(page, `${name}-desktop`, errs);
   await page.goto(`${B}/games/sky-crew`, { waitUntil: 'networkidle' });
   const early = page.locator('a:has-text("Play early build")');
@@ -247,7 +249,7 @@ async function singlePlayer(name, type) {
 
   // ---------- mobile ----------
   const dev = type === webkit ? devices['iPad (gen 7)'] : devices['Pixel 7'];
-  const mctx = await browser.newContext({ ...dev });
+  const mctx = await skipAp(await browser.newContext({ ...dev }));
   const m = await mctx.newPage(); watch(m, `${name}-mobile`, errs);
   await boot(m, false);
   const mq = await m.evaluate(() => window.skyCrew.quality());
@@ -294,7 +296,7 @@ async function coop() {
   const errs = [];
   const credTxt = fs.readFileSync(process.env.DEV_CREDS || new URL('../server/data/dev-creds.txt', import.meta.url).pathname, 'utf8');
   const devPw = credTxt.match(/password=(.*)/)[1].trim(), devUser = credTxt.match(/username=(.*)/)[1].trim();
-  const mk = async (label) => { const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } }); const p = await ctx.newPage(); watch(p, label, errs); return { ctx, p }; };
+  const mk = async (label) => { const ctx = await skipAp(await browser.newContext({ viewport: { width: 960, height: 600 } })); const p = await ctx.newPage(); watch(p, label, errs); return { ctx, p }; };
   const A = await mk('coop-dev'), Bc = await mk('coop-player');
   const login = async (p, username, password, register = false) => {
     await p.goto(`${B}/login`);

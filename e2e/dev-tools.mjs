@@ -3,6 +3,8 @@
 // Usage: node dev-tools.mjs        (server on BASE, default http://localhost:3200)
 import { chromium } from 'playwright';
 import fs from 'node:fs';
+// these suites test the cabin and flight; the airport terminal has its own suite (terminal.mjs)
+const skipAp = async (ctx) => { await ctx.addInitScript(() => { try { localStorage.setItem('skycrew.skipAirport', '1'); } catch { /* ignore */ } }); return ctx; };
 const B = process.env.BASE || 'http://localhost:3200';
 const OUT = new URL('../docs/screenshots/revision/dev', import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
@@ -18,7 +20,7 @@ const PW = 'Sky-crew-test-pass-1';
 const errs = [];
 const browser = await chromium.launch();
 const mk = async (label, q = 'low', fps = 1) => {
-  const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } });
+  const ctx = await skipAp(await browser.newContext({ viewport: { width: 960, height: 600 } }));
   await ctx.addInitScript((q) => { try { localStorage.setItem('skycrew.quality', q); } catch { /* ignore */ } }, q);
   const p = await ctx.newPage();
   p.on('console', (m) => { if (m.type() === 'error' && !NOISE.test(m.text())) errs.push(`[${label}] ${m.text()}`); });

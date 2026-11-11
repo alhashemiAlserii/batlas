@@ -62,7 +62,8 @@
     <div id="tbtns">
       <button id="tE" type="button">E</button>
       <button id="tJ" type="button">⤒</button>
-      <button id="tV" type="button">👁</button>
+      <button id="tV" type="button" aria-label="Camera">👁</button>
+      <button id="tRun" type="button" aria-label="Sprint">🏃</button>
       <button id="tChat" type="button" class="hidden" aria-label="Chat">💬</button>
     </div>
     <div id="tFlight" class="hidden">
@@ -165,6 +166,8 @@
         <select id="setQuality"><option value="auto">Auto</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
       <div id="setQualityNote" class="muted small"></div>
       <label class="setrow check"><input id="setSkipAirport" type="checkbox"> Skip the airport (quick rounds; in co-op the host decides)</label>
+      <div id="setCtlRow" class="setrow hidden"><button id="bEditCtl" type="button">🎮 Edit controls</button><button id="bResetCtl" type="button">Reset to default</button></div>
+      <div id="setCtlNote" class="muted small hidden">Drag the on-screen buttons where your thumbs like them. Saved on this device, separately for landscape and portrait.</div>
       <label class="setrow">Master volume <input id="volMaster" type="range" min="0" max="1" step="0.05"></label>
       <label class="setrow">Music <input id="volMusic" type="range" min="0" max="1" step="0.05"></label>
       <label class="setrow">Effects <input id="volSfx" type="range" min="0" max="1" step="0.05"></label>
@@ -178,6 +181,15 @@
       <div id="shopTabs" role="tablist"></div>
       <div id="shopBody"></div>
       <div id="shopMsg" class="muted small"></div>
+    </div>
+  </div>
+
+  <div id="ctlEdit" class="hidden" aria-label="Edit controls">
+    <div id="ctlBar" role="toolbar">
+      <div id="ctlSel" class="ctlsel"></div>
+      <div class="ctlrow"><span class="muted small">Size</span><button id="ctlSizeS" type="button">S</button><button id="ctlSizeM" type="button">M</button><button id="ctlSizeL" type="button">L</button>
+        <label class="small">Opacity <input id="ctlOpacity" type="range" min="0.3" max="1" step="0.05"></label><span id="ctlOpacityVal" class="small"></span></div>
+      <div class="ctlrow"><button id="ctlReset" type="button">Reset to default</button><button id="ctlDone" class="primary" type="button">Done</button></div>
     </div>
   </div>
 

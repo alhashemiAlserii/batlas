@@ -236,3 +236,27 @@ body.touch #docs { bottom: auto; top: calc(48px + env(safe-area-inset-top)); }
 .setrow.check, .routepick.check { display: flex; align-items: center; gap: 8px; }
 .setrow.check input, .routepick.check input { width: 20px; height: 20px; padding: 0; -webkit-appearance: checkbox; appearance: auto; }
 @media (max-height: 500px) { #docs { font-size: 11px; padding: 3px 8px; } body.touch #docs { top: auto; bottom: calc(10px + env(safe-area-inset-bottom)); } }
+
+/* ---------- touch control layout editor ---------- */
+.sa-probe { position: fixed; left: 0; top: 0; width: 0; height: 0; visibility: hidden; pointer-events: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.ctl-custom { position: fixed !important; right: auto !important; bottom: auto !important; margin: 0 !important; transform-origin: 50% 50%; }
+#tRun.on { background: rgba(255,170,30,.7) !important; }
+#setCtlRow { display: flex; gap: 8px; flex-wrap: wrap; }
+#ctlEdit { position: fixed; inset: 0; z-index: 40; touch-action: none; -webkit-user-select: none; user-select: none;
+  background-image: linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px); background-size: 40px 40px; }
+#ctlBar { position: absolute; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); background: rgba(7,21,58,.92); border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 8px 10px; display: grid; gap: 6px; justify-items: center; max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
+#ctlBar .ctlrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+#ctlBar button { padding: 6px 12px; min-width: 40px; }
+#ctlBar button.on { background: #1e6bff; }
+#ctlBar input[type=range] { width: 110px; vertical-align: middle; }
+.ctlsel { font-weight: 800; font-size: 13px; }
+body.ctl-editing canvas { filter: brightness(.55); }
+body.ctl-editing .overlay { display: none !important; }
+body.ctl-editing #hud.hidden, body.ctl-editing #touch.hidden { display: block !important; }
+body.ctl-editing #hud > :not(.topbtns) { visibility: hidden; }
+body.ctl-editing #rotateHint { display: none !important; }
+body.ctl-editing .ctl-force.hidden { display: inline-block !important; }
+body.ctl-editing #tFlight.ctl-force.hidden { display: grid !important; }
+body.ctl-editing #joy.ctl-force { display: block !important; }
+body.ctl-editing .ctl-force { outline: 2px dashed rgba(255,255,255,.55); outline-offset: 3px; }
+body.ctl-editing .ctl-force.ctl-sel { outline: 3px solid #ffd23f; }

@@ -13,6 +13,7 @@ import { Net } from './net.js';
 import * as UI from './ui.js';
 import { Gadgets } from './gadgets.js';
 import { buildPanel } from './devpanel.js';
+import { initControls, openEditor, resetLayout, ctl, controlsDebug } from './controls.js';
 
 const $ = (s) => document.querySelector(s);
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 && /iPad|iPhone|Android|Mobile/i.test(navigator.userAgent);
@@ -70,7 +71,7 @@ const myId = () => (net.inRoom ? net.cid : 'solo');
 
 // ---------------- input ----------------
 const keys = new Set();
-const touch = { mx: 0, my: 0, thr: 0 };
+const touch = { mx: 0, my: 0, thr: 0, run: false };
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
   if (e.code === 'F2') { e.preventDefault(); toggleAdmin(); return; }
@@ -115,7 +116,7 @@ function setupTouch() {
   UI.show('#touch', true);
   const joy = $('#joy'), knob = $('#joyKnob');
   let jid = null, c = null;
-  joy.addEventListener('pointerdown', (e) => { jid = e.pointerId; joy.setPointerCapture(jid); const r = joy.getBoundingClientRect(); c = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; mv(e); });
+  joy.addEventListener('pointerdown', (e) => { if (ctl.editing) return; jid = e.pointerId; joy.setPointerCapture(jid); const r = joy.getBoundingClientRect(); c = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; mv(e); });
   const mv = (e) => { if (e.pointerId !== jid) return; let dx = e.clientX - c.x, dy = e.clientY - c.y; const L = Math.hypot(dx, dy), M = 50; if (L > M) { dx *= M / L; dy *= M / L; } touch.mx = dx / M; touch.my = dy / M; knob.style.transform = `translate(${dx}px, ${dy}px)`; };
   joy.addEventListener('pointermove', mv);
   const end = (e) => { if (e.pointerId !== jid) return; jid = null; touch.mx = touch.my = 0; knob.style.transform = ''; };
@@ -125,12 +126,13 @@ function setupTouch() {
   canvas.addEventListener('pointermove', (e) => { const l = looks.get(e.pointerId); if (!l || paused) return; look(e.clientX - l.x, e.clientY - l.y, 0.006); l.x = e.clientX; l.y = e.clientY; });
   const lend = (e) => looks.delete(e.pointerId);
   canvas.addEventListener('pointerup', lend); canvas.addEventListener('pointercancel', lend);
-  const tap = (id, fn) => $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); if (playing && !paused) fn(); });
+  const tap = (id, fn) => $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); if (playing && !paused && !ctl.editing) fn(); });
   tap('#tE', interact);
   // jump: hold (jetpack / noclip fly while held)
   $('#tJ').addEventListener('pointerdown', (e) => { e.preventDefault(); if (playing && !paused) keys.add('Space'); });
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('#tJ').addEventListener(ev, () => keys.delete('Space'));
   tap('#tV', () => { me.third = !me.third; });
+  tap('#tRun', () => { touch.run = !touch.run; $('#tRun').classList.toggle('on', touch.run); });
   tap('#tLeave', leaveSeat);
   tap('#tGear', () => systemAct('gear'));
   const hold = (id, v) => { const b = $(id); b.addEventListener('pointerdown', () => { touch.thr = v; }); b.addEventListener('pointerup', () => { touch.thr = 0; }); b.addEventListener('pointercancel', () => { touch.thr = 0; }); };
@@ -179,7 +181,7 @@ function updatePlayer(dt) {
   fx += touch.mx; fz += touch.my;
   const L = Math.hypot(fx, fz); if (L > 1) { fx /= L; fz /= L; }
   if (me.frozen || gadgets.frozenT > 0) { me.vel.set(0, Math.min(0, me.vel.y), 0); fx = 0; fz = 0; }
-  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4) * gadgets.speedMul();
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4) * gadgets.speedMul();
   me.sprint = speed > 5 && L > 0.1;
   const s = Math.sin(me.yaw), c = Math.cos(me.yaw);
   const wx = (fx * c + fz * s) * speed, wz = (-fx * s + fz * c) * speed;
@@ -1003,6 +1005,11 @@ function openSettings(from) {
 $('#bSettings').addEventListener('click', () => openSettings('menu'));
 $('#bSettingsP').addEventListener('click', () => openSettings('pause'));
 $('#bSetClose').addEventListener('click', () => UI.show('#settings', false));
+// touch control layout editor (Settings -> Edit controls)
+UI.show('#setCtlRow', isTouch); UI.show('#setCtlNote', isTouch);
+initControls({ staff: () => !$('#btnAdmin').classList.contains('hidden'), done: () => openSettings(settingsFrom) });
+$('#bEditCtl').addEventListener('click', () => { UI.show('#settings', false); openEditor(); });
+$('#bResetCtl').addEventListener('click', () => { resetLayout(); UI.toast('Controls reset to the default layout for this orientation.'); });
 $('#setQuality').addEventListener('change', (e) => {
   localStorage.setItem(QKEY, e.target.value);
   $('#setQualityNote').textContent = playing ? 'Saved. Applies next time you open the game (or reload now).' : 'Saved. Reloading…';
@@ -1305,6 +1312,8 @@ window.skyCrew = {
   lastReport: () => lastReport,
   paxLooks: () => sim.pax.map((p) => p.look || null),
   pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible, frozen: (p.frozenT || 0) > 0, sizeK: p.sizeK || 1, cheer: (p.cheerT || 0) > 0, vip: p.id >= 900 })),
+  controls: () => controlsDebug(),
+  editControls: () => { UI.show('#settings', false); openEditor(); },
   term: () => ({ step: myStep(), local: termLocal.step, lastErr: termLocal.lastErr || null, airport: airportOn(), active: terminalActive(), bag: termLocal.bag, bagDone: terminal.bagDone(), crew: crewStatus(), docs: $('#docs').textContent, solids: solids().filter((c) => c.tag?.startsWith('term:')).map((c) => c.tag), paxInTerminal: sim.pax.filter((p) => p.mesh.position.z > STATIONS.gate.z && p.mesh.position.y < -1).length }),
   useE: () => interact(),
   locker: () => ({ outfit: myOutfit, klass: myClass, balance: wallet.balance, owned: [...wallet.owned], ownsAll: wallet.ownsAll, signedIn: wallet.signedIn, remotes: [...remotes].map(([, r]) => ({ username: r.info.username, key: r.key, klass: r.info.klass || null })), crewClasses: sim.classes(), hud: $('#hudWallet').textContent, salary: $('#resSalary').textContent, avatarOutfit: myAvatar.userData.look?.crew || null }),

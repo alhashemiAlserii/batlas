@@ -1,5 +1,7 @@
 import { webkit, devices } from 'playwright';
 import fs from 'node:fs';
+// these suites test the cabin and flight; the airport terminal has its own suite (terminal.mjs)
+const skipAp = async (ctx) => { await ctx.addInitScript(() => { try { localStorage.setItem('skycrew.skipAirport', '1'); } catch { /* ignore */ } }); return ctx; };
 const B = 'http://localhost:3000';
 const OUT = '/workspace/studio/docs/screenshots/stage3/webkit-site';
 const OUTBOX = '/workspace/studio/server/data/outbox';
@@ -25,7 +27,7 @@ const latestMail = (to) => {
 };
 
 // ---------- Desktop Safari ----------
-const dctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+const dctx = await skipAp(await browser.newContext({ viewport: { width: 1280, height: 860 } }));
 const d = await dctx.newPage(); watch(d, 'safari-desktop'); if (process.env.DBG) d.on('response', (r) => { if (r.url().includes('/api/')) console.log(r.status(), r.request().method(), r.url()); });
 await check(d, 'desktop', '/', 'home', true);
 await check(d, 'desktop', '/games');
@@ -88,7 +90,7 @@ await check(d, 'desktop', '/studio-console#news'); await d.waitForSelector('.new
 await check(d, 'desktop', '/studio-console#games'); await d.click('button:has-text("Edit")'); await d.waitForSelector('.version'); await d.screenshot({ path: `${OUT}/dashboard-games-versions.png`, fullPage: true });
 await check(d, 'desktop', '/admin');
 // ---------- iPhone Safari ----------
-const mctx = await browser.newContext({ ...devices['iPhone 15'] });
+const mctx = await skipAp(await browser.newContext({ ...devices['iPhone 15'] }));
 const m = await mctx.newPage(); watch(m, 'safari-iphone');
 for (const [p, s] of [['/', 'mobile-home'], ['/news', 'mobile-news'], ['/contact', 'mobile-contact'], ['/games/sky-crew', 'mobile-game'], ['/login', 'mobile-login'], ['/register', 'mobile-register']]) await check(m, 'iphone', p, s, s === 'mobile-home');
 await m.click('.menu-btn'); await m.waitForSelector('.nav.open .nav-links a'); await m.screenshot({ path: `${OUT}/mobile-menu.png` }); results.push('iphone menu opens ok');
