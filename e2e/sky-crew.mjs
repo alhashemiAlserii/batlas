@@ -461,7 +461,7 @@ async function coop() {
     await boot(Bc.p, false); await Bc.p.fill('#joinCode', code); await Bc.p.click('#bJoin');
     await Bc.p.waitForFunction(() => window.skyCrew.state().lobby, null, { timeout: 10000 });
     await Bc.p.click('#bBoard');
-  } catch (e) { bad(`coop: flight/stats failed ${e.message}`); }
+  } catch (e) { const fd = await A.p.evaluate(() => { const s = window.skyCrew.state(); return { phase: s.phase, y: Math.round(s.flight.y), onGround: s.flight.onGround, speed: Math.round(s.flight.speed), seat: s.me?.seat ?? null }; }).catch((x) => x.message); bad(`coop: flight/stats failed ${e.message.split('\n')[0]} host=${JSON.stringify(fd)}`); }
   // host hand-over: start a new flight with some state, host leaves, guest continues without a reset
   await A.p.click('#bAgain').catch(() => {}); await sleep(800);
   await Bc.p.waitForFunction(() => window.skyCrew.state().room?.players.length === 2 && window.skyCrew.state().phase === 'boarding', null, { timeout: 15000 });
