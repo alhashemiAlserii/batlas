@@ -31,13 +31,15 @@ function insets() {
   return { l: parseFloat(cs.paddingLeft) || 0, r: parseFloat(cs.paddingRight) || 0, t: parseFloat(cs.paddingTop) || 0, b: parseFloat(cs.paddingBottom) || 0 };
 }
 const M = 4; // keep a small margin from the safe edge
-function clampCenter(el, x, y, s) {
-  const w = (el.offsetWidth || 56) * s, h = (el.offsetHeight || 56) * s, i = insets();
+function clampCenter(el, x, y, s, c) {
+  // hidden controls (display:none) measure 0: use the size recorded while editing
+  if (c && el.offsetWidth) { c.w = el.offsetWidth; c.h = el.offsetHeight; }
+  const w = (el.offsetWidth || c?.w || 56) * s, h = (el.offsetHeight || c?.h || 56) * s, i = insets();
   const minX = i.l + M + w / 2, maxX = innerWidth - i.r - M - w / 2, minY = i.t + M + h / 2, maxY = innerHeight - i.b - M - h / 2;
   return { x: minX > maxX ? innerWidth / 2 : Math.min(maxX, Math.max(minX, x)), y: minY > maxY ? innerHeight / 2 : Math.min(maxY, Math.max(minY, y)) };
 }
 function place(el, c) {
-  const p = clampCenter(el, c.x * innerWidth, c.y * innerHeight, c.s);
+  const p = clampCenter(el, c.x * innerWidth, c.y * innerHeight, c.s, c);
   el.classList.add('ctl-custom');
   el.style.left = `${p.x}px`; el.style.top = `${p.y}px`;
   el.style.transform = `translate(-50%, -50%) scale(${c.s})`;
@@ -64,7 +66,7 @@ function snapshot() { // pin every control where it is now so moving one never r
   for (const d of eligible()) {
     const el = $(d.id); const r = el.getBoundingClientRect(); if (!r.width) continue;
     const s = layout()?.items?.[d.id]?.s ?? 1;
-    items[d.id] = { x: (r.left + r.width / 2) / innerWidth, y: (r.top + r.height / 2) / innerHeight, s };
+    items[d.id] = { x: (r.left + r.width / 2) / innerWidth, y: (r.top + r.height / 2) / innerHeight, s, w: el.offsetWidth, h: el.offsetHeight };
   }
   return items;
 }
@@ -128,10 +130,11 @@ export function initControls({ staff, done } = {}) {
     if (!drag || e.pointerId !== drag.pid) return;
     e.preventDefault();
     const L = ensureLayout(), c = L.items[drag.id] || (L.items[drag.id] = { x: 0.5, y: 0.5, s: 1 });
-    const p = clampCenter($(drag.id), e.clientX - drag.dx, e.clientY - drag.dy, c.s);
+    const p = clampCenter($(drag.id), e.clientX - drag.dx, e.clientY - drag.dy, c.s, c);
     c.x = p.x / innerWidth; c.y = p.y / innerHeight; place($(drag.id), c);
   });
   const end = (e) => { if (!drag || e.pointerId !== drag.pid) return; drag = null; save(); };
+
   ov.addEventListener('pointerup', end); ov.addEventListener('pointercancel', end);
   for (const k of Object.keys(SIZES)) $(`ctlSize${k}`).addEventListener('click', () => {
     if (!ctl.sel) return; const L = ensureLayout(); const c = L.items[ctl.sel]; if (!c) return;

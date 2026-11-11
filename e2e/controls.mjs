@@ -84,6 +84,9 @@ for (const S of SIZES) {
   d = await dbg(p);
   await drag(p, center(d.rects.joy), { x: vw * 0.2, y: vh * 0.6 });
   await p.tap('#ctlSizeS'); await sleep(100);
+  // the flight buttons (hidden outside the cockpit) dragged into the far corner
+  d = await dbg(p);
+  await drag(p, { x: d.rects.tFlight.l + 6, y: d.rects.tFlight.t + 6 }, { x: vw - 3, y: vh - 3 });
   // opacity
   await p.$eval('#ctlOpacity', (el) => { el.value = '0.6'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   d = await dbg(p);
@@ -104,6 +107,12 @@ for (const S of SIZES) {
   const jr = center(d.rects.tJ);
   check(d.layout && Math.abs(jr.x - saved.items.tJ.x * vw) < 3 && Math.abs(jr.y - saved.items.tJ.y * vh) < 3 && d.layout.items.tJ.s === 1.3 && d.layout.items.joy.s === 0.8, `${S.name}: layout survives a reload`);
   await p.screenshot({ path: `${OUT}/${S.name}-after-reload.png` });
+  // a control that was hidden when the layout was applied must still land fully on screen when it appears
+  // (e.g. Safari's toolbar shrinks the viewport while the flight buttons are hidden)
+  await p.setViewportSize({ width: vw - 40, height: vh - 40 }); await sleep(400);
+  const fr = await p.evaluate(() => { const el = document.getElementById('tFlight'); const was = el.classList.contains('hidden'); el.classList.remove('hidden'); const r = el.getBoundingClientRect(); if (was) el.classList.add('hidden'); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; }); // the game loop re-hides it every frame
+  await p.setViewportSize({ width: vw, height: vh }); await sleep(300);
+  check(fr && inside(fr, vw - 40, vh - 40) && fr.r > vw - 80, `${S.name}: flight buttons placed while hidden appear fully on screen in the corner (${fr && `${fr.l.toFixed(0)}..${fr.r.toFixed(0)} x ${fr.t.toFixed(0)}..${fr.b.toFixed(0)}`})`);
   // the moved jump button still works in play
   await p.evaluate(() => { const b = document.getElementById('tJ'); const r = b.getBoundingClientRect(); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); });
   const y0 = (await SC(p, () => window.skyCrew.state())).me.y; let yMax = y0;
