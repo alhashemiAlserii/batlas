@@ -461,8 +461,12 @@ async function coop() {
     const ra = await A.p.evaluate(() => window.skyCrew.state().results);
     ok(`coop: landed at ${ra.landedAt} (${ra.routeName}); results on both clients, ${ra.total} pts`);
     await A.p.screenshot({ path: `${OUT}/coop-results.png` });
-    const lbd = await A.p.evaluate(async () => (await (await fetch('/api/games/sky-crew/leaderboard')).json()).leaderboard.map((x) => x.username));
-    lbd.includes(devUser) && lbd.includes(guestName) ? ok(`coop: both flights saved; leaderboard lists ${lbd.join(', ')}`) : bad(`coop: leaderboard ${lbd}`);
+    // the leaderboard is a top 10: on a reused local DB earlier test pilots can fill it with higher scores
+    const lb = await A.p.evaluate(async () => (await (await fetch('/api/games/sky-crew/leaderboard')).json()).leaderboard.map((x) => [x.username, x.bestScore ?? x.score]));
+    const lbd = lb.map(([u]) => u), minScore = Math.min(...lb.map(([, sc]) => sc));
+    const listed = (u) => lbd.includes(u) || (lb.length >= 10 && minScore >= ra.total);
+    const hostFlights = (await A.p.evaluate(async (u) => (await (await fetch(`/api/users/${u}/game-stats`)).json()).skyCrew, devUser)).flights;
+    listed(devUser) && listed(guestName) && hostFlights >= 1 ? ok(`coop: both flights saved (host flights ${hostFlights}); leaderboard ${lbd.includes(guestName) ? 'lists the guest' : `full with higher scores (min ${minScore} >= ${ra.total})`}`) : bad(`coop: leaderboard ${JSON.stringify(lb)} (flight ${ra.total})`);
     const prof = await A.p.evaluate(async (u) => (await (await fetch(`/api/users/${u}/game-stats`)).json()).skyCrew, guestName);
     prof.flights >= 1 ? ok(`coop: guest profile stats ${JSON.stringify(prof)}`) : bad(`coop: profile stats ${JSON.stringify(prof)}`);
     await Bc.p.goto(`${B}/u/${guestName}`, { waitUntil: 'networkidle' });
