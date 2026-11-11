@@ -170,6 +170,22 @@ function moveAxis(axis, d, cols) {
     me.pos[axis] = d > 0 ? c.min[i] - R - 0.001 : c.max[i] + R + 0.001;
   }
 }
+const freeAt = (p, cols) => !cols.some((c) => overlaps(p, c));
+/** Teleported / spawned / ghosted into something solid (a seat, a wall, a bin): stand on it if it is a low step,
+ *  otherwise move to the nearest free spot on the same side of the fuselage, never on top of the bins. */
+function unstick(cols) {
+  const hit = cols.filter((c) => overlaps(me.pos, c)); if (!hit.length) return false;
+  const top = Math.max(...hit.map((c) => c.max[1]));
+  if (top - me.pos.y <= STEP) { const up = me.pos.clone(); up.y = top + 0.001; if (freeAt(up, cols)) { me.pos.copy(up); return true; } }
+  const inside = sim.inCabin(me.pos), q = me.pos.clone();
+  for (let r = 0.15; r <= 3.01; r += 0.15) {
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2; q.set(me.pos.x + Math.cos(a) * r, me.pos.y, me.pos.z + Math.sin(a) * r);
+      if (freeAt(q, cols) && sim.inCabin(q) === inside) { me.pos.copy(q); me.vel.x = me.vel.z = 0; return true; }
+    }
+  }
+  return false;
+}
 function updatePlayer(dt) {
   if (me.mode === 'pilot') { me.pos.set(-0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; return; }
   if (me.mode === 'copilot') { me.pos.set(0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; return; }
@@ -201,17 +217,21 @@ function updatePlayer(dt) {
   if (sim.turb > 0.3 && me.onGround && Math.random() < sim.turb * dt * 2) { me.vel.x += (Math.random() - 0.5) * sim.turb * 2.5; me.vel.z += (Math.random() - 0.5) * sim.turb * 2.5; }
   me.moving = L > 0.1;
   const cols = solids();
+  unstick(cols);
   const steps = Math.ceil(dt / 0.012);
   for (let i = 0; i < steps; i++) {
     const h = dt / steps;
     moveAxis('x', me.vel.x * h, cols);
     moveAxis('z', me.vel.z * h, cols);
+    const prevY = me.pos.y;
     me.pos.y += me.vel.y * h;
     let ground = false;
     for (const col of cols) {
       if (!overlaps(me.pos, col)) continue;
-      if (me.vel.y <= 0) { me.pos.y = col.max[1]; me.vel.y = 0; ground = true; }
-      else { me.pos.y = col.min[1] - H - 0.001; me.vel.y = 0; }
+      // only land on a top we came down onto / bump a ceiling we rose into; being inside something is unstick()'s
+      // job (snapping to its top stacked seat -> seat back -> overhead bins and left people standing on the bins)
+      if (me.vel.y <= 0 && prevY >= col.max[1] - 0.06) { me.pos.y = col.max[1]; me.vel.y = 0; ground = true; }
+      else if (me.vel.y > 0 && prevY + H <= col.min[1] + 0.06) { me.pos.y = col.min[1] - H - 0.001; me.vel.y = 0; }
     }
     if (ground) me.onGround = true;
     else if (me.vel.y < -0.5) me.onGround = false;
