@@ -417,11 +417,19 @@ async function coop() {
   await Bc.p.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, df);
   await sleep(200); await Bc.p.keyboard.press('KeyE');
   await Bc.p.waitForFunction(() => window.skyCrew.state().doors.rearPassable, null, { timeout: 15000 }).catch(() => {});
-  const pB = (await Bc.p.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && x.z > -8).sort((a, b) => a.z - b.z)[0];
-  if (!pB) bad('coop: no seated passengers for the throw test');
+  let pB = null;
+  for (const q of (await Bc.p.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && x.z > -8).sort((a, b) => a.z - b.z).slice(0, 4)) {
+    // wait until the guest's aim is really on a passenger (it can lag or be blocked by a seat back), then grab
+    await Bc.p.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, q);
+    let t = null; for (let i = 0; i < 30 && !(t && t.kind === 'grabPax'); i++) { await sleep(150); t = await Bc.p.evaluate(() => window.skyCrew.target()); }
+    if (!t || t.kind !== 'grabPax') continue;
+    await Bc.p.keyboard.press('KeyE');
+    const gid = await Bc.p.waitForFunction(() => window.skyCrew.heldPax(), null, { timeout: 5000 }).then((h) => h.jsonValue()).catch(() => null);
+    if (gid) { pB = (await Bc.p.evaluate(() => window.skyCrew.pax())).find((x) => x.id === gid); break; } // the one actually held
+  }
+  if (!pB) bad('coop: guest could not grab a seated passenger for the throw test');
   else {
-    await Bc.p.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, pB);
-    await sleep(200); await Bc.p.keyboard.press('KeyE'); await sleep(1000);
+    await A.p.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id)?.state === 'carried', pB.id, { timeout: 8000 }).catch(() => {});
     const hostView = (await A.p.evaluate(() => window.skyCrew.pax())).find((x) => x.id === pB.id);
     const bCid = await A.p.evaluate(() => [...window.skyCrew.state().remotes].length);
     hostView?.state === 'carried' && hostView.carriedBy && bCid ? ok('coop: guest picked up a passenger; host simulation shows them carried by the guest') : bad(`coop: host pax view ${JSON.stringify(hostView)}`);
