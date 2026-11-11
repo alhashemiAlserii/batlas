@@ -17,6 +17,11 @@ npm start                       # http://localhost:3000
 npm test                        # vitest + supertest
 ```
 
+> **Local SQLite driver.** `better-sqlite3` is an *optional* dependency (production on Render uses Postgres
+> via `DATABASE_URL`, so it is never needed there). If a fresh `npm ci` / `npm install` skips it, local
+> SQLite runs and `npm test` fail with `Cannot find module 'better-sqlite3'`. Install it locally without
+> touching `package.json`: `npm install --no-save better-sqlite3@13.0.3` (inside `server/`).
+
 | Script | What it does |
 |---|---|
 | `npm start` / `npm run dev` | Run the server (dev = auto-reload) |
