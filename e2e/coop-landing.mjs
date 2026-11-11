@@ -49,7 +49,7 @@ if (MODE === 'guest') {
   await G.waitForFunction(() => !window.skyCrew.state().room.pilotCid, null, { timeout: 15000 }); // the guest's own view of the seat
   await G.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
   await G.waitForFunction(() => window.skyCrew.state().me.mode === 'pilot' && !!window.skyCrew.state().room.pilotCid, null, { timeout: 20000 }).catch(async (e) => { console.log('  guest seat:', JSON.stringify(await G.evaluate(() => ({ mode: window.skyCrew.state().me.mode, pc: window.skyCrew.state().room.pilotCid })))); throw e; });
-  const pc = await H.evaluate(() => window.skyCrew.state().room.pilotCid);
+  const pc = await H.waitForFunction(() => window.skyCrew.state().room.pilotCid, null, { timeout: 10000 }).then((h) => h.jsonValue()).catch(() => null); // the room update reaches the host
   check(!!pc && await H.evaluate(() => window.skyCrew.state().me.mode !== 'pilot'), `guest has the controls (host sees pilot ${pc ? 'set' : 'none'})`);
   P = G;
 }
