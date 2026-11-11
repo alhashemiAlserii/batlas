@@ -44,11 +44,15 @@ const pick = async (q) => {
     if (i % 5 === 0) await G.evaluate((q) => { window.skyCrew.teleport(0, 0, q.z + 1.0); window.skyCrew.lookAt(q.x, 0.7, q.z); }, q);
     await sleep(150); t = await G.evaluate(() => window.skyCrew.target());
   }
-  await G.evaluate(() => document.activeElement?.blur()); // focus left in the room-code field must not eat the key
-  await G.keyboard.press('KeyE');
+  // direct interact (same code path as E / the touch button) so the test does not depend on synthetic key delivery
+  if (t?.kind === 'grabPax') await G.evaluate(() => window.skyCrew.useE());
   return t?.kind;
 };
-const seated = async () => (await G.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && Math.abs(x.x) < 1.2 && Math.abs(x.y) < 0.2 && x.z < 12).sort((a, b) => a.z - b.z);
+const seated = async () => {
+  const hs = (await H.evaluate(() => window.skyCrew.pax())).filter((x) => x.state === 'seated' && Math.abs(x.x) < 1.2 && Math.abs(x.y) < 0.05 && x.z < 12).sort((a, b) => a.z - b.z);
+  for (const q of hs.slice(0, 6)) await G.waitForFunction((q) => { const g = window.skyCrew.pax().find((x) => x.id === q.id); return g && Math.hypot(g.x - q.x, g.y - q.y, g.z - q.z) < 0.05; }, q, { timeout: 20000 }).catch(() => {});
+  return hs;
+};
 const view = (p, id) => p.evaluate((id) => window.skyCrew.pax().find((x) => x.id === id), id);
 
 // 1) refused + slow host: prediction shows, then visibly drops within ~2.5 s, with a message; host never carried
@@ -71,7 +75,7 @@ await sleep(1500);
 const k2 = await pick(q); check(k2 === 'grabPax', `after refusal: same passenger can be targeted again (${k2}; ${JSON.stringify(await view(G, q.id))?.slice(0, 120)})`);
 let both = false; for (let i = 0; i < 40 && !both; i++) { const [h, g] = await Promise.all([view(H, q.id), view(G, q.id)]); both = h.state === 'carried' && g.state === 'carried' && !!h.carriedBy && h.carriedBy === g.carriedBy; if (!both) await sleep(200); }
 check(both, 'after refusal: a real pickup works and host + guest agree');
-await G.keyboard.press('KeyE'); await sleep(1500); // put them down
+await G.evaluate(() => window.skyCrew.useE()); await sleep(1500); // put them down
 
 // 2) delayed (1.2 s) but accepted: both end up agreeing the guest carries them, no false "wriggled free"
 await G.evaluate(() => { window.__mode = 'delay'; window.__toasts = []; });

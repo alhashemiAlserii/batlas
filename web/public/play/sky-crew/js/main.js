@@ -72,8 +72,13 @@ const myId = () => (net.inRoom ? net.cid : 'solo');
 // ---------------- input ----------------
 const keys = new Set();
 const touch = { mx: 0, my: 0, thr: 0, run: false };
+/** A text field the player can actually see and type in. A hidden one (the room-code box after the menu closed)
+ *  must not swallow game keys: on a Mac or a keyboard iPad it kept focus and E/WASD did nothing. */
+const typingIn = (el) => !!el && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) && !el.disabled && el.offsetParent !== null && !el.closest('.hidden');
+/** Leave menu fields when the game/lobby takes over, so keys go to the game. */
+function releaseMenuFocus() { const el = document.activeElement; if (el && el !== document.body && !typingIn(el)) el.blur(); if (el && el.closest?.('#menu, #lobby') && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) el.blur(); }
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  if (typingIn(e.target)) return;
   if (e.code === 'F2') { e.preventDefault(); toggleAdmin(); return; }
   if (!playing) return;
   if (e.code === 'Escape') { togglePause(); return; }
@@ -989,7 +994,7 @@ function quitToMenu(msg) {
   if (msg) { $('#menuErr').textContent = msg; UI.show('#menuErr', true); }
 }
 function start() {
-  UI.show('#menu', false); UI.show('#lobby', false); UI.show('#hud', true); UI.show('#menuErr', false);
+  UI.show('#menu', false); UI.show('#lobby', false); releaseMenuFocus(); UI.show('#hud', true); UI.show('#menuErr', false);
   audio.stopMusic();
   playing = true; respawn(); updateWalletHud();
   UI.show('#btnAdmin', (!!net.inRoom && (net.you?.permissions || []).includes('admin.panel')) || myRole === 'DEVELOPER');
@@ -1032,7 +1037,7 @@ $('#lobContract').addEventListener('change', (e) => { if (net.inRoom && net.isHo
 $('#routeSel').addEventListener('change', (e) => { setRoute(e.target.value); refreshRouteUi(); });
 $('#lobRoute').addEventListener('change', (e) => { if (net.inRoom && !net.isHost) { refreshRouteUi(); return; } setRoute(e.target.value); refreshRouteUi(); });
 refreshRouteUi();
-function openLobby() { UI.show('#menu', false); UI.show('#lobby', true); audio.startMusic(); renderLobby(); refreshRouteUi(); }
+function openLobby() { releaseMenuFocus(); UI.show('#menu', false); UI.show('#lobby', true); audio.startMusic(); renderLobby(); refreshRouteUi(); }
 function renderLobby() {
   const room = net.room;
   if (!room || $('#lobby').classList.contains('hidden')) return;
