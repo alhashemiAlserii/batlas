@@ -441,7 +441,7 @@ async function coop() {
   }
   await A.p.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
   try {
-    await A.p.waitForSelector('#results:not(.hidden)', { timeout: 200000 });
+    await A.p.waitForSelector('#results:not(.hidden)', { timeout: 420000 }); // 3 starved clients: the host sim runs in slow motion (dt clamp)
     await Bc.p.waitForSelector('#results:not(.hidden)', { timeout: 20000 });
     await A.p.waitForFunction(() => window.skyCrew.lastReport(), null, { timeout: 10000 });
     await Bc.p.waitForFunction(() => window.skyCrew.lastReport(), null, { timeout: 10000 });
