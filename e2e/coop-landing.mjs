@@ -4,6 +4,10 @@
 // (starved) client can be told apart from a landing that never completes.
 import { chromium } from 'playwright';
 const B = process.env.BASE || 'http://localhost:3200';
+// MODE=host (host flies, default) | guest (the guest takes the controls after takeoff and lands) |
+// auto (nobody flies: the host's autopilot must hold the plane level, not crash or land)
+const MODE = process.env.MODE || 'host';
+console.log(`mode: ${MODE}`);
 const fail = [];
 const check = (c, m) => { if (!c) fail.push(m); console.log(`${c ? '✔' : '✘'} ${m}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -26,20 +30,43 @@ const H = await mk('h'); const G = await mk('g', '?fps=2');
 await H.click('#bCreate'); await H.waitForFunction(() => window.skyCrew.state().room?.code);
 const code = await H.evaluate(() => window.skyCrew.state().room.code);
 await G.fill('#joinCode', code); await G.click('#bJoin'); await G.waitForFunction(() => window.skyCrew.state().room, null, { timeout: 15000 });
+await H.evaluate(() => window.skyCrew.route('DNB')); // shortest route: the server's minimum airborne time is 63 s
 await H.click('#bBoard'); await H.waitForFunction(() => window.skyCrew.state().playing);
 await G.click('#bBoard'); await G.waitForFunction(() => window.skyCrew.state().playing, null, { timeout: 30000 });
+await G.waitForFunction(() => window.skyCrew.state().dest === 'DNB', null, { timeout: 30000 }); // the room's route reaches the guest
 const b0 = { h: await bal(H), g: await bal(G) };
 await H.evaluate(() => { window.skyCrew.debug.sitAll(); window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
 await H.keyboard.down('KeyR'); await H.waitForFunction(() => window.skyCrew.state().phase !== 'boarding', null, { timeout: 90000 }).catch(() => {}); await H.keyboard.up('KeyR');
 await H.evaluate(() => window.skyCrew.setFlight({ y: 600, speed: 90, throttle: 0.6, onGround: false, airborneOnce: true, pitch: 0 }));
-check(await H.evaluate(() => window.skyCrew.state().room.pilotCid === window.skyCrew.state().me.cid || !!window.skyCrew.state().room.pilotCid), 'host is in the pilot seat');
-await sleep(75000); // the server's minimum believable airborne time for the route
+check(await H.evaluate(() => window.skyCrew.state().room.pilotCid === window.skyCrew.state().me.cid || !!window.skyCrew.state().room.pilotCid), 'host took off from the pilot seat');
+let P = H; // the page whose simulation flies the plane
+if (MODE !== 'host') {
+  await H.evaluate(() => window.skyCrew.leaveSeat());
+  await H.waitForFunction(() => !window.skyCrew.state().room.pilotCid, null, { timeout: 15000 });
+  check(await H.evaluate(() => window.skyCrew.state().me.mode !== 'pilot'), 'host left the pilot seat');
+}
+if (MODE === 'guest') {
+  await G.waitForFunction(() => !window.skyCrew.state().room.pilotCid, null, { timeout: 15000 }); // the guest's own view of the seat
+  await G.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
+  await G.waitForFunction(() => window.skyCrew.state().me.mode === 'pilot' && !!window.skyCrew.state().room.pilotCid, null, { timeout: 20000 }).catch(async (e) => { console.log('  guest seat:', JSON.stringify(await G.evaluate(() => ({ mode: window.skyCrew.state().me.mode, pc: window.skyCrew.state().room.pilotCid })))); throw e; });
+  const pc = await H.evaluate(() => window.skyCrew.state().room.pilotCid);
+  check(!!pc && await H.evaluate(() => window.skyCrew.state().me.mode !== 'pilot'), `guest has the controls (host sees pilot ${pc ? 'set' : 'none'})`);
+  P = G;
+}
+if (MODE === 'auto') {
+  const a = await fl(H); await sleep(20000); const b = await fl(H);
+  check(!b.g && b.ph !== 'landed' && b.ph !== 'results' && Math.abs(b.y - a.y) < 120, `autopilot holds the plane with nobody flying (y ${a.y} → ${b.y}, ${b.ph})`);
+  const gy = (await fl(G)).y; check(Math.abs(gy - b.y) < 60, `guest sees the autopilot plane at the host's altitude (${gy} vs ${b.y})`);
+  await H.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); }); // take the controls back to land
+  await H.waitForFunction(() => window.skyCrew.state().me.mode === 'pilot', null, { timeout: 15000 });
+}
+await sleep(MODE === 'auto' ? 52000 : 75000); // the server's minimum believable airborne time for the route
 const t0 = Date.now();
-await H.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
+await P.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
 let res = null;
 for (let i = 0; i < 40 && !res; i++) {
   await sleep(6000);
-  const f = await fl(H); console.log(`  … ${Math.round((Date.now() - t0) / 1000)} s ${JSON.stringify(f)}`);
+  const f = await fl(P); console.log(`  … ${Math.round((Date.now() - t0) / 1000)} s ${JSON.stringify(f)}`);
   if (await H.isVisible('#results')) res = await H.evaluate(() => window.skyCrew.state().results);
 }
 check(!!res, `host landed and shows results (${res ? `${res.landedAt}, ${res.landing}, ${Math.round((Date.now() - t0) / 1000)} s` : 'timeout'})`);
