@@ -2,17 +2,21 @@ import { webkit, devices } from 'playwright';
 import fs from 'node:fs';
 // these suites test the cabin and flight; the airport terminal has its own suite (terminal.mjs)
 const skipAp = async (ctx) => { await ctx.addInitScript(() => { try { localStorage.setItem('skycrew.skipAirport', '1'); } catch { /* ignore */ } }); return ctx; };
-const B = 'http://localhost:3000';
-const OUT = '/workspace/studio/docs/screenshots/stage3/webkit-site';
-const OUTBOX = '/workspace/studio/server/data/outbox';
-const devPw = fs.readFileSync('/workspace/studio/server/data/test-developer-credentials.txt', 'utf8').match(/password=(.*)/)[1];
+const B = process.env.BASE || 'http://localhost:3200';
+const OUT = new URL('../docs/screenshots/stage3/webkit-site/', import.meta.url).pathname;
+fs.mkdirSync(OUT, { recursive: true });
+const OUTBOX = process.env.OUTBOX_DIR || new URL('../server/data/outbox/', import.meta.url).pathname;
+const devCreds = fs.readFileSync(process.env.DEV_CREDS || new URL('../server/data/dev-creds.txt', import.meta.url).pathname, 'utf8');
+const devPw = devCreds.match(/password=(.*)/)[1].trim();
+const devLogin = devCreds.match(/username=(.*)/)[1].trim();
 const browser = await webkit.launch();
 const problems = [];
 const results = [];
+// WebKit reports a fetch cut off by a page navigation as an "access control checks" error: noise, filtered.
 // Playwright's screenshot helper injects a <style>, which our strict CSP blocks: test noise, filtered.
 function watch(page, label) {
   page.on('console', (m) => { if (m.type() === 'error' && !/Refused to apply a stylesheet/.test(m.text())) problems.push(`[${label}] console: ${m.text()} @ ${page.url()}`); });
-  page.on('pageerror', (e) => problems.push(`[${label}] pageerror: ${e.message} @ ${page.url()}`));
+  page.on('pageerror', (e) => /due to access control checks/.test(e.message) || problems.push(`[${label}] pageerror: ${e.message} @ ${page.url()}`));
 }
 async function check(page, label, path, shot, full = false) {
   await page.goto(B + path, { waitUntil: 'networkidle' });
@@ -33,7 +37,8 @@ await check(d, 'desktop', '/', 'home', true);
 await check(d, 'desktop', '/games');
 await check(d, 'desktop', '/games/sky-crew', 'game-page', true);
 await check(d, 'desktop', '/news', 'news');
-await check(d, 'desktop', '/news/welcome-to-batlas', 'news-post');
+const firstSlug = await d.evaluate(async () => (await (await fetch('/api/news')).json()).posts?.[0]?.slug ?? (await (await fetch('/api/news')).json())[0]?.slug);
+await check(d, 'desktop', `/news/${firstSlug}`, 'news-post');
 await check(d, 'desktop', '/contact', 'contact');
 // contact form through the UI (honeypot hidden)
 const hpBox = await d.locator('#website').boundingBox();
@@ -63,7 +68,7 @@ await d.fill('#login', uname); await d.fill('#password', 'webkit-pass-654321');
 await Promise.all([d.waitForURL('**/profile'), d.click('#f button')]); await d.waitForLoadState('networkidle'); await d.waitForTimeout(300); results.push('login by username ok');
 await d.click('text=Log out'); await d.waitForTimeout(300);
 // staff temporary password: Developer issues one, user must change it at next login
-await d.goto(B + '/login'); await d.fill('#login', 'test_dev'); await d.fill('#password', devPw);
+await d.goto(B + '/login'); await d.fill('#login', devLogin); await d.fill('#password', devPw);
 await Promise.all([d.waitForURL('**/profile'), d.click('#f button')]); await d.waitForLoadState('networkidle'); await d.waitForTimeout(300);
 d.on('dialog', (dlg) => dlg.accept());
 await check(d, 'desktop', '/admin');
@@ -82,19 +87,19 @@ const fp = await d.goto(B + '/forgot-password');
 results.push(`forgot-password page with email off: HTTP ${fp.status()} (staff reset is the path)`);
 // developer dashboard
 await d.goto(B + '/login');
-await d.fill('#login', 'test_dev'); await d.fill('#password', devPw);
+await d.fill('#login', devLogin); await d.fill('#password', devPw);
 await Promise.all([d.waitForURL('**/profile'), d.click('#f button')]); await d.waitForLoadState('networkidle'); await d.waitForTimeout(300);
 await check(d, 'desktop', '/studio-console#stats'); await d.waitForSelector('.stat'); await d.screenshot({ path: `${OUT}/dashboard-stats.png`, fullPage: true });
 await check(d, 'desktop', '/studio-console#inbox'); await d.waitForSelector('.msg-item'); await d.screenshot({ path: `${OUT}/dashboard-inbox.png`, fullPage: true });
 await check(d, 'desktop', '/studio-console#news'); await d.waitForSelector('.news-list .card'); await d.screenshot({ path: `${OUT}/dashboard-news.png` });
-await check(d, 'desktop', '/studio-console#games'); await d.click('button:has-text("Edit")'); await d.waitForSelector('.version'); await d.screenshot({ path: `${OUT}/dashboard-games-versions.png`, fullPage: true });
+await check(d, 'desktop', '/studio-console#games'); await d.waitForSelector('[data-game="sky-crew"]'); await d.click('[data-game="sky-crew"] button:has-text("Edit")'); await d.waitForSelector('#game-form #add-version, #add-version'); await d.screenshot({ path: `${OUT}/dashboard-games-versions.png`, fullPage: true });
 await check(d, 'desktop', '/admin');
 // ---------- iPhone Safari ----------
 const mctx = await skipAp(await browser.newContext({ ...devices['iPhone 15'] }));
 const m = await mctx.newPage(); watch(m, 'safari-iphone');
 for (const [p, s] of [['/', 'mobile-home'], ['/news', 'mobile-news'], ['/contact', 'mobile-contact'], ['/games/sky-crew', 'mobile-game'], ['/login', 'mobile-login'], ['/register', 'mobile-register']]) await check(m, 'iphone', p, s, s === 'mobile-home');
 await m.click('.menu-btn'); await m.waitForSelector('.nav.open .nav-links a'); await m.screenshot({ path: `${OUT}/mobile-menu.png` }); results.push('iphone menu opens ok');
-await m.goto(B + '/login'); await m.fill('#login', 'test_dev'); await m.fill('#password', devPw);
+await m.goto(B + '/login'); await m.fill('#login', devLogin); await m.fill('#password', devPw);
 await Promise.all([m.waitForURL('**/profile'), m.click('#f button')]); await m.waitForLoadState('networkidle'); await m.waitForTimeout(300);
 await check(m, 'iphone', '/studio-console#stats', 'mobile-dashboard-stats', true);
 await check(m, 'iphone', '/studio-console#inbox');
