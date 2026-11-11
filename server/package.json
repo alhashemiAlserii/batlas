@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "backup": "tsx --env-file-if-exists=.env src/cli/backup.ts",
+    "restore": "tsx --env-file-if-exists=.env src/cli/restore.ts",
     "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://batlas:localtest@127.0.0.1:5433/batlas_test} vitest run"
   },
   "type": "module",
@@ -26,6 +27,7 @@
     "multer": "^2.5.0",
     "pg": "^8.23.1",
     "sharp": "^0.35.5",
+    "stream-json": "^3.9.0",
     "three": "^0.187.0",
     "tsx": "^4.23.15",
     "ws": "^8.22.2",

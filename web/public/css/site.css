@@ -315,3 +315,10 @@ body.lb-open{overflow:hidden}
 .uploader input[type=file]{min-width:0;font-size:14px}
 @media(max-width:600px){.site-banner{font-size:.85rem;padding:7px 12px;gap:2px 10px}.site-banner .when{width:100%}}
 .news-card .thumb img.mark{width:34%;height:auto;object-fit:contain;border-radius:8px}
+
+/* PWA offline fallback page */
+.offline-logo{display:block;margin:0 auto 10px;border-radius:22px}
+
+.danger-zone{border-color:var(--danger);margin-top:18px}
+.danger-zone .checks{display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px}
+.danger-zone .btn[disabled]{opacity:.5;cursor:not-allowed}

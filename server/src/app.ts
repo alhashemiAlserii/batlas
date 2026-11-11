@@ -25,9 +25,10 @@ import crypto from 'node:crypto';
 import { siteRoutes, type LiveRoomsProvider } from './routes/site.js';
 import { serveMedia } from './lib/media.js';
 import { getMaintenance } from './lib/maintenance.js';
+import { mountRestoreEndpoint } from './routes/restore-endpoint.js';
 
 /** Paths that keep working in maintenance mode for everyone (static assets for the maintenance page). */
-const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/favicon\.ico$/;
+const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/(favicon\.ico|sw\.js|manifest\.webmanifest|offline\.html|apple-touch-icon\.png)$/;
 /** API calls that keep working in maintenance mode (login itself refuses non-Developers with 503). */
 const MAINT_API_OPEN = new Set(['GET /api/csrf', 'GET /api/site', 'GET /api/maintenance', 'GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/game/verify', 'POST /api/game/audit', 'POST /api/game/ban', 'POST /api/game/owned', 'POST /api/game/salary', 'POST /api/game/grant', 'GET /api/internal/backup']);
 
@@ -76,6 +77,9 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
       next(e);
     }
   });
+
+  // Restore over HTTPS (moving to a new database). 404 unless RESTORE_TOKEN is set; see routes/restore-endpoint.ts.
+  mountRestoreEndpoint(app, ctx);
 
   app.use(
     helmet({
@@ -201,6 +205,15 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   // Database-backed uploads (images, trailers, avatars) with Range support for iOS Safari video.
   app.get('/media/:id', (req, res, next) => { serveMedia(db, req, res).catch(next); });
   app.use('/uploads', express.static(config.uploadDir, { index: false, dotfiles: 'deny', maxAge: '7d' }));
+  // PWA: the service worker must always be revalidated so a new deploy's worker is picked up promptly.
+  app.get('/sw.js', (_req, res) => {
+    res.set({ 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/' });
+    res.type('application/javascript').sendFile(path.join(pub, 'sw.js'));
+  });
+  app.get('/manifest.webmanifest', (_req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.type('application/manifest+json').sendFile(path.join(pub, 'manifest.webmanifest'));
+  });
   app.use(express.static(pub, { index: false, extensions: [] }));
 
   app.use((req, res) => {
