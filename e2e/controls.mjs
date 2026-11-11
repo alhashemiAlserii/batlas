@@ -35,6 +35,14 @@ for (const S of SIZES) {
   const { width: vw, height: vh } = S.viewport;
   await p.goto(`${B}/play/sky-crew?fps=4`, { waitUntil: 'load' });
   await p.waitForFunction(() => window.skyCrew?.ready, null, { polling: 250, timeout: 30000 });
+  // from the main menu: the editor shows the in-game controls (HUD is hidden in the menu) and returns to the menu
+  await p.$eval('#bSettings', (b) => b.click()); await p.tap('#bEditCtl'); await sleep(300);
+  let dm = await dbg(p);
+  check(dm.editing && dm.rects.joy && dm.rects.btnPause && dm.rects.tE && !(await p.isVisible('#menu')), `${S.name}: Edit controls from the main menu shows every control (menu hidden while editing)`);
+  await p.screenshot({ path: `${OUT}/${S.name}-editor-from-menu.png` });
+  await p.tap('#ctlDone'); await sleep(200);
+  await p.$eval('#bSetClose', (b) => b.click()); await sleep(200);
+  check(await p.isVisible('#menu') && !(await dbg(p)).editing && !(await p.isVisible('#joy')) === !(await p.evaluate(() => !document.getElementById('touch').classList.contains('hidden'))), `${S.name}: back to the main menu after editing`);
   // into a solo game, then pause -> settings
   await p.$eval('#bSolo', (b) => b.click());
   await p.waitForFunction(() => window.skyCrew.state().playing, null, { polling: 250, timeout: 20000 }).catch(() => {});
