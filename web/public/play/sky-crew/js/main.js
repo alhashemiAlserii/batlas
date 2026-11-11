@@ -605,16 +605,27 @@ net.addEventListener('maintenance', (e) => showMaintenance(e.detail.message));
 net.addEventListener('kicked', (e) => { const d = e.detail; quitToMenu(d.banned ? `You were banned from Sky Crew by ${d.by}${d.minutes ? ` for ${d.minutes} min` : ''}.${d.reason ? ` Reason: ${d.reason}` : ''}` : `You were removed from the room by ${d.by}.${d.reason ? ` ${d.reason}` : ''}`); });
 net.addEventListener('error', (e) => { if (e.detail.code === 'muted') UI.toast(e.detail.message, 'warn'); if (e.detail.code === 'seat_taken') { me.mode = 'walk'; UI.toast('Someone else is flying.'); } if (e.detail.code === 'crew_taken') { $('#lobRouteNote').textContent = e.detail.message; UI.toast(e.detail.message); } });
 net.addEventListener('close', () => {
+  // dropped while waiting in the lobby: the room is gone, go back to the menu instead of showing a dead lobby
+  if (!playing && !$('#lobby').classList.contains('hidden')) { quitToMenu('Lost the connection to the co-op room. Try again.'); return; }
   if (!playing || !net.wasInRoom) return;
+  continueSolo('Disconnected from the co-op room. Continuing solo.');
+});
+// the room was closed under us (e.g. the Developer closed it while we were in it): same as a drop
+net.addEventListener('room_left', (e) => {
+  if (!e.detail.reason) return; // our own Leave
+  if (!playing) { if (!$('#lobby').classList.contains('hidden')) quitToMenu('The co-op room was closed.'); return; }
+  continueSolo('The co-op room was closed. Continuing solo.');
+});
+function continueSolo(msg) {
   // the socket dropped mid-game: keep playing solo from exactly where we were (airport progress, flight, items)
   const mine = net.lastRoom?.players?.find((p) => p.cid === net.cid)?.term;
   if (mine) termLocal.step = mine;
   termLocal.pending = null;
-  UI.toast('Disconnected from the co-op room. Continuing solo.', 'warn');
+  UI.toast(msg, 'warn');
   sim.host = true; syncRemotes(null); UI.roomInfo(null); applyAirport();
   UI.show('#btnAdmin', myRole === 'DEVELOPER');
   if (!$('#admin').classList.contains('hidden')) UI.show('#admin', false);
-});
+}
 
 let sendT = 0, worldT = 0;
 function netTick(dt) {
@@ -949,7 +960,10 @@ function start() {
   UI.toast(net.inRoom ? `Co-op room ${net.room.code} — share the code!` : 'Solo flight. Load the bags, board everyone, then take the captain\'s seat.');
 }
 $('#bSolo').addEventListener('click', () => { if (net.inRoom) net.leave(); myCrew = null; dressMe(); setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; start(); });
+let goingOnline = false;
 async function goOnline(code) {
+  if (goingOnline) return; // a double tap must not create two rooms
+  goingOnline = true; for (const b of ['#bCreate', '#bJoin']) $(b).disabled = true;
   const err = $('#menuErr'); UI.show('#menuErr', false);
   try {
     if (!net.connected) await net.connect();
@@ -957,6 +971,7 @@ async function goOnline(code) {
     openLobby();
     if (myClass) pickClass(myClass); // carry my class pick into the room (the server re-checks ownership)
   } catch (e) { if (e.maintenance) return showMaintenance(e.message); err.textContent = e.message || String(e); UI.show('#menuErr', true); }
+  finally { goingOnline = false; for (const b of ['#bCreate', '#bJoin']) $(b).disabled = false; }
 }
 $('#bCreate').addEventListener('click', () => goOnline());
 $('#bJoin').addEventListener('click', () => { const c = $('#joinCode').value.trim().toUpperCase(); if (c.length === 5) goOnline(c); else { $('#menuErr').textContent = 'Room codes have 5 letters.'; UI.show('#menuErr', true); } });
