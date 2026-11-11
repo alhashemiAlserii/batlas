@@ -385,8 +385,9 @@ async function coop() {
   const cpp = await Bc.p.evaluate(() => window.skyCrew.debug.interactPoint('seat_copilot'));
   await Bc.p.evaluate((d) => { window.skyCrew.teleport(0.5, 0, -13.5); window.skyCrew.lookAt(d.x, d.y, d.z); }, cpp);
   await sleep(200); await Bc.p.keyboard.press('KeyE'); await sleep(500);
-  await Bc.p.keyboard.press('KeyB'); await sleep(200); await Bc.p.keyboard.press('KeyL'); await sleep(900);
-  const hc = await A.p.evaluate(() => window.skyCrew.cabin()), gc = await Bc.p.evaluate(() => window.skyCrew.cabin());
+  await Bc.p.keyboard.press('KeyB'); await sleep(200); await Bc.p.keyboard.press('KeyL');
+  // host applies, its next snapshot reaches the guest (a starved software-GL host may take a few frames): poll
+  let hc, gc; for (let i = 0; i < 50; i++) { hc = await A.p.evaluate(() => window.skyCrew.cabin()); gc = await Bc.p.evaluate(() => window.skyCrew.cabin()); if (hc.seatbelt && !hc.lights && gc.seatbelt && !gc.lights) break; await sleep(200); }
   hc.seatbelt && !hc.lights && gc.seatbelt && !gc.lights ? ok('coop: guest co-pilot switched seatbelt sign on + cabin lights off; host and guest agree') : bad(`coop: systems host=${JSON.stringify(hc)} guest=${JSON.stringify(gc)}`);
   await Bc.p.keyboard.press('KeyL'); await sleep(300);
   await Bc.p.screenshot({ path: `${OUT}/coop-copilot-guest.png` });

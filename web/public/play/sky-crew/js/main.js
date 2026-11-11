@@ -589,6 +589,9 @@ net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r)
 let freshJoin = true; // a flight that had already ended when we joined is not ours to report
 net.addEventListener('world', (e) => {
   if (sim.host) return;
+  const w = e.detail.w || {};
+  if (w.hs != null && w.hs === lastWorld.hs && Number(w.sq) <= lastWorld.sq) return; // stale / out-of-order snapshot
+  if (w.hs != null) { lastWorld.hs = w.hs; lastWorld.sq = Number(w.sq) || 0; }
   if (freshJoin) { freshJoin = false; if (e.detail.w.res) markReported(e.detail.w.res.at); }
   sim.applySnapshot(e.detail.w);
 });
@@ -656,7 +659,9 @@ function continueSolo(msg) {
   if (!$('#admin').classList.contains('hidden')) UI.show('#admin', false);
 }
 
-let sendT = 0, worldT = 0;
+let sendT = 0, worldT = 0, worldSeq = 0;
+// guests: the newest host snapshot applied so far (per host); an older one arriving late must never roll toggles back
+const lastWorld = { hs: null, sq: 0 };
 function netTick(dt) {
   if (!net.inRoom) return;
   net.wasInRoom = true;
@@ -666,7 +671,7 @@ function netTick(dt) {
     sendState();
     if (amPilot()) net.send({ t: 'plane', s: sim.planeState() });
   }
-  if (net.isHost && worldT > 0.1) { worldT = 0; net.send({ t: 'world', w: sim.snapshot(!net.room.pilotCid) }); }
+  if (net.isHost && worldT > 0.1) { worldT = 0; const w = sim.snapshot(!net.room.pilotCid); w.hs = net.cid; w.sq = ++worldSeq; net.send({ t: 'world', w }); }
 }
 
 // ---------------- flight ----------------
