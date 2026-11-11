@@ -26,6 +26,7 @@ npm test                        # vitest + supertest
 | `npm run typecheck` | TypeScript check |
 | `npm run test:pg` | Same tests against Postgres (`TEST_DATABASE_URL`, default `postgres://batlas:localtest@127.0.0.1:5433/batlas_test`) |
 | `npm run backup [-- --out file.json]` | Dump every table to JSON from `DATABASE_URL` (or the SQLite file). Contains password hashes: keep private |
+| `npm run restore -- --file f.json [--dry-run] [--force --confirm <db>]` | Restore a backup into `DATABASE_URL` (or the SQLite file): migrates first, refuses a non-empty DB unless `--force` + typed DB name, one transaction, fixes sequences. See [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) |
 | `cd e2e && npm i && npx playwright install webkit && npm run webkit` | Optional Safari (WebKit) end-to-end check against the running server (creates a throwaway `webkit_*` user and contact messages) |
 
 ## Stack
@@ -315,6 +316,14 @@ New permissions: `players.edit`, `players.online` (Admin + Developer), `media.up
 
 - `cd server && npm test` (SQLite) and `npm run test:pg` (Postgres): `tests/website.test.ts` (media/Range/caps, game fields, downloads, events, online, profile moderation, role rules) and `tests/maintenance.test.ts` (toggle permissions, env override, 503s, Developer bypass, healthz/backup exemptions, cache).
 - `e2e/website.mjs`: Playwright, drives every new dashboard control through the UI, then checks the public site in **Chromium + WebKit** at **iPhone 15, iPad (gen 7) and 1440×900**; screenshots in `docs/screenshots/website/` (results in `RESULTS.txt`). Run against a throw-away server: `BASE=http://localhost:3300 DEV_CREDS=../server/data/dev-creds.txt node website.mjs`. WebKit here has no GStreamer codecs, so WebKit runs skip the uploaded `<video>` (it crashes that renderer); trailer playback is verified in Chromium and by the Range tests. A check on a real iPhone/iPad is still recommended.
+
+## Data safety, PWA and apps (branch `data-safety`, builds on `website-upgrade`)
+
+- **Restore**: `npm run restore -- --file <backup.json>` (dry-run, refuses non-empty DBs without `--force --confirm <db>`, one transaction, media bytes, sequences). Procedure, Render free-tier facts and the Dec 3 plan: [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md). Drill results: [docs/RESTORE-DRILL.md](docs/RESTORE-DRILL.md).
+- **Off-box backups** (options only, nothing set up): [docs/OFFSITE-BACKUP-OPTIONS.md](docs/OFFSITE-BACKUP-OPTIONS.md).
+- **PWA**: installable from Safari "Add to Home Screen" / Chrome "Install"; the service worker caches only the site shell and never `/api`, `/media`, `/play/**` or WebSockets.
+- **Desktop / mobile wrappers**: `apps/desktop` (Electron) and `apps/mobile` (Capacitor). How to build and what was verified: [docs/BUILDING.md](docs/BUILDING.md).
+- Tests: `tests/restore.test.ts`, `tests/pwa.test.ts`; Playwright `e2e/pwa.mjs` (`BASE=http://127.0.0.1:3400 node pwa.mjs`).
 
 ## Browser testing
 

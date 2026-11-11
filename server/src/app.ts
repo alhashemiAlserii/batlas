@@ -27,7 +27,7 @@ import { serveMedia } from './lib/media.js';
 import { getMaintenance } from './lib/maintenance.js';
 
 /** Paths that keep working in maintenance mode for everyone (static assets for the maintenance page). */
-const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/favicon\.ico$/;
+const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/(favicon\.ico|sw\.js|manifest\.webmanifest|offline\.html|apple-touch-icon\.png)$/;
 /** API calls that keep working in maintenance mode (login itself refuses non-Developers with 503). */
 const MAINT_API_OPEN = new Set(['GET /api/csrf', 'GET /api/site', 'GET /api/maintenance', 'GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/game/verify', 'POST /api/game/audit', 'GET /api/internal/backup']);
 
@@ -201,6 +201,15 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   // Database-backed uploads (images, trailers, avatars) with Range support for iOS Safari video.
   app.get('/media/:id', (req, res, next) => { serveMedia(db, req, res).catch(next); });
   app.use('/uploads', express.static(config.uploadDir, { index: false, dotfiles: 'deny', maxAge: '7d' }));
+  // PWA: the service worker must always be revalidated so a new deploy's worker is picked up promptly.
+  app.get('/sw.js', (_req, res) => {
+    res.set({ 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/' });
+    res.type('application/javascript').sendFile(path.join(pub, 'sw.js'));
+  });
+  app.get('/manifest.webmanifest', (_req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.type('application/manifest+json').sendFile(path.join(pub, 'manifest.webmanifest'));
+  });
   app.use(express.static(pub, { index: false, extensions: [] }));
 
   app.use((req, res) => {

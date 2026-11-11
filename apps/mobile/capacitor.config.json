@@ -1,0 +1,13 @@
+{
+  "appId": "com.batlas.app",
+  "appName": "Batlas",
+  "webDir": "www",
+  "server": {
+    "url": "https://batlas-2je9.onrender.com",
+    "cleartext": false,
+    "allowNavigation": ["batlas-2je9.onrender.com"]
+  },
+  "backgroundColor": "#020a24",
+  "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false },
+  "android": { "allowMixedContent": false }
+}

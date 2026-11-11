@@ -1,0 +1,45 @@
+{
+  "name": "batlas-desktop",
+  "productName": "Batlas",
+  "version": "1.0.0",
+  "description": "Batlas desktop app: a thin Electron window around the live Batlas site.",
+  "author": "Batlas",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:linux": "electron-builder --linux AppImage tar.gz",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.batlas.desktop",
+    "productName": "Batlas",
+    "files": [
+      "main.js",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "linux": {
+      "category": "Game",
+      "icon": "build/icon.png",
+      "syncDesktopName": true
+    },
+    "win": {
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "category": "public.app-category.games",
+      "icon": "build/icon.png"
+    }
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "desktopName": "batlas.desktop"
+}

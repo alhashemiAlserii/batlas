@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Batlas</string>
+    <string name="title_activity_main">Batlas</string>
+    <string name="package_name">com.batlas.app</string>
+    <string name="custom_url_scheme">com.batlas.app</string>
+</resources>
