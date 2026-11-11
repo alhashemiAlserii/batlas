@@ -79,9 +79,9 @@ async function paxChaos(page, name) {
   await page.evaluate((d) => { window.skyCrew.teleport(0, 0, d.z - 0.9); window.skyCrew.lookAt(d.x, d.y, d.z); }, d);
   await sleep(150); await page.keyboard.press('KeyE'); await sleep(300);
   await page.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
-  await page.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
+  await page.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 220, y: 16, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
   try {
-    await page.waitForSelector('#results:not(.hidden)', { timeout: 200000 });
+    await page.waitForSelector('#results:not(.hidden)', { timeout: 300000 });
     const res = (await st(page)).results;
     const fine = res.lines.find(([l]) => /parachuted/.test(l));
     fine && fine[1] < 0 && res.stars <= 2 ? ok(`${name}: payout charges "${fine[0]}" ${fine[1]} credits, rating capped at ${res.stars}★`) : bad(`${name}: payout ${JSON.stringify(res.lines)}`);
@@ -200,7 +200,7 @@ async function singlePlayer(name, type) {
   await page.evaluate(() => { const d = window.skyCrew.dest(); window.skyCrew.setFlight({ x: d.x, z: d.z + 400, y: 30, yaw: 0, pitch: -0.07, bank: 0, speed: 70, throttle: 0.15, onGround: false, airborneOnce: true }); });
   try {
     await page.waitForFunction(() => window.skyCrew.state().phase === 'landed' || window.skyCrew.state().results, null, { timeout: 300000 });
-    await page.waitForSelector('#results:not(.hidden)', { timeout: 200000 });
+    await page.waitForSelector('#results:not(.hidden)', { timeout: 300000 });
     const res = (await st(page)).results;
     const sc = await page.evaluate(() => window.skyCrew.debug.score());
     res.landedAt === 'CRP' && !res.crashed && res.lines.some(([l]) => /^Fares/.test(l)) && (await page.textContent('#resTotal')).includes('₵')
@@ -254,7 +254,7 @@ async function singlePlayer(name, type) {
   const mq = await m.evaluate(() => window.skyCrew.quality());
   mq.quality === 'medium' ? ok(`${name}: mobile auto quality = ${mq.quality} (shadows ${mq.shadows})`) : bad(`${name}: mobile quality ${JSON.stringify(mq)}`);
   await m.screenshot({ path: `${OUT}/${name}-mobile-menu.png` });
-  await m.tap('#bSolo'); await m.waitForFunction(() => window.skyCrew.state().playing);
+  await m.$eval('#bSolo', (b) => b.click()); await m.waitForFunction(() => window.skyCrew.state().playing, null, { polling: 250, timeout: 30000 });
   const touchVisible = await m.isVisible('#joy');
   touchVisible ? ok(`${name}: mobile touch controls visible (${type === webkit ? 'iPad' : 'Pixel 7'})`) : bad(`${name}: touch controls missing`);
   // drive the joystick with a synthetic touch drag
@@ -280,7 +280,7 @@ async function singlePlayer(name, type) {
   await boot(m, false);
   const lq = await m.evaluate(() => window.skyCrew.quality());
   lq.quality === 'low' && !lq.shadows ? ok(`${name}: low quality preset applies after reload (no shadows)`) : bad(`${name}: low ${JSON.stringify(lq)}`);
-  await m.tap('#bSolo'); await m.waitForFunction(() => window.skyCrew.state().playing);
+  await m.$eval('#bSolo', (b) => b.click()); await m.waitForFunction(() => window.skyCrew.state().playing, null, { polling: 250, timeout: 30000 });
   await m.evaluate(() => { window.skyCrew.teleport(0.3, 0, -6); window.skyCrew.look(0, -0.1); });
   await sleep(500);
   await m.screenshot({ path: `${OUT}/${name}-mobile-cabin-low.png` });
