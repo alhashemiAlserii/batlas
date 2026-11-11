@@ -30,6 +30,12 @@ for (const [name, type] of [['chromium', chromium], ['webkit', webkit]]) {
   await p.evaluate(() => window.skyCrew.teleport(-1.9, 0, 2.3));
   let me = await settle(() => window.skyCrew.state().me.onGround);
   check(me.y < 0.6 && Math.abs(me.x) < 2.3, `${name}: teleport into the window wall -> back in the cabin on the floor (${me.x.toFixed(2)}, ${me.y.toFixed(2)})`);
+  // put in from below the cabin floor (teleport with the terminal's floor height): stands on the cabin floor
+  for (const y0 of [-1.0, -2.4]) {
+  await p.evaluate((y0) => window.skyCrew.teleport(0, y0, 8), y0); await sleep(1200);
+  me = await settle(() => window.skyCrew.state().me.onGround);
+  check(Math.abs(me.y) < 0.05 && Math.abs(me.z - 8) < 0.5 && Math.abs(me.x) < 0.5, `${name}: teleport in from y=${y0} below the floor -> standing on the cabin floor (${me.x.toFixed(2)}, ${me.y.toFixed(2)}, ${me.z.toFixed(2)})`);
+  }
   // walking the aisle stays on the floor
   await p.evaluate(() => { window.skyCrew.teleport(0, 0, 4); window.skyCrew.look(0, 0); }); await sleep(300);
   await p.keyboard.down('KeyW'); await p.waitForFunction(() => window.skyCrew.state().me.z < 1, null, { timeout: 20000 }).catch(() => {}); await p.keyboard.up('KeyW');

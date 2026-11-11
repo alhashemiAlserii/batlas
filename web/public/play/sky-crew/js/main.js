@@ -175,8 +175,17 @@ const freeAt = (p, cols) => !cols.some((c) => overlaps(p, c));
  *  otherwise move to the nearest free spot on the same side of the fuselage, never on top of the bins. */
 function unstick(cols) {
   const hit = cols.filter((c) => overlaps(me.pos, c)); if (!hit.length) return false;
-  const top = Math.max(...hit.map((c) => c.max[1]));
-  if (top - me.pos.y <= STEP) { const up = me.pos.clone(); up.y = top + 0.001; if (freeAt(up, cols)) { me.pos.copy(up); return true; } }
+  // a low step (cushion, kerb), or a floor slab we were put just under (cabin floor, jet bridge): stand on it.
+  // Narrow things (seat backs, walls, overhead bins) never count, so nobody ends up standing on the bins.
+  const floorish = (c) => c.max[1] - me.pos.y <= STEP || (c.max[0] - c.min[0] > 1.2 && c.max[2] - c.min[2] > 1.2 && c.max[1] - me.pos.y <= 3.0);
+  { // climb through stacked slabs (apron -> fuselage belly -> cabin floor) until free; give up at anything narrow
+    const up = me.pos.clone(); let h = hit;
+    for (let i = 0; i < 4 && h.length; i++) {
+      const slabs = h.filter(floorish); if (!slabs.length) break;
+      up.y = Math.max(...slabs.map((c) => c.max[1])) + 0.001; h = cols.filter((c) => overlaps(up, c));
+    }
+    if (!h.length && up.y - me.pos.y <= 3.0) { me.pos.copy(up); me.vel.y = 0; return true; }
+  }
   const inside = sim.inCabin(me.pos), q = me.pos.clone();
   for (let r = 0.15; r <= 3.01; r += 0.15) {
     for (let k = 0; k < 16; k++) {
