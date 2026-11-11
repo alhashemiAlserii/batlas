@@ -397,7 +397,9 @@ async function coop() {
   // co-pilot (guest) uses cockpit systems; the host simulation applies them
   const cpp = await Bc.p.evaluate(() => window.skyCrew.debug.interactPoint('seat_copilot'));
   await Bc.p.evaluate((d) => { window.skyCrew.teleport(0.5, 0, -13.5); window.skyCrew.lookAt(d.x, d.y, d.z); }, cpp);
-  await sleep(200); await Bc.p.keyboard.press('KeyE'); await sleep(500);
+  { let t = null; for (let i = 0; i < 30 && !(t && /copilot|seat/i.test(t.kind)); i++) { await sleep(150); t = await Bc.p.evaluate(() => window.skyCrew.target()); } } // aim settles first
+  await Bc.p.keyboard.press('KeyE');
+  await Bc.p.waitForFunction(() => window.skyCrew.state().me.mode === 'copilot', null, { timeout: 5000 }).catch(() => {});
   await Bc.p.keyboard.press('KeyB'); await sleep(200); await Bc.p.keyboard.press('KeyL');
   // host applies, its next snapshot reaches the guest (a starved software-GL host may take a few frames): poll
   let hc, gc; for (let i = 0; i < 50; i++) { hc = await A.p.evaluate(() => window.skyCrew.cabin()); gc = await Bc.p.evaluate(() => window.skyCrew.cabin()); if (hc.seatbelt && !hc.lights && gc.seatbelt && !gc.lights) break; await sleep(200); }
@@ -406,7 +408,7 @@ async function coop() {
   await Bc.p.screenshot({ path: `${OUT}/coop-copilot-guest.png` });
   // a short flight: host pilots, both clients save their result to their profile
   await A.p.evaluate(() => window.skyCrew.debug.sitAll());
-  await Bc.p.keyboard.press('KeyX'); await sleep(200);
+  await Bc.p.keyboard.press('KeyX'); await Bc.p.waitForFunction(() => window.skyCrew.state().me.mode === 'walk', null, { timeout: 5000 }).catch(() => {});
   await A.p.evaluate(() => { window.skyCrew.teleport(-0.3, 0, -13.6); window.skyCrew.takeSeat(); });
   await A.p.keyboard.down('KeyR'); await A.p.waitForFunction(() => window.skyCrew.state().phase !== 'boarding', null, { timeout: 90000 }).catch(() => {}); await A.p.keyboard.up('KeyR');
   await sleep(3000);
@@ -427,7 +429,7 @@ async function coop() {
     const gid = await Bc.p.waitForFunction(() => window.skyCrew.heldPax(), null, { timeout: 5000 }).then((h) => h.jsonValue()).catch(() => null);
     if (gid) { pB = (await Bc.p.evaluate(() => window.skyCrew.pax())).find((x) => x.id === gid); break; } // the one actually held
   }
-  if (!pB) bad('coop: guest could not grab a seated passenger for the throw test');
+  if (!pB) bad(`coop: guest could not grab a seated passenger for the throw test ${JSON.stringify(await Bc.p.evaluate(() => ({ mode: window.skyCrew.state().me.mode, me: window.skyCrew.state().me, target: window.skyCrew.target(), held: window.skyCrew.heldPax() })))}`);
   else {
     await A.p.waitForFunction((id) => window.skyCrew.pax().find((x) => x.id === id)?.state === 'carried', pB.id, { timeout: 8000 }).catch(() => {});
     const hostView = (await A.p.evaluate(() => window.skyCrew.pax())).find((x) => x.id === pB.id);
