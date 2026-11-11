@@ -5,6 +5,8 @@ import * as CANNON from '../../vendor/cannon-es.js';
 import { makeCharacter, animateCharacter, randomPassengerLook, bubble } from './characters.js';
 import { HALF_W, Z_TAIL, Z_NOSE, CEIL, GEAR_H, DEST, ORIGIN, ROUTES, MATERIALS, setRoute, REAR_DOOR, CARGO_DOOR, Z_HOLD0, Z_HOLD1 } from './world.js';
 import { newFlight, distTo } from './flight.js';
+import { paxTerminalPath, paxTerminalStart } from './terminal.js';
+import { landingGrade, fixDeadline, securityCatches, crewHas, PERK, CLASS_INFO } from './perks.js';
 
 export const ITEM_DEFS = {
   suitcase: { size: [0.55, 0.38, 0.26], mass: 14, colors: [0xe74c3c, 0x2980b9, 0x27ae60, 0x8e44ad, 0xf39c12, 0x34495e], label: 'suitcase', bag: true },
@@ -42,6 +44,7 @@ export class Sim {
     this.cfg = eventsConfig;
     this.toast = onToast || (() => {});
     this.host = true;
+    this.airport = true; // passengers (and crew) walk through the pre-flight terminal
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
     this.world.allowSleep = true;
@@ -69,7 +72,7 @@ export class Sim {
     this.seed = seed; this.rng = mulberry32(seed);
     this.phase = 'boarding'; this.t = 0; this.flightT = 0; this.nextId = 1;
     this.flight = newFlight();
-    this.events = []; this.cool = {}; this.eventClock = 0;
+    this.events = []; this.pendingEv = []; this.cool = {}; this.eventClock = 0;
     this.weather = this.weather || 'clear'; this.hour = this.hour ?? 13; this.turb = 0; this.emergencyLanding = null;
     this.cabin = { lights: true, seatbelt: false, gearDown: true, announced: 0, lastAnnounce: -99 };
     this.applyCabin();
@@ -94,13 +97,25 @@ export class Sim {
       const look = randomPassengerLook(mulberry32(seed + i * 104729)); // same seed => same people on every client
       const mesh = makeCharacter(look);
       const seat = seats[i];
-      const start = new THREE.Vector3((i % 2 ? 1 : -1) * (1.2 + (i % 3) * 0.5), -GEAR_H, Z_TAIL + 8 + i * 1.3); // queue on the apron behind the aircraft
-      mesh.position.copy(start);
       this.ship.plane.add(mesh);
-      // up the rear air-stairs, through the REAR DOOR, forward along the aisle, then into the row
-      const path = [new THREE.Vector3(0, -GEAR_H, Z_TAIL + 3.5), new THREE.Vector3(0, 0, Z_TAIL + 0.15), new THREE.Vector3(0, 0, Z_TAIL - 1.2), new THREE.Vector3(0, 0, seat.z), new THREE.Vector3(seat.x, 0, seat.z)];
-      this.pax.push({ id: i + 1, kind: kinds[Math.floor(rnd() * kinds.length)], look, mesh, seat, path, wp: 0, state: 'queue', delay: 2 + i * 2.6, request: null, reqT: 0, nextReq: 18 + rnd() * 30, mood: 70, panicT: 0, sleep: false, bubbleKind: null, bubble: null, dance: 0 });
+      const p = { id: i + 1, kind: kinds[Math.floor(rnd() * kinds.length)], look, mesh, seat, path: null, wp: 0, state: 'queue', delay: 2 + i * (this.airport ? 2.2 : 2.6), request: null, reqT: 0, nextReq: 18 + rnd() * 30, mood: 70, panicT: 0, sleep: false, bubbleKind: null, bubble: null, dance: 0 };
+      this.routePax(p, i);
+      this.pax.push(p);
     }
+  }
+  /** Boarding route: through the airport terminal (check-in, scanner, gate) or straight from the apron queue. */
+  routePax(p, i) {
+    const start = this.airport ? paxTerminalStart(i) : new THREE.Vector3((i % 2 ? 1 : -1) * (1.2 + (i % 3) * 0.5), -GEAR_H, Z_TAIL + 8 + i * 1.3);
+    p.mesh.position.copy(start);
+    // up the rear air-stairs, through the REAR DOOR, forward along the aisle, then into the row
+    const tail = [new THREE.Vector3(0, -GEAR_H, Z_TAIL + 3.5), new THREE.Vector3(0, 0, Z_TAIL + 0.15), new THREE.Vector3(0, 0, Z_TAIL - 1.2), new THREE.Vector3(0, 0, p.seat.z), new THREE.Vector3(p.seat.x, 0, p.seat.z)];
+    p.path = this.airport ? [...paxTerminalPath(i), ...tail] : tail;
+    p.doorWp = p.path.indexOf(tail[1]); p.wp = 0; p.pauseT = 0;
+  }
+  /** Host toggled the airport: passengers who haven't set off yet take the other route. */
+  setAirport(on) {
+    on = !!on; if (this.airport === on) return; this.airport = on;
+    this.pax.forEach((p, i) => { if (p.state === 'queue' || (p.state === 'walk' && p.wp < (p.doorWp ?? 1) && !p.extra)) { p.state = 'queue'; p.delay = 1 + i * (on ? 2.2 : 2.6); this.routePax(p, i); } });
   }
 
   // ---------------- items ----------------
@@ -223,6 +238,9 @@ export class Sim {
     if (dd.cargo.passable && pos.x > 0 && pos.z > CARGO_DOOR.z0 - 0.1 && pos.z < CARGO_DOOR.z1 + 0.1 && pos.y < 2.0) return 'cargo';
     return null;
   }
+  /** Crew classes (from the server's room list, via main.js). */
+  crew() { return this.crewInfo ? this.crewInfo() : []; }
+  classes() { return this.crew().map((c) => c.cls).filter(Boolean); }
   updateThrown(p, dt) {
     const pos = p.mesh.position, v = p.vel || (p.vel = new THREE.Vector3());
     v.y -= 9.8 * dt;
@@ -238,7 +256,17 @@ export class Sim {
       return;
     }
     // outside the fuselage
-    if (!this.flight.onGround && this.flight.y > GEAR_H + 3) return this.ejectPax(p);
+    if (!this.flight.onGround && this.flight.y > GEAR_H + 3) {
+      // Security Chief perk: grabs a passenger tumbling out of a door if they're close enough
+      if (securityCatches({ x: pos.x, y: pos.y, z: pos.z }, this.crew())) {
+        pos.set(Math.max(-HALF_W + 0.5, Math.min(HALF_W - 0.5, pos.x)), 0, Math.min(Z_TAIL - 0.8, Math.max(Z_NOSE + 0.6, pos.z)));
+        p.vel = null; p.spin = 0; p.mesh.rotation.set(0, 0, 0); p.state = 'return'; p.panicT = 0; p.mood = Math.min(100, p.mood + PERK.secCalmMood);
+        this.score.caught = (this.score.caught || 0) + 1;
+        this.toast('🛡️ The Security Chief caught the passenger just in time!', 'info');
+        return;
+      }
+      return this.ejectPax(p);
+    }
     if (pos.y <= -GEAR_H) { pos.y = -GEAR_H; this.landPax(p, false); }
   }
   landPax(p, inside) {
@@ -292,12 +320,12 @@ export class Sim {
     return n;
   }
 
-  serve(paxId, item) {
+  serve(paxId, item, cls = null) {
     const p = this.pax.find((x) => x.id === paxId);
     if (!p || p.state !== 'seated' || !p.request) return false;
     if (p.request === 'complaint') { if (item) return false; p.request = null; p.mood = Math.min(100, p.mood + 15); this.score.calmed++; this.flash(p, 'happy'); this.toast('You calmed the passenger down.'); return true; }
     if (p.request !== item) return false;
-    p.request = null; p.mood = Math.min(100, p.mood + 22); this.score.served++;
+    p.request = null; p.mood = Math.min(100, p.mood + 22 + (cls === 'cabin_pro' ? PERK.proServeMood : 0)); this.score.served++;
     if (item === 'snack') p.fed = true; if (item === 'water') p.drank = true;
     if (item === 'blanket' && PERSONALITIES[p.kind].sleeps) p.sleep = true;
     this.flash(p, p.sleep ? 'sleep' : 'happy');
@@ -348,10 +376,20 @@ export class Sim {
   flash(p, kind, t = 2.5) { p.bubbleKind = kind; p.flashT = t; }
 
   // ---------------- events ----------------
+  /** Mechanic / Navigator perk: random faults and turbulence are announced a few seconds early. */
+  warnOrTrigger(id) {
+    const cls = this.classes();
+    const fault = id === 'engine_warning' || id === 'cabin_pressure', bumpy = id === 'turbulence' || id === 'air_pocket';
+    const warn = fault && crewHas(cls, 'mechanic') ? PERK.mechWarn : bumpy && crewHas(cls, 'navigator') ? PERK.navWarn : 0;
+    if (!warn) return this.trigger(id);
+    (this.pendingEv ||= []).push({ id, at: this.t + warn });
+    this.toast(fault ? `${CLASS_INFO.mechanic.icon} Mechanic: ${id === 'engine_warning' ? 'engine' : 'cabin pressure'} fault coming in ${warn} s. Get to the panel!` : `${CLASS_INFO.navigator.icon} Navigator: ${id === 'air_pocket' ? 'air pocket' : 'turbulence'} ahead in ${warn} s. Seatbelts on!`, 'warn', 'warn');
+    return null;
+  }
   trigger(id, opts = {}) {
     const def = this.cfg.events.find((e) => e.id === id) || { id, message: id };
     const r = (a, d) => (a ? a[0] + this.rng() * (a[1] - a[0]) : d);
-    const e = { id, t: 0, dur: opts.dur ?? r(def.duration, 0), intensity: opts.intensity ?? r(def.intensity, 1), fix: def.fix, deadline: def.timeout, done: false };
+    const e = { id, t: 0, dur: opts.dur ?? r(def.duration, 0), intensity: opts.intensity ?? r(def.intensity, 1), fix: def.fix, deadline: fixDeadline(def.timeout, this.classes()), done: false };
     if (id === 'engine_warning') this.flight.engineFail = true;
     if (id === 'cabin_pressure') this.ship.masks.visible = true;
     if (id === 'complaint') {
@@ -393,7 +431,7 @@ export class Sim {
     if (['climb', 'cruise', 'approach'].includes(this.phase)) this.flightT += dt;
     if (f.touchdown && !this.score.landing && f.airborneOnce) {
       const td = f.touchdown;
-      this.score.landing = td.crash ? 'crash' : td.vs > -2.5 ? 'butter' : td.vs > -5 ? 'good' : 'hard';
+      this.score.landing = landingGrade(td.vs, td.crash, this.pilotClass ? this.pilotClass() : null); // Ace Pilot: softer grading
       this.score.landedAt = td.rwy; this.score.crashed = td.crash; this.score.vs = td.vs; this.score.belly = !!td.belly; this.score.wrongAirport = !!td.rwy && td.rwy !== DEST.code && td.rwy !== ORIGIN.code;
       this.phase = 'landed';
       if (td.crash) { this.toast(td.terrain ? 'CRASH! That hill came out of nowhere.' : td.belly ? 'BELLY LANDING! Somebody forgot the gear...' : 'CRASH! The plane is... not fine.', 'warn', 'crash'); this.finish(); }
@@ -412,9 +450,14 @@ export class Sim {
         const ok = this.cfg.events.filter((e) => e.phases.includes(this.phase) && !this.cool[e.id] && !this.events.some((x) => x.id === e.id && !x.done));
         const total = ok.reduce((a, e) => a + e.weight, 0);
         let pick = this.rng() * total;
-        for (const e of ok) { pick -= e.weight; if (pick <= 0) { this.trigger(e.id); break; } }
+        for (const e of ok) { pick -= e.weight; if (pick <= 0) { this.warnOrTrigger(e.id); break; } }
       }
     }
+    // early-warned events arrive on time
+    if (this.pendingEv?.length) for (const pe of [...this.pendingEv]) if (this.t >= pe.at) { this.pendingEv.splice(this.pendingEv.indexOf(pe), 1); this.trigger(pe.id); }
+    // Cabin Pro aura: nearby seated passengers slowly cheer up and stop panicking
+    const pros = this.crew().filter((c) => c.cls === 'cabin_pro');
+    if (pros.length) for (const p of this.pax) if (p.state === 'seated' && pros.some((c) => Math.hypot(c.x - p.mesh.position.x, c.z - p.mesh.position.z) < PERK.proCalmRadius)) { p.mood = Math.min(100, p.mood + PERK.proCalmRate * dt); p.panicT = Math.max(0, p.panicT - dt); }
     // active events
     let turb = this.weather === 'storm' && flying ? 0.35 : this.weather === 'rain' && flying ? 0.12 : 0;
     for (const e of this.events) {
@@ -473,11 +516,12 @@ export class Sim {
     if (p.state === 'queue') { p.delay -= dt; if (p.delay <= 0) p.state = 'walk'; }
     if (p.state === 'walk') {
       const tgt = p.path[p.wp];
-      if (p.wp === 1 && !this.ship.doors.rear.passable) { p.waiting = true; return; }
+      if (p.wp === (p.doorWp ?? 1) && !this.ship.doors.rear.passable) { p.waiting = true; return; }
+      if (p.pauseT > 0) { p.pauseT -= dt; p.waiting = true; return; } // at a desk / in the scanner
       p.waiting = false;
       const pos = p.mesh.position, d = tgt.clone().sub(pos), dist = d.length();
-      const step = 1.5 * dt;
-      if (dist <= step) { pos.copy(tgt); p.wp++; if (p.wp >= p.path.length) { p.state = 'seated'; p.mesh.rotation.y = 0; if (!p.boardedOnce) { p.boardedOnce = true; this.score.paxBoarded++; } } }
+      const step = (pos.z > Z_TAIL + 0.5 ? 2.0 : 1.5) * dt; // brisk through the terminal, careful in the aisle
+      if (dist <= step) { pos.copy(tgt); if (tgt.pause) p.pauseT = tgt.pause; p.wp++; if (p.wp >= p.path.length) { p.state = 'seated'; p.mesh.rotation.y = 0; if (!p.boardedOnce) { p.boardedOnce = true; this.score.paxBoarded++; } } }
       else { pos.addScaledVector(d.normalize(), step); p.mesh.rotation.y = Math.atan2(-d.x, -d.z); }
     }
     if (p.state === 'seated' && flying) {

@@ -113,7 +113,7 @@ export function buildAdmin({ you, room, myCid, send, live }) {
 
 export const CREW_LABEL = { pilot: 'Pilot', copilot: 'Co-pilot', cabin: 'Cabin crew', cargo: 'Cargo' };
 /** Glide-path indicator (PAPI lights + vertical/lateral deviation). */
-export function glide(gp, { name, gearDown, show: vis }) {
+export function glide(gp, { name, gearDown, show: vis, win = { high: 40, low: -30 } }) {
   const box = $('#gpath');
   if (!vis) return box.classList.add('hidden');
   box.classList.remove('hidden');
@@ -124,7 +124,7 @@ export function glide(gp, { name, gearDown, show: vis }) {
   $('#gpV').style.top = `${30 + v}px`;
   const lat = Math.max(-72, Math.min(72, gp.lateral / 10)); // your position vs the centreline
   $('#gpL').style.left = `calc(50% + ${lat}px)`;
-  const txt = gp.along < 0 ? 'Over the runway: flare!' : gp.dev > 40 ? 'Too high: descend' : gp.dev < -30 ? 'Too low: climb' : 'On the glide path';
+  const txt = gp.along < 0 ? 'Over the runway: flare!' : gp.dev > win.high ? 'Too high: descend' : gp.dev < win.low ? 'Too low: climb' : 'On the glide path';
   $('#gpTxt').textContent = `${(gp.along / 1000).toFixed(1)} km · ${txt}${Math.abs(gp.lateral) > 60 ? (gp.lateral > 0 ? ' · steer left' : ' · steer right') : ''}`;
   $('#gpGear').classList.toggle('hidden', gearDown || gp.h > 400);
 }

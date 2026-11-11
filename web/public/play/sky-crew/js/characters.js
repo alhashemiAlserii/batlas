@@ -124,6 +124,8 @@ function setExpression(ch, kind) {
   for (const [k, m] of Object.entries(f.mouths)) m.visible = k === e.m;
   f.mouths.smile.scale.x = u.dims.headR * (e.small ? 0.13 : 0.2);
   f.open.visible = e.eyes; f.closed.visible = !e.eyes;
+  const pop = kind === 'scared' ? 1.35 : kind === 'angry' ? 0.85 : 1; // cartoon eye-pop when scared
+  f.open.scale.set(pop, pop * (kind === 'joy' ? 0.8 : 1), 1);
   f.brows.forEach((b, i) => { const s = i ? 1 : -1; b.rotation.z = Math.PI / 2 + s * e.brow; b.position.y = f.ey + f.es * (1.55 + (e.lift ? 0.35 : 0) - (e.drop ? 0.2 : 0)); });
 }
 
@@ -261,7 +263,7 @@ export function makeCharacter(look = {}) {
   mesh.bind(new THREE.Skeleton(bones));
   const face = buildFace(d, look); face.position.set(hc[0] - J.head[0], hc[1] - J.head[1], hc[2] - J.head[2]); bones[BI.head].add(face);
   const mixer = new THREE.AnimationMixer(g);
-  g.userData = { mesh, bones, face, dims: d, mixer, clips: clipsFor(d), actions: {}, current: null, expr: null, t: Math.random() * 10, look, oneShot: null };
+  g.userData = { mesh, bones, boneByName: Object.fromEntries(bones.map((b) => [b.name, b])), face, dims: d, mixer, clips: clipsFor(d), actions: {}, current: null, expr: null, t: Math.random() * 10, look, oneShot: null, wob: { k: look.wobble ?? 1 } };
   setExpression(g, 'neutral');
   play(g, 'idle', 0);
   return g;
@@ -400,6 +402,33 @@ export function animateCharacter(ch, dt, f = {}) {
   const fu = u.face.userData;
   if (expr !== 'sleep') { const b = (u.t % 4.3) < 0.12; fu.open.visible = !b; fu.closed.visible = b; }
   u.mixer.update(dt * (f.speed ?? 1));
+  wobble(ch, dt);
+}
+
+// ---------------------------------------------------------------- floppy secondary motion
+// A damped spring driven by the character's own acceleration: heads lag and nod, arms flop, bodies sway.
+const _wv = new THREE.Vector3();
+function wobble(ch, dt) {
+  const u = ch.userData; if (!u.wob || dt <= 0) return;
+  const w = u.wob, p = ch.position;
+  if (!w.last) { w.last = p.clone(); w.v = new THREE.Vector3(); w.s = [0, 0]; w.sv = [0, 0]; return; }
+  _wv.copy(p).sub(w.last).divideScalar(Math.max(dt, 1 / 120));
+  if (_wv.lengthSq() > 400) _wv.set(0, 0, 0); // teleports / seat snaps are not accelerations
+  const ax = (_wv.x - w.v.x) / Math.max(dt, 1 / 120), az = (_wv.z - w.v.z) / Math.max(dt, 1 / 120);
+  w.v.copy(_wv); w.last.copy(p);
+  const ry = ch.rotation.y, c = Math.cos(ry), s = Math.sin(ry);
+  const lx = ax * c - az * s, lz = ax * s + az * c; // acceleration in the character's frame (front = -z)
+  const K = 70, C = 7, G = 0.0045 * w.k;
+  for (const [i, a] of [[0, lx], [1, lz]]) {
+    const acc = -K * w.s[i] - C * w.sv[i] - Math.max(-60, Math.min(60, a)) * G;
+    w.sv[i] += acc * dt; w.s[i] = Math.max(-0.5, Math.min(0.5, w.s[i] + w.sv[i] * dt));
+  }
+  const t = u.t, B = u.boneByName;
+  const sway = Math.sin(t * 2.1) * 0.015 * w.k; // idle jelly sway
+  B.head?.rotateX(-w.s[1] * 1.4); B.head?.rotateZ(w.s[0] * 1.4 + sway);
+  B.chest?.rotateX(-w.s[1] * 0.6); B.chest?.rotateZ(w.s[0] * 0.6);
+  B['arm.L']?.rotateZ(Math.max(0, w.s[0]) * 2 + Math.abs(w.s[1]) * 0.8); B['arm.R']?.rotateZ(Math.min(0, w.s[0]) * 2 - Math.abs(w.s[1]) * 0.8);
+  B['arm.L']?.rotateX(w.s[1] * 1.5); B['arm.R']?.rotateX(w.s[1] * 1.5);
 }
 /** Name of the clip currently playing (tests). */
 export const currentClip = (ch) => ch.userData?.current || null;
@@ -409,8 +438,9 @@ export const CLIP_NAMES = ['idle', 'walk', 'run', 'sitDown', 'sit', 'standUp', '
 export function randomPassengerLook(rnd = Math.random) {
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const fem = rnd() < 0.5;
-  const shape = pick(['average', 'average', 'tall', 'short', 'chubby', 'chubby', 'slim', 'kid', 'elder']);
-  const sh = { average: [1, 1, 1], tall: [1.15, 0.9, 1.05], short: [0.88, 1.05, 1.05], chubby: [1.0, 1.4, 1.05], slim: [1.08, 0.8, 0.95], kid: [0.75, 0.95, 1.18], elder: [0.95, 1.15, 1.0] }[shape];
+  // chunky, comedic party-game proportions (original Sky Crew designs): big heads, silly body shapes
+  const shape = pick(['ball', 'noodle', 'pear', 'brick', 'egg', 'tiny', 'average', 'elder', 'ball', 'pear']);
+  const sh = { average: [0.95, 1.15, 1.25, 1], ball: [0.85, 1.75, 1.3, 0.9], noodle: [1.25, 0.72, 1.15, 0.75], pear: [0.95, 1.55, 1.25, 0.7], brick: [1.05, 1.3, 1.15, 1.55], egg: [0.9, 1.35, 1.45, 0.8], tiny: [0.68, 1.05, 1.5, 0.9], elder: [0.92, 1.3, 1.3, 0.9] }[shape];
   const hair = fem ? pick(['long', 'bun', 'ponytail', 'bob', 'curly', 'afro', 'short']) : pick(['short', 'short', 'spiky', 'bald', 'mohawk', 'curly', 'afro', 'bob']);
   const hats = ['cap', 'beanie', 'tophat', 'sunhat', 'cowboy', 'party'];
   const pattern = pick(['plain', 'plain', 'stripes', 'dots', 'split']);
@@ -420,13 +450,13 @@ export function randomPassengerLook(rnd = Math.random) {
     hat: rnd() < 0.3 ? pick(hats) : null, hatColor: pick([0xd63031, 0x0984e3, 0xfdcb6e, 0x2d3436, 0x6ab04c, 0xe84393, 0xf5f0e1]),
     skirt: fem && rnd() < 0.35, dress: fem && rnd() < 0.15, shorts: !fem && rnd() < 0.2, sleeves: rnd() < 0.45 ? 'short' : 'long',
     glasses: rnd() < 0.3 ? (rnd() < 0.4 ? 2 : 1) : 0, beard: !fem && rnd() < 0.18, moustache: !fem && rnd() < 0.15, tie: !fem && rnd() < 0.15 ? pick([0xd62828, 0x1d3557, 0xffbe0b]) : null,
-    height: sh[0] * (0.95 + rnd() * 0.1), girth: sh[1] * (0.92 + rnd() * 0.16), headSize: sh[2] * (0.95 + rnd() * 0.12), legs: shape === 'short' || shape === 'kid' ? 0.85 : 1,
-    eyeSize: 0.22 + rnd() * 0.08, nose: rnd() < 0.7 ? 'round' : 'pointy', backpack: rnd() < 0.15 ? pick(SHIRTS) : null, shape,
+    height: sh[0] * (0.95 + rnd() * 0.1), girth: sh[1] * (0.92 + rnd() * 0.16), headSize: sh[2] * (0.95 + rnd() * 0.12), shoulders: sh[3], legs: shape === 'tiny' || shape === 'ball' ? 0.72 : shape === 'noodle' ? 1.15 : 0.85,
+    eyeSize: 0.3 + rnd() * 0.1, wobble: shape === 'ball' || shape === 'pear' ? 1.6 : 1.2, nose: rnd() < 0.7 ? 'round' : 'pointy', backpack: rnd() < 0.15 ? pick(SHIRTS) : null, shape,
   };
 }
 
 /** Billboard sprite with player name + rank badge. Colours come from the server-verified rank. */
-export function nameTag(name, role) {
+export function nameTag(name, role, badge = '') {
   const c = document.createElement('canvas'); c.width = 512; c.height = 128;
   const g = c.getContext('2d');
   const color = RANK_COLORS[role] || RANK_COLORS.PLAYER;
@@ -434,6 +464,7 @@ export function nameTag(name, role) {
   g.font = 'bold 26px -apple-system, Segoe UI, sans-serif';
   const bw = g.measureText(label).width + 26;
   g.font = 'bold 44px -apple-system, Segoe UI, sans-serif';
+  if (badge) name = `${badge} ${name}`; // class badge (from the server-checked class pick)
   const nw = Math.min(330, g.measureText(name).width);
   const total = bw + 14 + nw + 28, x0 = (512 - total) / 2;
   g.fillStyle = 'rgba(2,10,36,0.72)'; roundRect(g, x0, 24, total, 80, 18); g.fill();
@@ -466,3 +497,133 @@ export function bubble(kind) {
 }
 
 function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+
+// ================================================================ crew "bean" explorers (players)
+// Original Sky Crew design: a soft rounded bean body with the face right on it, big eyes, a tiny mouth,
+// noodle arms, stubby legs. Same 19-bone rig + clips as everyone else, plus extra floppy wobble.
+export const OUTFIT_PALETTE = [0x2f6fde, 0xe8453c, 0x2bb673, 0xf6b93b, 0x8e5bd9, 0xff7eb6, 0x1fb5c9, 0xff8a1a, 0x3b3f4a, 0xf3f0e6];
+export const CREW_SKINS = [0xffe0c4, 0xf1c27d, 0xe0ac69, 0xc68642, 0x9c6136, 0x70432a, 0xfff0e0];
+export const OUTFIT_NAMES = { captain: 'Captain uniform', attendant: 'Flight attendant', mechanic: 'Mechanic overalls', hoodie: 'Comfy hoodie', explorer: 'Explorer jacket', dino: 'Dino costume', astronaut: 'Space suit' };
+const HELMET = new THREE.MeshPhongMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.28, shininess: 120, specular: 0xffffff, depthWrite: false });
+const shade = (c, k) => _c.set(c).multiplyScalar(k).getHex();
+
+export function makeCrew(o = {}) {
+  o = { outfit: 'captain', hat: 'captain', color: 0, skin: 1, ...o };
+  const col = OUTFIT_PALETTE[o.color] ?? OUTFIT_PALETTE[0], skin = CREW_SKINS[o.skin] ?? CREW_SKINS[1];
+  const fit = o.outfit;
+  // --- proportions
+  const footH = 0.06, thigh = 0.14, shin = 0.13, hipY = footH + thigh + shin;
+  const y0 = hipY - 0.07, H = 1.13, rB = 0.31, rT = 0.27;
+  const d = { s: 1, g: 1, leg: thigh + shin, torso: 0.7, headR: 0.27, belly: rB, chest: rT, footH, hipY, thigh, shin, arm: 0.19, fore: 0.17, limbR: 0.052, legR: 0.078, hipW: 0.13 };
+  const J = {
+    hips: [0, hipY, 0], spine: [0, hipY + 0.24, 0], chest: [0, hipY + 0.46, 0], neck: [0, hipY + 0.62, 0], head: [0, hipY + 0.68, 0],
+  };
+  const shY = hipY + 0.5;
+  for (const [k, sx] of [['L', 1], ['R', -1]]) {
+    J[`shoulder.${k}`] = [sx * 0.16, shY, 0]; J[`arm.${k}`] = [sx * 0.29, shY, 0]; J[`forearm.${k}`] = [sx * 0.29, shY - d.arm, 0]; J[`hand.${k}`] = [sx * 0.29, shY - d.arm - d.fore, 0];
+    J[`thigh.${k}`] = [sx * d.hipW, hipY, 0]; J[`shin.${k}`] = [sx * d.hipW, hipY - thigh, 0]; J[`foot.${k}`] = [sx * d.hipW, footH, 0];
+  }
+  const radAt = (y) => { const t = Math.max(0, Math.min(1, (y - y0) / H)); const w = rB + (rT - rB) * t; return w * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(2 * t - 1), 2.6)), 1 / 2.6); };
+  const collarY = hipY + 0.6, faceY = hipY + 0.84, topY = y0 + H;
+  const parts = [];
+  // --- body bean: weights blend hips -> spine -> chest -> neck -> head going up (floppy top)
+  const prof = []; const N = 44;
+  for (let i = 0; i <= N; i++) { const t = i / N, y = y0 + t * H; prof.push(new THREE.Vector2(i === 0 ? 0.001 : i === N ? 0.001 : Math.max(0.01, radAt(y)), y)); }
+  const beanW = (x, y) => {
+    if (y < J.spine[1]) return blendY('hips', 'spine', hipY, J.spine[1])(x, y);
+    if (y < J.chest[1]) return blendY('spine', 'chest', J.spine[1], J.chest[1])(x, y);
+    if (y < J.neck[1]) return blendY('chest', 'neck', J.chest[1], J.neck[1])(x, y);
+    return blendY('neck', 'head', J.neck[1], J.head[1] + 0.06)(x, y);
+  };
+  const front = (z) => z < 0;
+  const inFace = (x, y, z) => front(z) && ((x / 0.2) ** 2 + ((y - faceY) / 0.2) ** 2) < 1; // the hood opening
+  const paint = (x, y, z) => {
+    if (fit === 'dino') { if (y >= collarY - 0.02 && inFace(x, y, z)) return skin; if (front(z) && ((x / 0.19) ** 2 + ((y - (hipY + 0.28)) / 0.27) ** 2) < 1) return shade(col, 1.35); return col; }
+    if (y >= collarY) return skin;
+    if (fit === 'astronaut') return Math.abs(y - (hipY + 0.4)) < 0.03 ? col : 0xf2f2f2;
+    if (y < hipY + 0.05 && fit !== 'mechanic' && fit !== 'dino') return fit === 'captain' ? 0x1b2a5c : fit === 'explorer' ? 0x6b5b3a : fit === 'attendant' ? 0x1d3557 : 0x3d5a80; // trousers band
+    if (fit === 'captain') {
+      if (front(z) && Math.abs(x) < 0.028 && y > collarY - 0.3 && y < collarY - 0.02) return col; // tie
+      if (front(z) && Math.abs(x) < 0.03 + (y - (collarY - 0.32)) * 0.35 && y > collarY - 0.32) return 0xffffff; // shirt V
+      if (front(z) && Math.abs(Math.abs(x) - 0.09) < 0.014 && Math.abs(((y - hipY) % 0.1) - 0.05) < 0.014 && y < collarY - 0.1) return 0xf5c542; // buttons
+      return Math.abs(y - (hipY + 0.07)) < 0.018 ? 0x101828 : 0x1b2a5c;
+    }
+    if (fit === 'attendant') { if (front(z) && Math.abs(x) < 0.02 + (y - (collarY - 0.22)) * 0.5 && y > collarY - 0.22) return 0xffffff; return Math.abs(y - (hipY + 0.2)) < 0.02 ? 0xf5c542 : col; }
+    if (fit === 'mechanic') {
+      if (front(z) && Math.abs(x) < 0.15 && y > hipY + 0.22 && y < collarY - 0.06) return shade(col, 1.15); // bib
+      if (front(z) && Math.abs(x - 0.06) < 0.045 && Math.abs(y - (hipY + 0.3)) < 0.04) return shade(col, 0.7); // pocket
+      if (Math.abs(Math.abs(x) - 0.12) < 0.022 && y > collarY - 0.12) return shade(col, 1.25); // straps
+      return y > collarY - 0.06 ? 0x9aa3ad : col;
+    }
+    if (fit === 'hoodie') { if (front(z) && Math.abs(x) < 0.15 && y > hipY + 0.12 && y < hipY + 0.3) return shade(col, 0.82); if (y < hipY + 0.11) return shade(col, 0.75); return col; }
+    if (fit === 'explorer') {
+      const kh = 0xc8a165;
+      if (front(z) && Math.abs(Math.abs(x) - 0.12) < 0.05 && Math.abs(y - (hipY + 0.42)) < 0.045) return 0xa9844c; // chest pockets
+      if (Math.abs(y - (hipY + 0.13)) < 0.022) return 0x5d4037; // belt
+      if (front(z) && Math.abs(x) < 0.012) return 0x8d6e3f; // zip
+      return kh;
+    }
+    return col;
+  };
+  parts.push(part(new THREE.LatheGeometry(prof, 36), col, 'chest', { paint, weights: beanW, scale: [1, 1, 0.92] }));
+  // --- outfit extras
+  const bodyCol = { captain: 0x1b2a5c, attendant: col, mechanic: col, hoodie: col, explorer: 0xc8a165, dino: col, astronaut: 0xf2f2f2 }[fit] ?? col;
+  if (fit === 'attendant') parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.85, 0.03, 6, 16), 0xf5c542, 'neck', { pos: [0, collarY - 0.02, 0], rot: [Math.PI / 2, 0, 0], scale: [1, 0.92, 1] }));
+  if (fit === 'attendant') parts.push(part(new THREE.CylinderGeometry(rB * 1.0, rB * 1.22, 0.16, 18, 1, true), col, 'hips', { pos: [0, hipY - 0.02, 0] }));
+  if (fit === 'explorer') { parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.88, 0.035, 6, 16), col, 'neck', { pos: [0, collarY - 0.02, 0], rot: [Math.PI / 2, 0, 0] })); parts.push(part(capsule(0.17, 0.2, 3, 10), 0x8d6e3f, 'chest', { pos: [0, hipY + 0.38, radAt(hipY + 0.38) * 0.95], scale: [1, 1, 0.55] })); }
+  if (fit === 'hoodie') { parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.9, 0.06, 6, 16), shade(col, 0.85), 'neck', { pos: [0, collarY, 0.03], rot: [Math.PI / 2 - 0.25, 0, 0] })); for (const sx of [-1, 1]) parts.push(part(capsule(0.008, 0.1, 2, 4), 0xffffff, 'chest', { pos: [sx * 0.04, collarY - 0.1, -radAt(collarY - 0.1) * 0.92] })); }
+  if (fit === 'mechanic') parts.push(part(new THREE.TorusGeometry(0.035, 0.012, 4, 10), 0xc0c0c0, 'hips', { pos: [-0.2, hipY + 0.05, -0.12], rot: [0, 0.6, 0] })); // wrench loop
+  if (fit === 'astronaut') { parts.push(part(new THREE.BoxGeometry(0.34, 0.4, 0.16), 0xb0b7c3, 'chest', { pos: [0, hipY + 0.38, radAt(hipY + 0.38) * 0.9] })); parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.95, 0.04, 6, 18), 0x9aa3ad, 'neck', { pos: [0, collarY, 0], rot: [Math.PI / 2, 0, 0] })); }
+  if (fit === 'dino') {
+    for (let i = 0; i < 6; i++) { const y = hipY + 0.1 + i * 0.16; parts.push(part(new THREE.ConeGeometry(0.05, 0.12, 5), shade(col, 1.3), i > 3 ? 'head' : 'chest', { pos: [0, y, radAt(y) * 0.92 + 0.03], rot: [Math.PI / 2 - 0.3, 0, 0], weights: beanW })); }
+    parts.push(part(new THREE.ConeGeometry(0.12, 0.45, 10), col, 'hips', { pos: [0, hipY + 0.02, rB + 0.12], rot: [Math.PI / 2 + 0.5, 0, 0] })); // tail
+    for (const sx of [-1, 1]) parts.push(part(new THREE.ConeGeometry(0.03, 0.06, 4), 0xffffff, 'head', { pos: [sx * 0.08, faceY + 0.2, -radAt(faceY + 0.2) * 0.95], rot: [Math.PI, 0, 0], weights: beanW })); // felt teeth on the hood
+  }
+  // --- arms (noodles) + mitten hands
+  const sleeve = { captain: 0x1b2a5c, attendant: col, mechanic: 0x9aa3ad, hoodie: col, explorer: 0xc8a165, dino: col, astronaut: 0xf2f2f2 }[fit] ?? col;
+  const handC = fit === 'astronaut' ? 0xffffff : fit === 'mechanic' ? 0x37474f : fit === 'dino' ? col : skin;
+  for (const [k, sx] of [['L', 1], ['R', -1]]) {
+    const a = J[`arm.${k}`], f = J[`forearm.${k}`], h = J[`hand.${k}`];
+    parts.push(part(capsule(d.limbR, d.arm * 0.95, 3, 8), sleeve, `arm.${k}`, { pos: [a[0], a[1] - d.arm / 2, a[2]] }));
+    parts.push(part(capsule(d.limbR * 0.95, d.fore * 0.9, 3, 8), fit === 'mechanic' ? skin : sleeve, `forearm.${k}`, { pos: [f[0], f[1] - d.fore / 2, f[2]], paint: (x, y) => (fit === 'captain' && y < f[1] - d.fore * 0.75 ? 0xf5c542 : fit === 'astronaut' && y < f[1] - d.fore * 0.75 ? col : fit === 'mechanic' ? skin : sleeve) }));
+    parts.push(part(sphere(0.07, 10, 8), handC, `hand.${k}`, { pos: [h[0], h[1] - 0.05, h[2]], scale: [0.85, 1, 1] }));
+    parts.push(part(sphere(0.03, 6, 5), handC, `hand.${k}`, { pos: [h[0] - sx * 0.035, h[1] - 0.03, h[2] - 0.04] }));
+    const t = J[`thigh.${k}`], sh = J[`shin.${k}`], ft = J[`foot.${k}`];
+    const pants = { captain: 0x1b2a5c, attendant: 0x1d3557, mechanic: col, hoodie: 0x3d5a80, explorer: 0x6b5b3a, dino: col, astronaut: 0xf2f2f2 }[fit] ?? 0x2b2d42;
+    const shoe = { captain: 0x111111, attendant: 0x111111, mechanic: 0x4e342e, hoodie: 0xffffff, explorer: 0x5d4037, dino: shade(col, 0.7), astronaut: 0x9aa3ad }[fit] ?? 0x2b2b33;
+    parts.push(part(capsule(d.legR, thigh * 0.8, 3, 8), pants, `thigh.${k}`, { pos: [t[0], t[1] - thigh / 2, t[2]] }));
+    parts.push(part(capsule(d.legR * 0.92, shin * 0.75, 3, 8), pants, `shin.${k}`, { pos: [sh[0], sh[1] - shin / 2 + 0.02, sh[2]] }));
+    parts.push(part(sphere(0.095, 12, 8), shoe, `foot.${k}`, { pos: [ft[0], ft[1] - 0.025, ft[2] - 0.04], scale: [0.9, 0.62, 1.4] }));
+  }
+  void bodyCol;
+  // --- hats (sit on the top of the bean)
+  const hat = fit === 'astronaut' ? 'none' : o.hat;
+  const tr = radAt(topY - 0.12) * 1.02, ht = topY - 0.1, hc = col;
+  const HP = (geo, c, opt) => part(geo, c, 'head', opt);
+  if (hat === 'captain') { parts.push(HP(new THREE.CylinderGeometry(tr * 1.12, tr * 0.98, 0.13, 18), 0x1b2a5c, { pos: [0, ht + 0.07, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 0.8, tr * 0.8, 0.015, 14, 1, false, Math.PI * 0.6, Math.PI * 0.8), 0x111111, { pos: [0, ht + 0.01, -tr * 0.25], rot: [0.22, 0, 0] })); parts.push(HP(new THREE.TorusGeometry(tr * 1.0, 0.012, 4, 18), 0xf5c542, { pos: [0, ht + 0.03, 0], rot: [Math.PI / 2, 0, 0] })); parts.push(HP(sphere(0.03, 8, 6), 0xf5c542, { pos: [0, ht + 0.08, -tr * 1.1], scale: [1, 1, 0.4] })); }
+  if (hat === 'pillbox') parts.push(HP(new THREE.CylinderGeometry(tr * 0.55, tr * 0.6, 0.1, 14), hc, { pos: [tr * 0.25, ht + 0.07, 0], rot: [0, 0, -0.25] }));
+  if (hat === 'beanie') { parts.push(HP(new THREE.SphereGeometry(tr * 1.06, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hc, { pos: [0, ht - 0.04, 0], paint: (x, y) => (Math.floor(y * 40) % 2 ? hc : 0xffffff) })); parts.push(HP(sphere(0.06, 8, 6), 0xffffff, { pos: [0, ht + tr * 1.02, 0] })); }
+  if (hat === 'cap') { parts.push(HP(new THREE.SphereGeometry(tr * 1.05, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hc, { pos: [0, ht - 0.03, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 0.8, tr * 0.8, 0.015, 14, 1, false, Math.PI * 0.6, Math.PI * 0.8), hc, { pos: [0, ht - 0.02, -tr * 0.55], rot: [0.1, 0, 0] })); }
+  if (hat === 'bucket') { parts.push(HP(new THREE.CylinderGeometry(tr * 0.85, tr * 1.05, 0.14, 16), 0xc8a165, { pos: [0, ht + 0.04, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 1.45, tr * 1.45, 0.015, 18), 0xb08d55, { pos: [0, ht - 0.02, 0] })); parts.push(HP(new THREE.TorusGeometry(tr * 0.98, 0.015, 4, 16), hc, { pos: [0, ht + 0.0, 0], rot: [Math.PI / 2, 0, 0] })); }
+  if (hat === 'hardhat') { parts.push(HP(new THREE.SphereGeometry(tr * 1.1, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), 0xffd23f, { pos: [0, ht - 0.03, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 1.3, tr * 1.3, 0.015, 18), 0xffd23f, { pos: [0, ht - 0.03, -0.02] })); }
+  if (hat === 'party') parts.push(HP(new THREE.ConeGeometry(tr * 0.45, 0.3, 12), hc, { pos: [tr * 0.15, ht + 0.16, 0], rot: [0, 0, -0.2], paint: (x, y) => (Math.floor(y * 30) % 2 ? hc : 0xffffff) }));
+  if (hat === 'tophat') { parts.push(HP(new THREE.CylinderGeometry(tr * 0.7, tr * 0.7, 0.3, 16), 0x222222, { pos: [0, ht + 0.16, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 1.15, tr * 1.15, 0.015, 18), 0x222222, { pos: [0, ht + 0.01, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 0.71, tr * 0.71, 0.04, 16), hc, { pos: [0, ht + 0.04, 0] })); }
+  if (hat === 'headphones') { parts.push(HP(new THREE.TorusGeometry(radAt(faceY + 0.08) * 1.04, 0.022, 6, 18, Math.PI), 0x2d3436, { pos: [0, faceY + 0.06, 0], rot: [0, Math.PI / 2, 0] })); for (const sx of [-1, 1]) parts.push(HP(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 12), hc, { pos: [sx * radAt(faceY) * 1.02, faceY, 0], rot: [0, 0, Math.PI / 2] })); }
+  // --- assemble (same skeleton setup as makeCharacter)
+  const geo = mergeGeometries(parts, false); for (const p2 of parts) p2.dispose(); geo.computeBoundingSphere();
+  const bones = BONES.map((n) => { const b = new THREE.Bone(); b.name = n; return b; });
+  for (const n of BONES) { const b = bones[BI[n]], p2 = PARENT[n]; const wp = J[n], pp = p2 ? J[p2] : [0, 0, 0]; b.position.set(wp[0] - pp[0], wp[1] - pp[1], wp[2] - pp[2]); if (p2) bones[BI[p2]].add(b); }
+  const mesh = new THREE.SkinnedMesh(geo, MAT); mesh.castShadow = true; mesh.frustumCulled = false;
+  const g = new THREE.Group(); g.add(bones[0]); g.add(mesh); g.updateMatrixWorld(true); mesh.bind(new THREE.Skeleton(bones));
+  // face right on the bean: big eyes, tiny mouth (built at the bean radius so it hugs the surface)
+  const fr = radAt(faceY) * 0.94;
+  const face = buildFace({ headR: fr }, { eyeSize: 0.3 });
+  face.userData.brows.forEach((b) => b.scale.multiplyScalar(0.8));
+  face.position.set(0, faceY - J.head[1], -0.035); bones[BI.head].add(face);
+  if (fit === 'astronaut') { const hel = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 14), HELMET); hel.position.set(0, faceY - J.head[1] + 0.04, 0); hel.renderOrder = 2; bones[BI.head].add(hel); }
+  const mixer = new THREE.AnimationMixer(g);
+  d.headR = fr;
+  g.userData = { mesh, bones, boneByName: Object.fromEntries(bones.map((b) => [b.name, b])), face, dims: d, mixer, clips: clipsFor(d), actions: {}, current: null, expr: null, t: Math.random() * 10, look: { crew: o }, oneShot: null, wob: { k: 1.8 }, crew: true };
+  setExpression(g, 'neutral'); play(g, 'idle', 0);
+  return g;
+}

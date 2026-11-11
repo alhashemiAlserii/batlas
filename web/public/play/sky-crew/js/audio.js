@@ -93,6 +93,9 @@ export class Audio {
     if (!this.ctx) return;
     switch (name) {
       case 'ding': this.tone(659, 1.4, { vol: 0.18, type: 'sine' }); this.tone(1318, 0.8, { vol: 0.04 }); this.tone(523, 1.8, { vol: 0.18, at: 0.45 }); this.tone(1046, 1.0, { vol: 0.04, at: 0.45 }); break;
+      case 'beep': this.tone(880, 0.12, { type: 'square', vol: 0.06 }); this.tone(1320, 0.18, { type: 'square', vol: 0.06, at: 0.14 }); break; // scanner: all clear
+      case 'boop': for (let i = 0; i < 3; i++) this.tone(i % 2 ? 520 : 760, 0.16, { type: 'triangle', vol: 0.08, at: i * 0.18 }); break; // scanner: random check
+      case 'stamp': this.tone(140, 0.12, { type: 'triangle', vol: 0.2 }); this.tone(90, 0.08, { type: 'square', vol: 0.05, at: 0.02 }); break; // desk stamp
       case 'click': this.tone(1800, 0.04, { type: 'square', vol: 0.04 }); break;
       case 'pickup': this.tone(420, 0.12, { type: 'triangle', vol: 0.12, to: 720 }); this.burst(0.08, { vol: 0.06, freq: 2500, type: 'bandpass' }); break;
       case 'drop': this.tone(140, 0.18, { vol: 0.25, to: 55 }); this.burst(0.12, { vol: 0.12, freq: 500 }); break;

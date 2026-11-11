@@ -86,6 +86,7 @@ let seedN = 100;
 /** Fly a whole flight through the host's world snapshots, with the server clock advanced by `airSec`. */
 async function fly(host: any, airSec: number, res: any, lost = 0) {
   const seed = ++seedN;
+  host.c.send({ t: 'airport', skip: true }); // these tests are about pay; terminal.test.ts covers the airport
   host.c.send(world(seed, 'boarding')); host.c.send(world(seed, 'taxi'));
   await new Promise((r) => setTimeout(r, 50));
   host.c.send(world(seed, 'climb'));
@@ -154,7 +155,7 @@ describe('salary (server-computed from its own room tracking)', () => {
     const host = await player('PLAYER'), late = await player('PLAYER');
     const code = await room(host);
     const seed = ++seedN;
-    host.c.send(world(seed, 'boarding')); host.c.send(world(seed, 'climb'));
+    host.c.send({ t: 'airport', skip: true }); host.c.send(world(seed, 'boarding')); host.c.send(world(seed, 'climb'));
     await new Promise((r) => setTimeout(r, 50));
     late.c.send({ t: 'join', code }); await late.c.wait((m: any) => m.t === 'room' && m.you);
     clock += 200_000;

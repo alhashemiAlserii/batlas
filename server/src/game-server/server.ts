@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { SiteBridge, VerifiedUser } from './bridge.js';
 import { canActOn, ITEM_TIERS, type ItemTier, type Permission } from '../lib/permissions.js';
+import { checkStep, newTerm, type TermState } from './terminal.js';
 import { DEV_ITEMS, DEV_CATEGORIES, devItem, MAX_EQUIPPED, WEATHERS, SCENARIOS, TELEPORT_SPOTS, NPC_ACTIONS, ROOM_EVENTS, DIFFICULTIES, MUTE_MINUTES_MAX, BAN_MINUTES_MAX } from './catalog.js';
 import { envMaintenance, MAINTENANCE_MESSAGE, type MaintenanceCheck } from './maintenance.js';
 
@@ -57,6 +58,7 @@ interface Client {
   outfit: Outfit;
   lastOutfit: number;
   klass: string | null; // class picked for the next flight (ownership checked with the website)
+  term: TermState; // pre-flight airport progress (server truth)
 }
 
 interface RoomConfig { difficulty: (typeof DIFFICULTIES)[number]; payout: number; maxPlayers: number }
@@ -77,6 +79,7 @@ interface Room {
   seq: number;
   flight: Flight | null; // server-side record of the current flight (salaries)
   flightSeq: number;
+  airport: boolean; // walk through the pre-flight terminal (host can skip it for quick rounds)
 }
 
 type Send = (c: Client, msg: unknown) => void;
@@ -127,9 +130,9 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   const send: Send = (c, msg) => {
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit, klass: c.klass });
+  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit, klass: c.klass, term: c.term.step });
   // Hidden Developers are left out of everyone else's player list.
-  const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, hour: r.hour, locked: r.locked, config: r.config, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
+  const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, hour: r.hour, locked: r.locked, config: r.config, airport: r.airport, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
   const broadcastRoom = (r: Room, except?: Client) => { for (const c of r.clients.values()) if (c !== except) send(c, roomInfo(r, c)); };
   /** Developer rank, as verified by the website for this connection's game token (never client claims). */
   const isDev = (c: Client) => !!c.user && c.user.role === 'DEVELOPER';
@@ -189,6 +192,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     c.joinedAt = Date.now();
     r.clients.set(c.cid, c);
     c.room = r;
+    c.term = newTerm(now());
     send(c, { ...roomInfo(r, c), you: c.cid, hidden: c.hidden });
     if (!c.hidden) broadcast(r, { t: 'joined', player: publicPlayer(c) }, c);
     broadcastRoom(r, c);
@@ -257,8 +261,10 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     f.paid = true;
     const sal = salaryFor(f, w, r.config.payout);
     const present = [...r.clients.values()].filter((o) => o.user && !o.hidden);
-    const crew = present.filter((o) => f.crew.get(o.cid) === o.user!.userId);
-    for (const o of present) if (!crew.includes(o)) send(o, { t: 'salary', amount: 0, reason: 'You joined after takeoff, so this flight is not on your payslip.' });
+    const skipped = present.filter((o) => f.unboarded?.has(o.user!.userId));
+    for (const o of skipped) send(o, { t: 'salary', amount: 0, reason: 'You skipped the airport (no boarding pass), so this flight is not on your payslip.' });
+    const crew = present.filter((o) => f.crew.get(o.cid) === o.user!.userId && !skipped.includes(o));
+    for (const o of present) if (!crew.includes(o) && !skipped.includes(o)) send(o, { t: 'salary', amount: 0, reason: 'You joined after takeoff, so this flight is not on your payslip.' });
     if (sal.rejected || !crew.length) {
       for (const o of crew) send(o, { t: 'salary', amount: 0, reason: `No salary: ${sal.rejected ?? 'no crew'}.`, facts: sal.facts });
       const host = r.clients.get(r.hostCid);
@@ -437,6 +443,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
           if (target && target !== c) { const g = canActOn(actor(c), actor(target)); if (!g.ok) return g.reason; who = target; }
         }
         if (p) p = [p[0] + 0.8, p[1], p[2]]; // land beside them, not inside them
+        if (isDev(c) && who.term.step !== 'boarded') { who.term = { step: 'boarded', at: now() }; void audit(c, 'terminal.dev_skip', {}, who === c ? undefined : who); broadcastRoom(r!); } // the Developer teleports past the airport
         fx({ cid: who.cid, to, p }, {});
         await audit(c, 'teleport', { to: to ?? 'player', mode: args.toPlayer ? 'to_player' : args.bring ? 'bring' : 'spot' }, who === c ? (args.toPlayer ? other(args.toPlayer) : undefined) : who);
         return null;
@@ -556,7 +563,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         }
         c.user = u; // the ONLY source of name/rank/permissions
         if (u.outfit) c.outfit = u.outfit;
-        send(c, { t: 'welcome', you: { cid: c.cid, username: u.username, displayName: u.displayName, role: u.role, permissions: u.permissions, avatarUrl: u.avatarUrl } });
+        send(c, { t: 'welcome', you: { cid: c.cid, username: u.username, displayName: u.displayName, role: u.role, permissions: u.permissions, avatarUrl: u.avatarUrl, outfit: c.outfit, balance: u.balance ?? 0 } });
       })();
       return;
     }
@@ -568,7 +575,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         return send(c, { t: 'pong', at: m.at });
       case 'create': {
         { const mm = isDev(c) ? null : await maintenanceMsg(); if (mm) return send(c, { t: 'maintenance', message: mm }); }
-        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0, flight: null, flightSeq: 0 };
+        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0, flight: null, flightSeq: 0, airport: true };
         rooms.set(room.code, room);
         log(`room ${room.code} created by ${c.user.username}`);
         return joinRoom(c, room, { created: true });
@@ -623,10 +630,22 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         if (m.w && typeof m.w === 'object') {
           r.route = typeof m.w.route === 'string' ? m.w.route.slice(0, 8) : r.route; r.phase = typeof m.w.ph === 'string' ? m.w.ph.slice(0, 16) : r.phase;
           const seed = Number(m.w.seed);
-          if (Number.isFinite(seed) && (!r.flight || r.flight.seed !== seed || (r.flight.paid && m.w.ph === 'boarding'))) r.flight = newFlight(r.code, seed, ++r.flightSeq);
+          if (Number.isFinite(seed) && (!r.flight || r.flight.seed !== seed || (r.flight.paid && m.w.ph === 'boarding'))) {
+            r.flight = newFlight(r.code, seed, ++r.flightSeq);
+            for (const o of r.clients.values()) o.term = newTerm(now()); // a new flight: everyone starts at the terminal entrance again
+            broadcastRoom(r);
+          }
           if (r.flight) {
             const crewNow = new Map([...r.clients.values()].filter((o) => o.user && !o.hidden).map((o) => [o.cid, o.user!.userId] as [string, number]));
-            if (trackSnapshot(r.flight, m.w, now(), crewNow) === 'results') void paySalaries(r, r.flight, m.w);
+            const wasAirborne = !!r.flight.airborneAt;
+            const res = trackSnapshot(r.flight, m.w, now(), crewNow);
+            if (!wasAirborne && r.flight.airborneAt && r.airport) {
+              // took off: anyone who did not board through the terminal is not on this flight's payslip
+              const skipped = [...r.clients.values()].filter((o) => o.user && !o.hidden && o.term.step !== 'boarded');
+              r.flight.unboarded = new Set(skipped.map((o) => o.user!.userId));
+              if (skipped.length) void audit(c, 'terminal.depart_unboarded', { flight: r.flight.key, players: skipped.map((o) => o.user!.username) });
+            }
+            if (res === 'results') void paySalaries(r, r.flight, m.w);
           }
         }
         return broadcast(r, { t: 'world', w: m.w }, c);
@@ -649,6 +668,25 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         c.outfit = o;
         if (r && !c.hidden) broadcast(r, { t: 'outfit', cid: c.cid, outfit: o });
         return send(c, { t: 'outfit', cid: c.cid, outfit: o });
+      }
+      case 'term': {
+        // airport step: in order, at the right desk, at human speed (see terminal.ts)
+        if (!r || c.hidden) return;
+        if (!r.airport) return send(c, { t: 'error', code: 'term_off', message: 'The airport is skipped this round.' });
+        if (r.phase && r.phase !== 'boarding') return send(c, { t: 'error', code: 'term_late', message: 'The plane has already left the gate.' });
+        const e = checkStep(c.term, m.step, vec3(c.state?.p), now());
+        if (e) { if (e.code === 'term_order' || e.code === 'term_bad') void audit(c, 'terminal.denied', { step: String(m.step).slice(0, 16), at: c.term.step, reason: e.code }); return send(c, { t: 'error', ...e }); }
+        c.term = { step: m.step, at: now() };
+        send(c, { t: 'term', cid: c.cid, step: m.step });
+        return broadcastRoom(r);
+      }
+      case 'airport': {
+        // host (or the Developer) chooses whether this round walks through the terminal
+        if (!r) return;
+        if (r.hostCid !== c.cid && !isDev(c)) return send(c, { t: 'error', code: 'not_host', message: 'Only the host can change that.' });
+        if (r.phase && r.phase !== 'boarding') return send(c, { t: 'error', code: 'term_late', message: 'The plane has already left the gate.' });
+        r.airport = !m.skip;
+        return broadcastRoom(r);
       }
       case 'class': {
         // class pick for the next flight: must be OWNED (checked with the website) and picked before takeoff
@@ -702,7 +740,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   }
 
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
-    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0, outfit: { ...DEFAULT_OUTFIT }, lastOutfit: 0, klass: null };
+    const c: Client = { cid: crypto.randomBytes(6).toString('base64url'), ws, user: null, room: null, state: null, crew: null, hidden: false, joinedAt: 0, bucket: { tokens: 120, last: Date.now() }, authed: null, equipped: new Set(), lastUse: new Map(), useCounts: new Map(), mutedUntil: 0, frozen: false, lastChat: 0, outfit: { ...DEFAULT_OUTFIT }, lastOutfit: 0, klass: null, term: newTerm(Date.now()) };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4003, 'auth_timeout'); }, 10_000);
     ws.on('message', (data) => {

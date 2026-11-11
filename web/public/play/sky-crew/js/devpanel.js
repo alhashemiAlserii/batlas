@@ -3,13 +3,13 @@
 import { el, rankBadge } from './ui.js';
 
 const $ = (s) => document.querySelector(s);
-const state = { tab: null, q: '', cat: 'All', bc: '', hour: 13 };
+const state = { tab: null, q: '', cat: 'All', bc: '', hour: 13, item: {} };
 
 const WEATHER = [['clear', '☀ Clear'], ['cloudy', '☁ Cloudy'], ['rain', '🌧 Rain'], ['storm', '⛈ Storm'], ['fog', '🌫 Fog']];
 const SCEN = [['engine_failure', 'Engine failure'], ['turbulence', 'Severe turbulence'], ['cabin_pressure', 'Cabin pressure'], ['emergency_landing', 'Emergency landing']];
 const SPOTS = [['cockpit', '🧑‍✈️ Cockpit'], ['cargo', '📦 Cargo hold'], ['cabin', '💺 Cabin'], ['galley', '☕ Galley (rear)'], ['apron', '🛫 Apron']];
 
-export function buildPanel({ you, room, myCid, send, live, inv, gear, flight }) {
+export function buildPanel({ you, room, myCid, send, live, inv, gear, flight, catalog = [] }) {
   const P = new Set(you.permissions || []);
   const dev = you.role === 'DEVELOPER';
   const btn = (label, fn, cls = '', extra = {}) => el('button', { type: 'button', class: cls, onclick: fn, ...extra }, label);
@@ -75,6 +75,15 @@ export function buildPanel({ you, room, myCid, send, live, inv, gear, flight }) 
         P.has('teleport') ? btn('Go to', () => send('teleport', { toPlayer: p.cid }), '', { 'data-act': 'goto' }) : null,
         P.has('teleport') && !prot ? btn('Bring', () => send('teleport', { bring: p.cid }), '', { 'data-act': 'bring' }) : null));
   }) : [el('div', { class: 'muted small' }, 'No other players in the room.')]))]);
+  T('wallet', '💳 Wallet', dev && P.has('dev.commands'), () => [sec('Credits & shop items (Developer only, logged)', ...((room?.players || []).map((p) => {
+    const sel = el('select', { 'data-wallet-item': p.username }, ...catalog.filter((i) => i.price > 0).map((i) => el('option', { value: i.key }, `${i.name} (${i.kind})`)));
+    if (state.item[p.cid]) sel.value = state.item[p.cid];
+    sel.addEventListener('change', () => { state.item[p.cid] = sel.value; });
+    return el('div', { class: 'admplayer', 'data-wallet': p.username },
+      el('div', { class: 'admrow' }, rankBadge(p.role), el('span', {}, `${p.displayName || p.username}${p.cid === myCid ? ' (you)' : ''}`), p.role === 'DEVELOPER' ? el('span', { class: 'muted small' }, 'owns everything') : null),
+      grid(...[100, 500, 1000].map((n) => btn(`+₵${n}`, () => send('wallet', { cid: p.cid, credits: n }), 'gold', { 'data-credits': String(n) })), btn('−₵500', () => send('wallet', { cid: p.cid, credits: -500 }), 'danger', { 'data-credits': '-500' })),
+      el('div', { class: 'setrow' }, sel, btn('Give', () => send('wallet', { cid: p.cid, item: sel.value }), '', { 'data-act': 'give' }), btn('Take away', () => send('wallet', { cid: p.cid, item: sel.value, remove: true }), 'danger', { 'data-act': 'take' })));
+  })))]);
   T('teleport', '🌀 Teleport', P.has('teleport'), () => [sec('Teleport me to', grid(...SPOTS.map(([id, l]) => btn(l, () => send('teleport', { to: id }), '', { 'data-spot': id })))),
     others.length ? sec('Teleport me to a player', grid(...others.map((p) => btn(p.username, () => send('teleport', { toPlayer: p.cid }))))) : null]);
   T('npc', '🧍 NPCs', P.has('npc.control'), () => [sec(`Passengers (${flight?.pax ?? '?'} aboard)`, grid(
@@ -113,7 +122,7 @@ export function buildPanel({ you, room, myCid, send, live, inv, gear, flight }) 
   if (!visible.some((t) => t.id === state.tab)) state.tab = visible[0].id;
   head.replaceChildren(...visible.map((t) => btn(t.label, () => { state.tab = t.id; rerender(); }, t.id === state.tab ? 'on' : '', { 'data-tab': t.id, role: 'tab', 'aria-selected': String(t.id === state.tab) })));
   body.replaceChildren(...[].concat(visible.find((t) => t.id === state.tab).render()).filter(Boolean));
-  function rerender() { buildPanel({ you, room, myCid, send, live, inv, gear, flight }); }
+  function rerender() { buildPanel({ you, room, myCid, send, live, inv, gear, flight, catalog }); }
 }
 const LV = { PLAYER: 0, TRUSTED: 1, ADMIN: 2, DEVELOPER: 3 };
 const rankAbove = (a, b) => (LV[a] ?? 0) > (LV[b] ?? 0);

@@ -11,6 +11,7 @@ export interface Flight {
   airborneAt: number | null; landedAt: number | null; resultsAt: number | null;
   crew: Map<string, number>; // cid -> userId, aboard at takeoff
   paxBoarded: number; paxLost: number; paid: boolean; phases: string[];
+  unboarded?: Set<number>; // userIds that took off without boarding through the terminal
 }
 export function newFlight(roomCode: string, seed: number, seq: number): Flight {
   return { key: `${roomCode}:${seed}:${seq}`, seed, route: null, airborneAt: null, landedAt: null, resultsAt: null, crew: new Map(), paxBoarded: 0, paxLost: 0, paid: false, phases: [] };

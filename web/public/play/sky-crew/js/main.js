@@ -1,10 +1,14 @@
 // Sky Crew v0 — bootstrap, input, player controller, camera, networking glue.
+import { api } from '/js/common.js';
 import * as THREE from '../../vendor/three.module.js';
 import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, setRoute, Z_TAIL, Z_NOSE } from './world.js';
 import { Sim, ITEM_DEFS } from './sim.js';
 import { stepFlight, KT, FT, distTo, relBearing, glidePath } from './flight.js';
 import { Audio } from './audio.js';
-import { makeCharacter, animateCharacter, nameTag, RANK_COLORS } from './characters.js';
+import { makeCrew, animateCharacter, nameTag, RANK_COLORS } from './characters.js';
+import { buildTerminal, TERM_SPAWN, STATIONS, stepIdx } from './terminal.js';
+import { wallet, loadWallet, renderShop, fmtC, owns } from './shop.js';
+import { CLASS_INFO, turbulenceFactor, glideWindow, serveReach, fixReach, carryLimit, tailwind, PERK } from './perks.js';
 import { Net } from './net.js';
 import * as UI from './ui.js';
 import { Gadgets } from './gadgets.js';
@@ -33,6 +37,7 @@ const env = buildWorld(scene, { quality });
 if (Q.shadow) { env.sun.castShadow = true; env.sun.shadow.mapSize.set(Q.shadow, Q.shadow); }
 const SUN_OFF = new THREE.Vector3(350, 550, 250).normalize().multiplyScalar(600);
 const ship = buildPlane();
+const terminal = buildTerminal(ship); // pre-flight airport behind the parked plane (before the physics world is built)
 // cabin key light: soft shadows from seats/bins/people (1024 map on iPad 'medium', 2048 on desktop 'high')
 if (Q.shadow) { const k = ship.cabin.key; k.castShadow = true; k.shadow.mapSize.set(Q.shadow, Q.shadow / 2); if (quality !== 'high') k.shadow.autoUpdate = false; }
 let keyShadowT = 0; // medium (iPad): the cabin shadow map is refreshed at ~12 Hz instead of every frame
@@ -44,7 +49,7 @@ addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); ca
 const eventsConfig = await (await fetch('/play/sky-crew/events.json')).json();
 const net = new Net();
 const sim = new Sim({ ship, eventsConfig, onToast: (m, k, sfx) => { UI.toast(m, k); playSfx(sfx || (k === 'warn' ? 'warn' : null)); if (net.inRoom && net.isHost) net.send({ t: 'event', e: { toast: m, kind: k, sfx } }); } });
-const SFX = new Set(['ding', 'click', 'warn', 'gear', 'crash', 'serve', 'fix']);
+const SFX = new Set(['ding', 'click', 'warn', 'gear', 'crash', 'serve', 'fix', 'beep', 'boop', 'stamp']);
 function playSfx(name) { if (name && SFX.has(name) && playing) audio.play(name); }
 sim.onRoute = () => refreshRouteUi();
 
@@ -52,10 +57,13 @@ sim.onRoute = () => refreshRouteUi();
 const R = 0.3, H = 1.7, EYE = 1.58, STEP = 0.45;
 const SPAWN = new THREE.Vector3(7.5, -GEAR_H, 17.5); // on the apron, behind and right of the aircraft, facing the rear door
 const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, moving: false, frozen: false, flying: false };
-let myAvatar = makeCharacter({ uniform: 'cabin' });
+const DEFAULT_OUTFIT = { outfit: 'captain', hat: 'captain', color: 0, skin: 1 };
+let myOutfit = (() => { try { return { ...DEFAULT_OUTFIT, ...JSON.parse(localStorage.getItem('skycrew.outfit') || 'null') }; } catch { return { ...DEFAULT_OUTFIT }; } })();
+let myClass = null; // class for the next flight (server-checked in rooms)
+let myAvatar = makeCrew(myOutfit);
 ship.plane.add(myAvatar);
 let myCrew = null; // lobby pick: pilot | copilot | cabin | cargo (solo: null = do everything)
-function dressMe() { ship.plane.remove(myAvatar); myAvatar = makeCharacter({ uniform: myCrew || 'pilot', hair: 'short' }); ship.plane.add(myAvatar); if (gadgets) gadgets.rebuild(myId()); }
+function dressMe() { ship.plane.remove(myAvatar); myAvatar = makeCrew(myOutfit); ship.plane.add(myAvatar); if (gadgets) gadgets.rebuild(myId()); }
 let gadgets = null; // Developer gadgets (created once the remote-player table exists)
 let myCid = 'solo', myRole = null, playing = false, paused = false, seenSeed = sim.seed, resultsShown = false;
 const myId = () => (net.inRoom ? net.cid : 'solo');
@@ -100,7 +108,7 @@ addEventListener('mousemove', (e) => {
 });
 document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && playing && !paused && !overlayOpen()) setPaused(true); });
 function look(dx, dy, s) { me.yaw -= dx * s; me.pitch = Math.max(-1.45, Math.min(1.45, me.pitch - dy * s)); }
-const overlayOpen = () => !$('#results').classList.contains('hidden') || !$('#admin').classList.contains('hidden') || !$('#chatBox').classList.contains('hidden');
+const overlayOpen = () => !$('#shop').classList.contains('hidden') || !$('#results').classList.contains('hidden') || !$('#admin').classList.contains('hidden') || !$('#chatBox').classList.contains('hidden');
 
 // touch: joystick + look + buttons
 function setupTouch() {
@@ -139,7 +147,9 @@ if (isTouch) setupTouch();
 
 // ---------------- collision (plane-local AABBs) ----------------
 function solids() {
-  return ship.colliders.filter((c) => !(c.tag === 'ground' && !sim.groundOn) && !(c.tag && c.tag.endsWith(':open')));
+  const ta = terminalActive(), si = stepIdx(myStep());
+  return ship.colliders.filter((c) => !(c.tag === 'ground' && !sim.groundOn) && !(c.tag && c.tag.endsWith(':open'))
+    && !(c.tag === 'term:arch' && (!ta || si >= 2 || termLocal.bag)) && !(c.tag === 'term:gate' && (!ta || si >= 3)));
 }
 function overlaps(p, c, hgt = H) {
   return p.x + R > c.min[0] && p.x - R < c.max[0] && p.y + hgt > c.min[1] && p.y < c.max[1] && p.z + R > c.min[2] && p.z - R < c.max[2];
@@ -236,21 +246,23 @@ function findTarget() {
     if (p.state !== 'seated' || !p.request) continue;
     const head = p.mesh.position.clone(); head.y += 1.1;
     const ok = p.request === 'complaint' ? !held : held && held.type === p.request;
-    consider(head, 2.6, { kind: 'serve', pax: p, ok, prio: 0.7, label: p.request === 'complaint' ? (held ? 'Hands full: put it down to talk' : 'Calm the passenger down') : ok ? `Give the ${ITEM_DEFS[p.request].label}` : `Wants: ${ITEM_DEFS[p.request].label}` });
+    consider(head, serveReach(classOf(myId())), { kind: 'serve', pax: p, ok, prio: 0.7, label: p.request === 'complaint' ? (held ? 'Hands full: put it down to talk' : 'Calm the passenger down') : ok ? `Give the ${ITEM_DEFS[p.request].label}` : `Wants: ${ITEM_DEFS[p.request].label}` });
   }
   if (!held) for (const p of sim.pax) {
     if (p.state === 'lost' || p.state === 'carried' || p.state === 'thrown') continue;
     const chest = p.mesh.position.clone(); chest.y += p.state === 'seated' ? 0.7 : 1.0;
     consider(chest, 2.0, { kind: 'grabPax', pax: p, prio: 2.2, label: 'Pick up the passenger (they will hate it)' });
   }
-  if (!held) for (const it of sim.items.values()) { if (!it.heldBy && (!ITEM_DEFS[it.type].gadget || net.you?.role === 'DEVELOPER')) consider(it.mesh.position, 2.4, { kind: 'grab', item: it, label: ITEM_DEFS[it.type].gadget ? `Equip ${ITEM_DEFS[it.type].label.replace(' case', '')}` : `Pick up ${ITEM_DEFS[it.type].label}` }); }
+  const stack = held && canStack(myId(), heldBy(myId()));
+  if (!held || stack) for (const it of sim.items.values()) { if (stack && !ITEM_DEFS[it.type].bag) continue; if (!it.heldBy && (!ITEM_DEFS[it.type].gadget || net.you?.role === 'DEVELOPER')) consider(it.mesh.position, 2.4, { kind: 'grab', item: it, label: ITEM_DEFS[it.type].gadget ? `Equip ${ITEM_DEFS[it.type].label.replace(' case', '')}` : `Pick up ${ITEM_DEFS[it.type].label}` }); }
   for (const ip of ship.interact) {
+    if (ip.term) { const tt = termTarget(ip, held); if (tt) consider(ip.pos, 2.4, tt); continue; }
     const t = { ...ip };
     if (ip.kind === 'door') t.label = `${ship.doors[ip.door].open ? 'Close' : 'Open'} the ${ip.label}`;
     if (ip.kind === 'dispense' && held) continue;
     if (ip.kind === 'pilot') { const pc = net.room?.pilotCid; if (pc && pc !== myId()) t.label = 'Someone is flying'; }
     if (ip.kind === 'copilot' && copilotTaken()) t.label = 'The co-pilot seat is taken';
-    consider(ip.pos, ip.kind === 'pilot' || ip.kind === 'copilot' ? 2.2 : 1.9, ip.kind === 'pilot' || ip.kind === 'copilot' ? { ...t, prio: 0.6 } : t);
+    consider(ip.pos, ip.kind === 'pilot' || ip.kind === 'copilot' ? 2.2 : ip.kind === 'panel' && classOf(myId()) === 'mechanic' ? PERK.mechReach : 1.9, ip.kind === 'pilot' || ip.kind === 'copilot' ? { ...t, prio: 0.6 } : t);
   }
   if (!best && held) return { kind: 'drop', label: `Put down the ${ITEM_DEFS[held.type].label}` };
   return best;
@@ -259,6 +271,7 @@ function interact() {
   const t = findTarget(), held = heldItem();
   if (!t) return;
   if (t.kind === 'leave') return leaveSeat();
+  if (t.kind.startsWith('term_')) return termInteract(t);
   if (t.kind === 'grab' && ITEM_DEFS[t.item.type].gadget) { audio.play('pickup'); net.admin('equip', { item: t.item.type }).then(() => act({ k: 'grab', id: t.item.id })).catch((e) => UI.toast(e.message, 'warn')); return; }
   if (t.kind === 'grab') { audio.play('pickup'); act({ k: 'grab', id: t.item.id }); return; }
   if (t.kind === 'drop') return dropHeld(0.9, 0);
@@ -284,7 +297,7 @@ function dropHeld(dist, throwSpeed) {
     p.z = Math.max(Z_NOSE + 0.4, Math.min(Z_TAIL - 0.4, p.z));
     p.y = Math.min(p.y, CEIL - 0.35);
   }
-  const v = dir.clone().multiplyScalar(throwSpeed); v.y += throwSpeed ? 1.5 : 0;
+  const v = dir.clone().multiplyScalar(throwSpeed * (classOf(myId()) === 'baggage' && ITEM_DEFS[held.type].bag ? PERK.bagThrow : 1)); v.y += throwSpeed ? 1.5 : 0;
   audio.play('drop');
   act({ k: 'drop', id: held.id, p: [p.x, p.y, p.z], v: [v.x, v.y, v.z] });
 }
@@ -317,6 +330,22 @@ function act(a) {
   applyAct(myId(), a);
 }
 const holderOf = (cid) => [...sim.items.values()].find((i) => i.heldBy === cid);
+const heldBy = (cid) => [...sim.items.values()].filter((i) => i.heldBy === cid);
+/** A player's class: ONLY what the game server put in the room list (it checked ownership); solo = my local pick. */
+function classOf(cid) {
+  if (net.inRoom) return net.room?.players.find((p) => p.cid === cid)?.klass || null;
+  return cid === myId() ? myClass : null;
+}
+function crewInfo() {
+  const out = [{ cid: myId(), cls: classOf(myId()), x: me.pos.x, y: me.pos.y, z: me.pos.z, seated: me.mode !== 'walk' }];
+  for (const [cid, r] of remotes) out.push({ cid, cls: classOf(cid), x: r.mesh.position.x, y: r.mesh.position.y, z: r.mesh.position.z, seated: r.mode === 'pilot' || r.mode === 'copilot' });
+  return out;
+}
+const pilotCid = () => (net.inRoom ? net.room?.pilotCid : me.mode === 'pilot' ? myId() : null);
+sim.crewInfo = crewInfo;
+sim.pilotClass = () => { const c = pilotCid(); return c ? classOf(c) : null; };
+/** Baggage Master: a second bag on top of the first (bags only). */
+const canStack = (cid, held) => held.length > 0 && held.length < carryLimit(classOf(cid)) && held.every((i) => ITEM_DEFS[i.type].bag);
 function applyAct(cid, a) {
   if (!a || typeof a !== 'object') return;
   switch (a.k) {
@@ -324,7 +353,8 @@ function applyAct(cid, a) {
       const it = sim.items.get(String(a.id));
       // gadget cases: only a server-verified Developer (rank comes from the server's room list) can take one; it turns into equipped gear
       if (it && ITEM_DEFS[it.type].gadget) { if (roleOf(cid) === 'DEVELOPER') sim.removeItem(it.id); break; }
-      if (!holderOf(cid) && !sim.carrierOf(cid)) sim.grab(String(a.id), cid); break;
+      const hb = heldBy(cid);
+      if ((!hb.length || (canStack(cid, hb) && it && ITEM_DEFS[it.type].bag)) && !sim.carrierOf(cid)) sim.grab(String(a.id), cid); break;
     }
     case 'grabPax': if (!holderOf(cid)) sim.grabPax(Number(a.id), cid); break;
     case 'dropPax': if (Array.isArray(a.p) && a.p.length === 3 && a.p.every(Number.isFinite)) sim.dropPax(Number(a.id), cid, a.p.map(Number), Array.isArray(a.v) ? a.v.map(Number) : [0, 0, 0]); break;
@@ -332,7 +362,7 @@ function applyAct(cid, a) {
     case 'serve': {
       const it = a.item ? sim.items.get(String(a.item)) : null;
       if (it && it.heldBy !== cid) break;
-      if (sim.serve(Number(a.pax), it ? it.type : null) && it) sim.removeItem(it.id);
+      if (sim.serve(Number(a.pax), it ? it.type : null, classOf(cid)) && it) sim.removeItem(it.id);
       break;
     }
     case 'door': if (['rear', 'cargo'].includes(a.d) && sim.phase !== 'taxi') sim.setDoor(a.d, !ship.doors[a.d].open); break;
@@ -473,19 +503,20 @@ function showMaintenance(message) {
 $('#maintClose').addEventListener('click', () => UI.show('#maint', false));
 function syncRemotes(room) {
   const ids = new Set(room ? room.players.map((p) => p.cid) : []);
-  for (const [cid, r] of remotes) if (!ids.has(cid) || cid === myId() || r.crew !== (room?.players.find((p) => p.cid === cid)?.crew || null)) { ship.plane.remove(r.mesh); remotes.delete(cid); }
+  const lookKey = (p) => `${JSON.stringify(p?.outfit || DEFAULT_OUTFIT)}|${p?.klass || ''}`;
+  for (const [cid, r] of remotes) if (!ids.has(cid) || cid === myId() || r.key !== lookKey(room?.players.find((p) => p.cid === cid))) { ship.plane.remove(r.mesh); remotes.delete(cid); }
   if (!room) return;
   for (const p of room.players) {
     if (p.cid === myId()) { if ((p.crew || null) !== myCrew) { myCrew = p.crew || null; dressMe(); } continue; }
     if (remotes.has(p.cid)) { remotes.get(p.cid).info = p; continue; }
-    // crew uniform by job; hair/skin seeded from the player id so everyone sees the same person
-    let hsh = 0; for (const ch of p.cid) hsh = (hsh * 31 + ch.charCodeAt(0)) | 0;
-    const mesh = makeCharacter({ uniform: p.crew || 'cabin', hair: ['short', 'long', 'bun', 'spiky'][Math.abs(hsh) % 4], skin: [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac][Math.abs(hsh >> 3) % 5] });
-    mesh.add(nameTag(p.displayName || p.username, p.role));
+    // the outfit each player picked (server-validated) + their class badge
+    const mesh = makeCrew(p.outfit || DEFAULT_OUTFIT);
+    mesh.add(nameTag(p.displayName || p.username, p.role, CLASS_INFO[p.klass]?.icon || ''));
     ship.plane.add(mesh);
-    const r = { mesh, target: new THREE.Vector3(...(p.state?.p || SPOTS.apron)), ry: 0, mode: p.state?.mode || 'walk', moving: false, info: p, crew: p.crew || null };
+    const r = { mesh, target: new THREE.Vector3(...(p.state?.p || SPOTS.apron)), ry: 0, mode: p.state?.mode || 'walk', moving: false, info: p, crew: p.crew || null, key: lookKey(p) };
     mesh.position.copy(r.target);
     remotes.set(p.cid, r);
+    gadgets?.rebuild(p.cid);
   }
 }
 function updateRemotes(dt) {
@@ -520,6 +551,7 @@ net.addEventListener('room', (e) => {
   }
   if (wasHost && !sim.host) { sim.seed = -1; }
   if (me.mode === 'pilot' && room.pilotCid !== myId()) me.mode = 'walk';
+  applyAirport();
   if (!$('#admin').classList.contains('hidden')) renderAdmin();
 });
 net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.pt = s.pt; r.mode = s.mode; r.moving = s.moving; r.run = !!s.run; r.fly = !!s.fly; r.held = s.held; });
@@ -592,13 +624,15 @@ function updateFlight(dt) {
   const f = sim.flight;
   turbPhase += dt;
   const turbV = sim.turb ? sim.turb * (Math.sin(turbPhase * 6.3) * 2.2 + Math.sin(turbPhase * 2.1) * 1.5) - (sim.activeEvents || sim.events.filter((e) => !e.done).map((e) => [e.id])).some((e) => e[0] === 'air_pocket' || e.id === 'air_pocket') * 6 : 0;
+  holdAtGate(f);
   if (amPilot()) {
     const inp = {
       pitch: (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - touch.my,
       roll: (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + touch.mx,
       throttleDelta: (keys.has('KeyR') || keys.has('PageUp') ? 1 : 0) - (keys.has('KeyF') || keys.has('PageDown') ? 1 : 0) + touch.thr,
     };
-    if (sim.phase !== 'results') stepFlight(f, inp, dt, turbV);
+    f.tailwind = tailwind(crewInfo().map((c) => c.cls));
+    if (sim.phase !== 'results') stepFlight(f, inp, dt, turbV * turbulenceFactor(sim.pilotClass()));
   } else if (sim.host && !someonePilots()) {
     // autopilot: wings level, hold pitch (or slow down on the ground)
     const inp = { pitch: f.onGround ? 0 : Math.max(-1, Math.min(1, (0.03 - f.pitch) * 3 - f.vs * 0.05)), roll: f.onGround ? 0 : Math.max(-1, Math.min(1, -f.bank * 2)), throttleDelta: f.onGround && f.speed > 0 ? -1 : 0 };
@@ -632,6 +666,14 @@ function updateCamera() {
       camera.lookAt(w.x, w.y + 2, w.z);
       return;
     }
+  }
+  if (shopOpen() && me.mode === 'walk') { // locker preview: look at my crew member from the front, character on the left
+    const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
+    const c = me.pos.clone(); c.y += 0.95;
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x); // camera's right when it looks back at the avatar
+    camera.position.copy(c).addScaledVector(fwd, 3.1); camera.position.y += 0.2;
+    camera.lookAt(ship.plane.localToWorld(c.clone().addScaledVector(right, innerWidth > innerHeight ? 0.95 : 0)));
+    return;
   }
   if (camOverride?.pos) { camera.position.set(...camOverride.pos); camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(...camOverride.at))); return; }
   const seated = me.mode === 'pilot' || me.mode === 'copilot';
@@ -744,8 +786,10 @@ function placeCarriedPax() {
 }
 function placeHeld() {
   placeCarriedPax();
+  const stackN = new Map();
   for (const it of sim.items.values()) {
     if (!it.heldBy) continue;
+    const k = stackN.get(it.heldBy) || 0; stackN.set(it.heldBy, k + 1);
     let pos, yaw;
     if (it.heldBy === myId()) {
       if (me.third) { pos = new THREE.Vector3(me.pos.x, me.pos.y + 1.15, me.pos.z).addScaledVector(new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw)), 0.5); }
@@ -757,7 +801,7 @@ function placeHeld() {
       pos = r.mesh.position.clone().add(new THREE.Vector3(-Math.sin(r.mesh.rotation.y) * 0.5, 1.15, -Math.cos(r.mesh.rotation.y) * 0.5));
       yaw = r.mesh.rotation.y;
     }
-    it.mesh.position.copy(pos); it.mesh.rotation.set(0, yaw, 0);
+    it.mesh.position.copy(pos); it.mesh.position.y += k * 0.4; it.mesh.rotation.set(0, yaw, 0);
   }
 }
 
@@ -771,6 +815,7 @@ function updateHud() {
   for (const t of roleTasks()) rows.push(t);
   if (sim.phase === 'boarding') {
     title = `PRE-FLIGHT · ${DEST.name.toUpperCase()}`;
+    for (const r of terminalRows()) rows.push(r);
     const list = sim.checklist(), done = list.filter((x) => x.done).length;
     for (const x of list) rows.push({ text: x.text, state: x.done ? 'done' : '' });
     rows.push({ text: done === list.length ? 'Checklist complete (+200)! Pilot: throttle up (R)' : `Checklist ${done}/${list.length} (all done = +200 bonus)`, state: done === list.length ? 'done' : '' });
@@ -805,7 +850,7 @@ function updateHud() {
   UI.show('#cpPanel', cop);
   if (cop) { $('#cpLights').classList.toggle('on', sim.cabin.lights); $('#cpBelt').classList.toggle('on', sim.cabin.seatbelt); $('#cpGear').classList.toggle('on', sim.cabin.gearDown); }
   const gp = glidePath(f);
-  UI.glide(gp, { name: DEST.name, gearDown: sim.cabin.gearDown, show: (pilot || cop) && !f.onGround && gp.active && gp.along < 10000 && sim.phase !== 'results' });
+  UI.glide(gp, { name: DEST.name, gearDown: sim.cabin.gearDown, win: glideWindow(sim.pilotClass()), show: (pilot || cop) && !f.onGround && gp.active && gp.along < 10000 && sim.phase !== 'results' });
   if (pilot || cop) {
     const warnings = [];
     if (f.stall && !f.onGround) warnings.push('STALL');
@@ -815,7 +860,7 @@ function updateHud() {
     if (!sim.cabin.gearDown && !f.onGround && f.y < 150 && gp.active) warnings.push('GEAR');
     UI.flightHud(f, { kt: KT, ft: FT, distKm: distTo(f, DEST) / 1000, bearing: relBearing(f, DEST), warnings, dest: DEST.code, gearDown: sim.cabin.gearDown });
   }
-  if (sim.results && !resultsShown) { resultsShown = true; if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); UI.results(sim.results); document.exitPointerLock?.(); reportFlight(sim.results); }
+  if (sim.results && !resultsShown) { resultsShown = true; if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); UI.results(sim.results); showSalary(); document.exitPointerLock?.(); reportFlight(sim.results); }
 }
 
 /** Job-specific to-do rows (co-op crew role, or everything in solo). */
@@ -842,7 +887,7 @@ const live = { rooms: null, hidden: false,
   async join(code, hidden) { toggleAdmin(false); await devJoin(code, hidden); },
 };
 let devInv = null; // the secret inventory catalogue: sent by the server ONLY to a verified Developer
-function renderAdmin() { buildPanel({ you: net.you || { role: myRole, permissions: [] }, room: net.room, myCid: myId(), live: net.you?.role === 'DEVELOPER' ? live : null, inv: devInv, gear: gadgets.mine(), flight: { pax: sim.pax.filter((p) => p.state !== 'lost').length }, send: (cmd, args) => { $('#admMsg').textContent = '…'; return net.admin(cmd, args).catch(() => {}); } }); }
+function renderAdmin() { buildPanel({ you: net.you || { role: myRole, permissions: [] }, room: net.room, myCid: myId(), live: net.you?.role === 'DEVELOPER' ? live : null, inv: devInv, gear: gadgets.mine(), flight: { pax: sim.pax.filter((p) => p.state !== 'lost').length }, catalog: wallet.catalog, send: (cmd, args) => { $('#admMsg').textContent = '…'; return net.admin(cmd, args).catch(() => {}); } }); }
 /** Developer: jump into any room by code (full / locked / hidden are decided by the server). */
 async function devJoin(code, hidden) {
   try {
@@ -876,19 +921,19 @@ $('#bAgain').addEventListener('click', () => { UI.show('#results', false); if (!
 $('#bResMenu').addEventListener('click', () => quitToMenu());
 
 function restartFlight() { const c = sim.contract; for (const p of sim.pax) sim.stopEjectFx(p); sim.host = !net.inRoom || net.isHost; sim.reset(Math.floor(Math.random() * 1e9)); sim.contract = c || 'standard'; }
-function respawn() { if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); me.pos.copy(SPAWN); me.vel.set(0, 0, 0); me.yaw = 0.45; me.pitch = -0.05; resultsShown = false; UI.show('#results', false); }
+function respawn() { if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); resetTermLocal(); const inTerm = airportOn() && sim.phase === 'boarding' && myStep() !== 'boarded'; me.pos.copy(inTerm ? TERM_SPAWN : SPAWN); me.vel.set(0, 0, 0); me.yaw = inTerm ? 0 : 0.45; me.pitch = -0.05; resultsShown = false; UI.show('#results', false); }
 function quitToMenu(msg) {
   if (net.inRoom) net.leave();
   syncRemotes(null); UI.roomInfo(null); UI.show('#lobby', false); myCrew = null; dressMe();
   audio.startMusic();
-  playing = false; setPaused(false); UI.show('#admin', false); UI.show('#results', false); UI.show('#hud', false); UI.show('#menu', true);
+  playing = false; setPaused(false); UI.show('#admin', false); UI.show('#results', false); UI.show('#hud', false); UI.show('#hudWallet', false); UI.show('#menu', true);
   sim.host = true; restartFlight(); respawn();
   if (msg) { $('#menuErr').textContent = msg; UI.show('#menuErr', true); }
 }
 function start() {
   UI.show('#menu', false); UI.show('#lobby', false); UI.show('#hud', true); UI.show('#menuErr', false);
   audio.stopMusic();
-  playing = true; respawn();
+  playing = true; respawn(); updateWalletHud();
   UI.show('#btnAdmin', (!!net.inRoom && (net.you?.permissions || []).includes('admin.panel')) || myRole === 'DEVELOPER');
   UI.toast(net.inRoom ? `Co-op room ${net.room.code} — share the code!` : 'Solo flight. Load the bags, board everyone, then take the captain\'s seat.');
 }
@@ -899,6 +944,7 @@ async function goOnline(code) {
     if (!net.connected) await net.connect();
     if (code) { sim.host = false; sim.seed = -1; await net.join(code); } else { setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; await net.create(); }
     openLobby();
+    if (myClass) pickClass(myClass); // carry my class pick into the room (the server re-checks ownership)
   } catch (e) { if (e.maintenance) return showMaintenance(e.message); err.textContent = e.message || String(e); UI.show('#menuErr', true); }
 }
 $('#bCreate').addEventListener('click', () => goOnline());
@@ -931,13 +977,13 @@ function renderLobby() {
   $('#lobCode').textContent = room.code;
   $('#lobRoute').disabled = !net.isHost;
   $('#bLock').textContent = room.locked ? '🔒 Room locked (click to open)' : '🔓 Room open (click to lock)';
-  $('#bLock').disabled = !net.isHost;
+  $('#bLock').disabled = !net.isHost; $('#lobSkipAirport').disabled = !net.isHost && myRole !== 'DEVELOPER';
   for (const b of document.querySelectorAll('.crewpick button')) {
     const who = room.players.filter((p) => p.crew === b.dataset.crew);
     b.classList.toggle('mine', myCrew === b.dataset.crew);
     b.classList.toggle('taken', ['pilot', 'copilot'].includes(b.dataset.crew) && who.some((p) => p.cid !== myId()));
   }
-  $('#lobPlayers').replaceChildren(...room.players.map((p) => UI.el('div', { class: 'pl' }, UI.rankBadge(p.role), UI.el('span', { class: `name-${p.role.toLowerCase()}` }, p.displayName || p.username), p.cid === room.hostCid ? ' (host)' : '', p.cid === myId() ? ' (you)' : '', UI.el('span', { class: 'crew' }, p.crew ? UI.CREW_LABEL[p.crew] : 'no job yet'))));
+  $('#lobPlayers').replaceChildren(...room.players.map((p) => UI.el('div', { class: 'pl' }, UI.rankBadge(p.role), UI.el('span', { class: `name-${p.role.toLowerCase()}` }, p.displayName || p.username), p.cid === room.hostCid ? ' (host)' : '', p.cid === myId() ? ' (you)' : '', p.klass ? UI.el('span', { class: 'klass', title: CLASS_INFO[p.klass]?.name }, `${CLASS_INFO[p.klass]?.icon} ${CLASS_INFO[p.klass]?.name}`) : '', UI.el('span', { class: 'crew' }, p.crew ? UI.CREW_LABEL[p.crew] : 'no job yet'))));
   refreshRouteUi();
 }
 for (const b of document.querySelectorAll('.crewpick button')) b.addEventListener('click', () => { const role = myCrew === b.dataset.crew ? null : b.dataset.crew; net.send({ t: 'crew', role }); });
@@ -990,11 +1036,185 @@ function markReported(at) {
   try { localStorage.setItem('skycrew.reported', JSON.stringify([...reportedFlights].slice(-30))); } catch { /* private mode */ }
 }
 
+// ---------------- pre-flight airport terminal ----------------
+// Solo: steps are local. Co-op: the GAME SERVER owns each player's step (in order, at the desk, at human speed);
+// the host refuses to leave the gate until every visible crew member is aboard.
+const termLocal = { step: 'none', bag: false, pending: null, pendingAt: 0, lastHold: 0 };
+const SKIP_KEY = 'skycrew.skipAirport';
+function airportOn() { return net.inRoom ? net.room?.airport !== false : localStorage.getItem(SKIP_KEY) !== '1'; }
+function terminalActive() { return airportOn() && sim.groundOn && sim.phase === 'boarding'; }
+function myStep() { if (!net.inRoom) return termLocal.step; return net.room?.players.find((p) => p.cid === net.cid)?.term || 'none'; }
+function resetTermLocal() { termLocal.step = 'none'; termLocal.bag = false; termLocal.pending = null; terminal.resetBag(); }
+function crewStatus() {
+  const list = net.inRoom ? (net.room?.players || []).map((p) => ({ name: p.displayName || p.username, step: p.term || 'none', me: p.cid === net.cid })) : [{ name: 'You', step: termLocal.step, me: true }];
+  return { list, ready: !airportOn() || list.every((p) => p.step === 'boarded') };
+}
+const DOC = { none: '🛂 Passport', checkin: '🎫 Boarding pass · Gate A1', security: '🎫 Boarding pass · Gate A1', gate: '🎫✔ Pass scanned · walk to the plane', boarded: '✅ Aboard' };
+function terminalRows() {
+  if (!airportOn()) return [];
+  const si = stepIdx(myStep()), rows = [];
+  const mk = (i, text) => rows.push({ text, state: si > i ? 'done' : si === i ? 'warn' : '' });
+  mk(0, '① Check in at the orange desk (passport)');
+  mk(1, termLocal.bag || si > 1 ? '② Walk through the scanner arch' : '② Bag on the X-ray belt, then the scanner');
+  mk(2, '③ Show your boarding pass at Gate A1');
+  mk(3, '④ Walk down to the plane and board');
+  const cs = crewStatus();
+  if (cs.list.length > 1) { const n = cs.list.filter((p) => p.step === 'boarded').length; rows.push({ text: `Crew aboard ${n}/${cs.list.length}${n < cs.list.length ? ` · waiting for ${cs.list.filter((p) => p.step !== 'boarded').map((p) => p.name).slice(0, 3).join(', ')}` : ' · ready to go!'}`, state: n === cs.list.length ? 'done' : '' }); }
+  return rows;
+}
+function termTarget(ip, held) {
+  if (!terminalActive()) return null;
+  const si = stepIdx(myStep());
+  if (ip.kind === 'term_checkin') return si === 0 ? { ...ip, label: 'Hand over your passport (check in)' } : { ...ip, kind: 'term_info', label: '✓ Checked in: head to security' };
+  if (ip.kind === 'term_belt') return si === 0 ? { ...ip, kind: 'term_info', label: 'Check in at the orange desk first' } : si === 1 && !termLocal.bag ? { ...ip, label: held ? 'Hands full: put it down first' : 'Put your bag on the X-ray belt' } : si === 1 ? { ...ip, kind: 'term_info', label: 'Your bag is in the scanner: walk through the arch' } : null;
+  if (ip.kind === 'term_gate') return si < 2 ? { ...ip, kind: 'term_info', label: 'Go through security first' } : si === 2 ? { ...ip, label: 'Show your boarding pass' } : { ...ip, kind: 'term_info', label: '✓ Pass scanned: walk to the plane' };
+  return null;
+}
+function termInteract(t) {
+  if (t.kind === 'term_info') { UI.toast(t.label); return; }
+  if (t.kind === 'term_checkin') return termStep('checkin');
+  if (t.kind === 'term_belt') { if (heldItem() || heldPax()) return UI.toast('Put down what you are carrying first.'); termLocal.bag = true; terminal.startBag(); audio.play('click'); UI.toast('🧳 Bag on the belt. Now walk through the scanner arch!'); return; }
+  if (t.kind === 'term_gate') return termStep('gate');
+}
+const STEP_DONE = {
+  checkin: () => { terminal.cheer('checkin'); audio.play('stamp'); UI.toast('🎫 Checked in! Here is your boarding pass for Gate A1. Next: security.'); },
+  security: () => { terminal.cheer('security', 1.2); UI.toast('✅ Security cleared. Gate A1 is straight ahead.'); },
+  gate: () => { terminal.cheer('gate'); audio.play('stamp'); UI.toast('🛫 Pass scanned. Have a lovely flight! Walk down to the plane.'); },
+  boarded: () => { UI.toast(crewStatus().ready ? '✅ You are aboard. Everyone is here: ready for departure!' : '✅ You are aboard. Waiting for the rest of the crew…'); },
+};
+function termStep(step) {
+  if (termLocal.pending && performance.now() - termLocal.pendingAt < 4000) return;
+  if (!net.inRoom) { termLocal.step = step; STEP_DONE[step]?.(); return; }
+  termLocal.pending = step; termLocal.pendingAt = performance.now();
+  net.send({ t: 'term', step });
+}
+net.addEventListener('term', (e) => { if (e.detail.cid !== net.cid) return; const p = net.room?.players.find((q) => q.cid === net.cid); if (p) p.term = e.detail.step; termLocal.pending = null; STEP_DONE[e.detail.step]?.(); });
+net.addEventListener('error', (e) => { if (!/^term_/.test(e.detail.code || '')) return; termLocal.pending = null; if (e.detail.code !== 'term_fast') UI.toast(e.detail.message, 'warn'); });
+let secCheckAt = 0;
+function updateTerminal(dt) {
+  terminal.update(dt, { dest: DEST, visible: sim.groundOn });
+  if (!playing || !terminalActive()) { if ($('#docs').textContent) $('#docs').textContent = ''; return; }
+  const si = stepIdx(myStep()), now = performance.now();
+  // walked through the arch with the bag in the scanner
+  if (si === 1 && termLocal.bag && terminal.bagDone() && me.pos.z < STATIONS.arch.z - 0.6 && me.pos.z > STATIONS.gate.z && Math.abs(me.pos.x - STATIONS.arch.x) < 3 && !termLocal.pending && now > secCheckAt) {
+    secCheckAt = now + 4500;
+    if (Math.random() < 0.15) { // purely cosmetic "random check"
+      terminal.flashArch(0xffb627, 1.4); terminal.cheer('security', 1.4); audio.play('boop');
+      UI.toast('🔎 Random check! The officer waves a beeping wand… beep… boop… all clear, enjoy your flight!');
+      setTimeout(() => termStep('security'), 1400);
+    } else { terminal.flashArch(0x3ddc84, 1.0); audio.play('beep'); termStep('security'); }
+  }
+  if (si === 3 && sim.inCabin(me.pos) && !termLocal.pending && now > secCheckAt) { secCheckAt = now + 2500; termStep('boarded'); }
+  const d = $('#docs'); const txt = DOC[myStep()] || DOC.none;
+  if (d.textContent !== txt) d.textContent = txt;
+}
+/** The plane can't leave the gate until the whole crew has boarded through the terminal. */
+function holdAtGate(f) {
+  if (sim.phase !== 'boarding' || !f.onGround || crewStatus().ready) return;
+  if (f.throttle > 0 || f.speed > 0.2) {
+    f.throttle = 0; f.speed = 0;
+    if (amPilot() && performance.now() - termLocal.lastHold > 6000) { termLocal.lastHold = performance.now(); const cs = crewStatus(); UI.toast(`🛑 Wait for the whole crew to board (${cs.list.filter((p) => p.step === 'boarded').length}/${cs.list.length} aboard).`, 'warn'); }
+  }
+}
+function setAirport(on) {
+  if (net.inRoom) { if (!net.isHost && myRole !== 'DEVELOPER') return UI.toast('Only the host can change that.'); net.send({ t: 'airport', skip: !on }); return; }
+  localStorage.setItem(SKIP_KEY, on ? '0' : '1'); applyAirport();
+}
+let airportSeen = null;
+function applyAirport() {
+  const on = airportOn();
+  sim.setAirport(on);
+  $('#setSkipAirport').checked = !on; $('#lobSkipAirport').checked = !on;
+  if (airportSeen === on) return; const first = airportSeen === null; airportSeen = on;
+  if (first || !playing || sim.phase !== 'boarding' || me.mode !== 'walk') return;
+  const inside = me.pos.z > STATIONS.gate.z - 0.3 && me.pos.y < -1;
+  if (on && myStep() !== 'boarded' && !inside) { resetTermLocal(); me.pos.copy(TERM_SPAWN); me.yaw = 0; UI.toast('🛂 The airport is open: check in at the terminal.'); }
+  if (!on && inside) { me.pos.copy(SPAWN); me.yaw = 0.45; UI.toast('⏩ Airport skipped for this round.'); }
+}
+$('#setSkipAirport').addEventListener('change', (e) => setAirport(!e.target.checked));
+$('#lobSkipAirport').addEventListener('change', (e) => setAirport(!e.target.checked));
+applyAirport();
+
+// ---------------- outfits, shop, classes, salary (server-checked) ----------------
+const shopOpen = () => !$('#shop').classList.contains('hidden');
+function shopCtx() {
+  return { outfit: myOutfit, klass: myClass, inRoom: net.inRoom, phase: sim.phase, toast: (m) => UI.toast(m, 'warn'), setOutfit, pickClass, onBalance: updateWalletHud };
+}
+function openShop(tab) {
+  if (tab) import('./shop.js').then((m) => { m.shopState.tab = tab; });
+  $('#shopMsg').textContent = '';
+  UI.show('#shop', true); document.exitPointerLock?.();
+  renderShop(shopCtx());
+  loadWallet().then(() => { if (shopOpen()) renderShop(shopCtx()); updateWalletHud(); });
+}
+function closeShop() { UI.show('#shop', false); }
+$('#shopClose').addEventListener('click', closeShop);
+$('#bShop').addEventListener('click', () => openShop());
+$('#bShopP').addEventListener('click', () => { paused = false; UI.show('#pause', false); openShop('outfit'); });
+$('#bResShop').addEventListener('click', () => openShop('class'));
+$('#bLobShop').addEventListener('click', () => openShop('class'));
+function updateWalletHud() {
+  const h = $('#hudWallet');
+  h.textContent = `₵ ${Math.round(wallet.balance).toLocaleString('en-US')}${myClass ? ` · ${CLASS_INFO[myClass]?.icon || ''} ${CLASS_INFO[myClass]?.name || ''}` : ''}`;
+  UI.show('#hudWallet', !!(user && playing));
+}
+async function setOutfit(o) {
+  const keys = [`outfit:${o.outfit}`, `hat:${o.hat}`, `color:${o.color}`];
+  const missing = keys.find((k) => !owns(k));
+  if (missing) { $('#shopMsg').textContent = 'Buy it first.'; return; }
+  myOutfit = { ...o }; dressMe();
+  try { localStorage.setItem('skycrew.outfit', JSON.stringify(myOutfit)); } catch { /* private mode */ }
+  if (shopOpen()) renderShop(shopCtx());
+  if (!user) return;
+  try { await api('PUT', '/api/game/sky-crew/outfit', { outfit: myOutfit }); } catch (e) { $('#shopMsg').textContent = e.message || 'Could not save the outfit.'; }
+  if (net.connected) net.send({ t: 'outfit', outfit: myOutfit });
+}
+let classWait = null;
+async function pickClass(id) {
+  if (id && !owns(`class:${id}`)) { $('#shopMsg').textContent = 'Buy this class first.'; return; }
+  if (net.inRoom) {
+    net.send({ t: 'class', id: id || null });
+    const r = await new Promise((res) => { classWait = res; setTimeout(() => { if (classWait === res) { classWait = null; res({ error: 'The server did not answer.' }); } }, 5000); });
+    if (r.error) { $('#shopMsg').textContent = r.error; return; }
+    myClass = r.id || null;
+  } else myClass = id || null;
+  $('#shopMsg').textContent = myClass ? `${CLASS_INFO[myClass].icon} ${CLASS_INFO[myClass].name} picked: ${CLASS_INFO[myClass].perk}` : 'Flying without a class.';
+  updateWalletHud(); renderLobby();
+  if (shopOpen()) renderShop(shopCtx());
+}
+net.addEventListener('class', (e) => { if (classWait) { const w = classWait; classWait = null; w({ id: e.detail.id }); } });
+net.addEventListener('outfit', (e) => { const p = net.room?.players.find((q) => q.cid === e.detail.cid); if (p) { p.outfit = e.detail.outfit; syncRemotes(net.room); } });
+net.addEventListener('wallet', (e) => {
+  const d = e.detail; wallet.balance = d.balance;
+  UI.toast(d.item ? `🎁 ${d.by} ${d.removed ? 'removed' : 'gave you'} ${wallet.catalog.find((i) => i.key === d.item)?.name || d.item}.` : `🎁 ${d.by} ${d.credits >= 0 ? 'gave you' : 'took'} ${fmtC(Math.abs(d.credits))}.`);
+  loadWallet().then(() => { if (myClass && !owns(`class:${myClass}`)) myClass = null; updateWalletHud(); if (shopOpen()) renderShop(shopCtx()); });
+});
+let lastSalary = null;
+function showSalary() {
+  const box = $('#resSalary'); box.classList.add('muted');
+  if (lastSalary && Date.now() - lastSalary.at < 30000) return renderSalary(lastSalary.d);
+  box.textContent = !user ? '💼 Guests are not paid. Sign in and fly online to earn a salary.' : !net.inRoom ? '💼 Solo flights don\'t pay a salary. Create an online room (even just for you) to get paid.' : '💼 Waiting for the payslip from the airline…';
+}
+net.addEventListener('salary', (e) => { lastSalary = { d: e.detail, at: Date.now() }; renderSalary(e.detail); if (e.detail.amount > 0 && !e.detail.duplicate) UI.toast(`💼 Salary paid: +${fmtC(e.detail.amount)} (wallet ${fmtC(e.detail.balance)})`); });
+function renderSalary(d) {
+  const box = $('#resSalary');
+  if (d.amount > 0 || d.duplicate) {
+    wallet.balance = d.balance;
+    box.replaceChildren(UI.el('b', { class: 'pos' }, `💼 Salary ${d.duplicate ? 'already paid' : `+${fmtC(d.amount)}`}`), ` · wallet ${fmtC(d.balance)}`);
+  } else box.textContent = `💼 No salary this time: ${d.reason || 'the flight did not qualify.'}`;
+  box.classList.remove('muted');
+  updateWalletHud();
+}
+const errMsg = { not_owned: 'You do not own that yet.', class_locked: 'Classes are picked before takeoff.', bad_class: 'Unknown class.', bad_outfit: 'That outfit is not available.' };
+net.addEventListener('error', (e) => { const m = errMsg[e.detail.code]; if (!m) return; if (classWait) { const w = classWait; classWait = null; w({ error: e.detail.message || m }); } else UI.toast(e.detail.message || m, 'warn'); });
+
 const user = await Net.me();
 if (user) {
   myRole = user.role;
   $('#meLine').replaceChildren('Signed in as ', UI.rankBadge(user.role), UI.el('span', { class: `name-${user.role.toLowerCase()}` }, user.displayName || user.username), '. Co-op rooms use your Batlas rank.');
   $('#bCreate').disabled = false; $('#bJoin').disabled = false;
+  await loadWallet();
+  try { const o = await api('GET', '/api/game/sky-crew/outfit'); if (o?.outfit) { myOutfit = o.outfit; dressMe(); } } catch { /* keep the local look */ }
 } else {
   $('#meLine').replaceChildren('Playing as a guest (solo). ', UI.el('a', { href: '/login?next=/play/sky-crew', class: 'back' }, 'Sign in'), ' to play co-op with friends.');
 }
@@ -1032,11 +1252,12 @@ function frame() {
   sim.animate(dt);
   placeHeld();
   updateRemotes(dt);
+  updateTerminal(dt);
   gadgets.update(dt, { remotes });
   updateSplashes(dt);
   updateWeather(dt);
   // my own body (visible in third person)
-  myAvatar.visible = me.third && me.mode === 'walk';
+  myAvatar.visible = (me.third || shopOpen()) && me.mode === 'walk';
   myAvatar.position.copy(me.pos); myAvatar.rotation.y = me.yaw;
   animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk' });
   updateCamera();
@@ -1077,6 +1298,11 @@ window.skyCrew = {
   lastReport: () => lastReport,
   paxLooks: () => sim.pax.map((p) => p.look || null),
   pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible, frozen: (p.frozenT || 0) > 0, sizeK: p.sizeK || 1, cheer: (p.cheerT || 0) > 0, vip: p.id >= 900 })),
+  term: () => ({ step: myStep(), local: termLocal.step, airport: airportOn(), active: terminalActive(), bag: termLocal.bag, bagDone: terminal.bagDone(), crew: crewStatus(), docs: $('#docs').textContent, solids: solids().filter((c) => c.tag?.startsWith('term:')).map((c) => c.tag), paxInTerminal: sim.pax.filter((p) => p.mesh.position.z > STATIONS.gate.z && p.mesh.position.y < -1).length }),
+  useE: () => interact(),
+  locker: () => ({ outfit: myOutfit, klass: myClass, balance: wallet.balance, owned: [...wallet.owned], ownsAll: wallet.ownsAll, signedIn: wallet.signedIn, remotes: [...remotes].map(([, r]) => ({ username: r.info.username, key: r.key, klass: r.info.klass || null })), crewClasses: sim.classes(), hud: $('#hudWallet').textContent, salary: $('#resSalary').textContent, avatarOutfit: myAvatar.userData.look?.crew || null }),
+  openShop: (t) => openShop(t),
+  perks: () => ({ pilotClass: sim.pilotClass(), tailwind: sim.flight.tailwind || 1, pending: (sim.pendingEv || []).map((e) => e.id), score: { caught: sim.score.caught || 0, landing: sim.score.landing } }),
   gadgets: () => ({ mine: [...gadgets.mine()], tool: gadgets.tool(), mode: gadgets.mode, fx: gadgets.fx.length, frozenT: gadgets.frozenT, sizeK: gadgets.sizeK, scale: myAvatar.scale.x, flying: !!me.flying, frozen: !!me.frozen, iced: !!myAvatar.userData.ice, attach: Object.keys(gadgets.attach.get(myId()) || {}), grav: !!sim.grav, inv: devInv ? devInv.items.map((i) => i.id) : null, remoteGear: Object.fromEntries([...gadgets.gear].filter(([c]) => c !== myId()).map(([c, g]) => [remotes.get(c)?.info.username || c, [...g]])), remoteAttach: Object.fromEntries([...remotes].map(([c, r]) => [r.info.username, Object.keys(gadgets.attach.get(c) || {})])) }),
   fire: (alt) => fireGadget(!!alt),
   draw: () => { forceRender = true; },

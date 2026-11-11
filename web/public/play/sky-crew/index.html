@@ -16,6 +16,8 @@
     <div id="cross"></div>
     <div id="obj" class="panel"></div>
     <div id="roominfo" class="panel hidden"></div>
+    <div id="docs" class="panel" aria-live="polite"></div>
+    <div id="hudWallet" class="panel hidden" title="Your Sky Crew credits"></div>
     <div id="toasts"></div>
     <div id="chatLog" aria-live="polite"></div>
     <div id="chatBox" class="hidden"><input id="chatInput" type="text" maxlength="200" autocomplete="off" placeholder="Say something to the crew… (Enter to send, Esc to cancel)"></div>
@@ -86,6 +88,7 @@
       <div class="actions">
         <button id="bSolo" class="primary" type="button">Play solo</button>
         <button id="bCreate" type="button" disabled>Create co-op room</button>
+        <button id="bShop" type="button">🛍 Shop &amp; locker</button>
         <button id="bSettings" type="button">⚙ Settings</button>
         <div class="joinrow"><input id="joinCode" maxlength="5" placeholder="ROOM CODE" autocomplete="off" autocapitalize="characters" aria-label="Room code"><button id="bJoin" type="button" disabled>Join</button></div>
       </div>
@@ -112,6 +115,7 @@
       <div class="actions">
         <button id="bResume" class="primary" type="button">Resume</button>
         <button id="bCam" type="button">Toggle third person</button>
+        <button id="bShopP" type="button">👕 Change outfit</button>
         <button id="bSettingsP" type="button">⚙ Settings</button>
         <button id="bRestart" type="button">Restart flight</button>
         <button id="bQuit" type="button">Quit to menu</button>
@@ -126,8 +130,10 @@
       <div id="resStars" class="stars"></div>
       <table id="resTable"></table>
       <div class="total">Payout <b id="resTotal">₵0</b></div>
+      <div id="resSalary" class="salary muted small">Waiting for the payslip…</div>
       <div class="actions">
         <button id="bAgain" class="primary" type="button">Fly again</button>
+        <button id="bResShop" type="button">🛍 Shop</button>
         <button id="bResMenu" type="button">Menu</button>
       </div>
     </div>
@@ -145,9 +151,10 @@
       </div>
       <label class="routepick">Destination <select id="lobRoute" aria-label="Destination"></select></label>
       <label class="routepick">Contract <select id="lobContract" aria-label="Contract"><option value="standard">Standard</option><option value="premium">Premium (×1.6 pay, ×2 fines)</option></select></label>
+      <label class="routepick check"><input id="lobSkipAirport" type="checkbox"> Skip the airport (quick round · host)</label>
       <div id="lobRouteNote" class="muted small"></div>
       <div id="lobPlayers" class="lobplayers"></div>
-      <div class="actions"><button id="bBoard" class="primary" type="button">Board the plane</button><button id="bLock" type="button">🔓 Room open (click to lock)</button><button id="bLobLeave" type="button">Leave room</button></div>
+      <div class="actions"><button id="bBoard" class="primary" type="button">Board the plane</button><button id="bLobShop" type="button">🛍 Shop &amp; class</button><button id="bLock" type="button">🔓 Room open (click to lock)</button><button id="bLobLeave" type="button">Leave room</button></div>
     </div>
   </div>
 
@@ -157,12 +164,24 @@
       <label class="setrow">Graphics quality
         <select id="setQuality"><option value="auto">Auto</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
       <div id="setQualityNote" class="muted small"></div>
+      <label class="setrow check"><input id="setSkipAirport" type="checkbox"> Skip the airport (quick rounds; in co-op the host decides)</label>
       <label class="setrow">Master volume <input id="volMaster" type="range" min="0" max="1" step="0.05"></label>
       <label class="setrow">Music <input id="volMusic" type="range" min="0" max="1" step="0.05"></label>
       <label class="setrow">Effects <input id="volSfx" type="range" min="0" max="1" step="0.05"></label>
       <div class="actions"><button id="bSetClose" class="primary" type="button">Done</button></div>
     </div>
   </div>
+
+  <div id="shop" class="overlay side shop hidden" role="dialog" aria-label="Shop and locker">
+    <div class="card">
+      <div class="admhead"><h2>🛍 Shop &amp; locker</h2><span id="shopBal" class="balance"></span><button id="shopClose" type="button" aria-label="Close">✕</button></div>
+      <div id="shopTabs" role="tablist"></div>
+      <div id="shopBody"></div>
+      <div id="shopMsg" class="muted small"></div>
+    </div>
+  </div>
+
+  <div id="rotateHint" class="rotate-hint" aria-hidden="true"><div><div class="rot-icon">📱↻</div><b>Turn your phone sideways</b><p class="muted small">Sky Crew plays in landscape.</p></div></div>
 
   <div id="maint" class="overlay hidden">
     <div class="card">

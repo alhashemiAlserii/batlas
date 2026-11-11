@@ -6,12 +6,12 @@ export type ItemKind = 'outfit' | 'hat' | 'color' | 'class';
 export interface ShopItem { key: string; kind: ItemKind; id: string; name: string; price: number; icon: string; description: string }
 
 export const CLASSES = [
-  { id: 'ace_pilot', name: 'Ace Pilot', icon: '🛩️', price: 1500, description: 'Steadier controls in turbulence and a wider landing-guide window.' },
-  { id: 'cabin_pro', name: 'Cabin Pro', icon: '☕', price: 1000, description: 'Serves food and drinks faster; passengers near you calm down quicker.' },
-  { id: 'mechanic', name: 'Mechanic', icon: '🔧', price: 1200, description: 'Repairs twice as fast and sees faults coming before they hit.' },
-  { id: 'navigator', name: 'Navigator', icon: '🧭', price: 1200, description: 'Turbulence warnings ahead of time and a tailwind shortcut on every route.' },
-  { id: 'security', name: 'Security Chief', icon: '🛡️', price: 1400, description: 'Calms unruly passengers instantly and catches anyone about to fall out of the door.' },
-  { id: 'baggage', name: 'Baggage Master', icon: '🧳', price: 1000, description: 'Carries two bags at once and loads the hold faster.' },
+  { id: 'ace_pilot', name: 'Ace Pilot', icon: '🛩️', price: 1500, description: 'Turbulence shakes the plane 65% less, softer landing grades and a wider glide-path window.' },
+  { id: 'cabin_pro', name: 'Cabin Pro', icon: '☕', price: 1000, description: 'Serve passengers from further away, served passengers get extra happy, and seated passengers near you calm down.' },
+  { id: 'mechanic', name: 'Mechanic', icon: '🔧', price: 1200, description: 'Faults are announced 8 s early, the crew gets twice as long to fix them, and you reach the panel from further away.' },
+  { id: 'navigator', name: 'Navigator', icon: '🧭', price: 1200, description: 'Turbulence and air pockets announced 6 s early, plus a 12% tailwind that shortens every flight.' },
+  { id: 'security', name: 'Security Chief', icon: '🛡️', price: 1400, description: 'Catches passengers about to fall out of an open door (within 4 m) and calms them right down.' },
+  { id: 'baggage', name: 'Baggage Master', icon: '🧳', price: 1000, description: 'Carries two bags at once and throws them 40% further.' },
 ] as const;
 export const CLASS_IDS = CLASSES.map((c) => c.id) as string[];
 
@@ -42,6 +42,7 @@ export function outfitAllowed(o: Outfit, owns: (key: string) => boolean) {
 
 // ---------------------------------------------------------------- salary (computed by the server)
 export const ROUTE_KM: Record<string, number> = { CRP: 16.8, DNB: 10.4, PNR: 25.6 };
+// the fastest the plane can go (full-throttle dive ≈125 m/s) × the Navigator tailwind (1.12) ≈ 140 m/s
 export const MAX_SPEED_MS = 140; // fastest the aircraft can go (m/s); used for the minimum believable flight time
 export const SALARY_CAP = 1500; // hard cap per flight per crew member
 export const MAX_PAID_FLIGHTS_PER_HOUR = 8;

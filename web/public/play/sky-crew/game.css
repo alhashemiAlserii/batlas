@@ -157,3 +157,82 @@ select option { color: #000; }
 body.touch #gpath { top: 150px; transform: none; right: 10px; width: 150px; }
 body.touch #cpPanel { bottom: 180px; }
 @media (max-width: 640px) { .crewpick { grid-template-columns: 1fr; } }
+
+/* ---------- shop & locker ---------- */
+.shop .card { width: min(420px, calc(100vw - 24px)); }
+.balance { font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#shopClose { padding: 4px 10px; }
+#shopTabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+#shopTabs button { padding: 6px 10px; font-size: 13px; } #shopTabs button.on { background: rgba(25,211,197,.3); border-color: var(--teal); }
+.shopgrid { display: grid; gap: 6px; }
+.shopcard { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+.shopcard.on { border-color: var(--teal); background: rgba(25,211,197,.12); }
+.shopcard .invicon { font-size: 24px; text-align: center; }
+.shopcard .invtxt { display: grid; min-width: 0; } .shopcard .invtxt b { font-size: 14px; }
+.shopcard button { padding: 8px 12px; font-size: 13px; min-height: 40px; } .shopcard button.gold { border-color: var(--gold); color: var(--gold); }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); display: inline-block; padding: 0; }
+.skinrow { display: flex; flex-wrap: wrap; gap: 8px; } .skinrow .swatch { width: 40px; height: 40px; } .skinrow .swatch.on { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(25,211,197,.45); }
+.chip { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,.08); white-space: nowrap; } .chip.on { background: rgba(25,211,197,.25); color: #bff8f1; }
+.walletbig { display: grid; justify-items: start; margin: 6px 0; } .walletbig b { font-size: 34px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.pos { color: #9ff0c8; } .neg { color: #ff9a9a; }
+#shopMsg { margin-top: 8px; min-height: 18px; }
+#shop h4 { margin: 12px 0 6px; font-size: 12px; letter-spacing: .12em; color: var(--teal); }
+#hudWallet { left: 12px; bottom: 12px; font-weight: 800; color: var(--gold); padding: 6px 10px; font-variant-numeric: tabular-nums; }
+body.touch #hudWallet { bottom: auto; top: calc(12px + env(safe-area-inset-top)); left: auto; right: calc(150px + env(safe-area-inset-right)); }
+.salary { margin-top: 8px; text-align: right; font-size: 14px; }
+#lobPlayers .klass { font-size: 12px; color: var(--gold); margin-left: 6px; }
+.setrow select { font: inherit; color: var(--text); background: rgba(0,0,0,.35); border: 1px solid rgba(120,160,255,.45); border-radius: 8px; padding: 6px; max-width: 200px; }
+
+/* ---------- notches / safe areas ---------- */
+#obj { left: calc(12px + env(safe-area-inset-left)); top: calc(12px + env(safe-area-inset-top)); }
+.topbtns { right: calc(12px + env(safe-area-inset-right)); top: calc(12px + env(safe-area-inset-top)); }
+#roominfo { right: calc(12px + env(safe-area-inset-right)); }
+#joy { left: calc(24px + env(safe-area-inset-left)); bottom: calc(28px + env(safe-area-inset-bottom)); }
+#tbtns { right: calc(20px + env(safe-area-inset-right)); bottom: calc(28px + env(safe-area-inset-bottom)); }
+#tFlight { right: calc(20px + env(safe-area-inset-right)); }
+.overlay { padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+.overlay .card { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+
+/* ---------- landscape phones (short screens) ---------- */
+@media (max-height: 500px) {
+  .card { padding: 12px 14px; } h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 18px; margin: 0 0 4px; }
+  .overlay .card { max-height: calc(100dvh - 16px); }
+  .overlay.side .card { max-height: calc(100dvh - 16px); }
+  #obj { max-width: 190px; font-size: 11px; padding: 6px 8px; max-height: 46vh; overflow: hidden; }
+  #obj h3 { font-size: 11px; margin-bottom: 2px; }
+  #roominfo { display: none; }
+  #toasts { top: calc(8px + env(safe-area-inset-top)); width: min(420px, 50vw); font-size: 12px; }
+  #joy { width: 104px; height: 104px; bottom: calc(12px + env(safe-area-inset-bottom)); left: calc(14px + env(safe-area-inset-left)); }
+  #joyKnob { left: 29px; top: 29px; width: 46px; height: 46px; }
+  #tbtns { grid-template-columns: repeat(3, 52px); gap: 8px; bottom: calc(12px + env(safe-area-inset-bottom)); right: calc(14px + env(safe-area-inset-right)); }
+  #tbtns button { width: 52px; height: 52px; font-size: 19px; }
+  #tE { grid-column: span 1; width: 60px !important; height: 60px !important; }
+  #tFlight { bottom: calc(12px + env(safe-area-inset-bottom)); right: calc(200px + env(safe-area-inset-right)); grid-template-columns: repeat(2, 84px); gap: 6px; }
+  #tFlight button { width: 84px; height: 40px; font-size: 13px; }
+  body.touch #fhud { top: calc(6px + env(safe-area-inset-top)); gap: 6px; padding: 4px 8px; font-size: 12px; max-width: 54vw; }
+  body.touch #gpath { top: 70px; right: calc(10px + env(safe-area-inset-right)); width: 140px; font-size: 11px; padding: 6px 8px; }
+  #chatLog { left: calc(130px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); width: min(360px, 36vw); font-size: 12px; }
+  #held { bottom: auto; top: 50%; right: calc(14px + env(safe-area-inset-right)); font-size: 12px; }
+  #prompt { top: 62%; font-size: 13px; }
+  .shop .card { width: min(400px, 54vw); }
+  #admin .card { width: min(440px, 60vw); }
+  .crewpick { grid-template-columns: repeat(4, 1fr) !important; } .crewpick button small { display: none; }
+  .stars { font-size: 24px; margin: 2px 0 4px; } #resTable { font-size: 12px; } #resTable td { padding: 2px; }
+}
+
+/* ---------- portrait phones: ask to rotate (tablets keep portrait) ---------- */
+.rotate-hint { display: none; }
+@media (pointer: coarse) and (orientation: portrait) and (max-width: 600px) {
+  .rotate-hint { display: flex; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; text-align: center; padding: 24px; background: radial-gradient(ellipse at center, #0c2260, #02061a); }
+  .rotate-hint .rot-icon { font-size: 64px; display: inline-block; animation: rot 1.8s ease-in-out infinite; }
+  .rotate-hint b { display: block; font-size: 22px; margin-top: 10px; }
+}
+@keyframes rot { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(90deg); } }
+
+/* ---------- airport terminal ---------- */
+#docs { left: 50%; transform: translateX(-50%); bottom: calc(96px + env(safe-area-inset-bottom)); font-weight: 700; font-size: 13px; padding: 5px 12px; border-color: rgba(245,197,66,.6); white-space: nowrap; }
+#docs:empty { display: none; }
+body.touch #docs { bottom: auto; top: calc(48px + env(safe-area-inset-top)); }
+.setrow.check, .routepick.check { display: flex; align-items: center; gap: 8px; }
+.setrow.check input, .routepick.check input { width: 20px; height: 20px; padding: 0; -webkit-appearance: checkbox; appearance: auto; }
+@media (max-height: 500px) { #docs { font-size: 11px; padding: 3px 8px; } body.touch #docs { top: auto; bottom: calc(10px + env(safe-area-inset-bottom)); } }

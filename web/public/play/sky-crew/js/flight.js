@@ -56,7 +56,7 @@ export function stepFlight(f, inp, dt, turb = 0) {
     const d = Math.hypot(f.x - o.x, f.z - o.z);
     if (d < o.r && f.y < o.h * (1 - d / o.r) + 3) { f.crashed = true; f.onGround = true; f.touchdown = { vs: f.vs, rwy: null, hard: true, crash: true, terrain: true, at: Date.now() }; f.speed *= 0.2; return; }
   }
-  const horiz = f.speed * Math.cos(f.pitch);
+  const horiz = f.speed * Math.cos(f.pitch) * (f.onGround ? 1 : f.tailwind || 1); // Navigator class: favourable winds aloft
   f.x += -Math.sin(f.yaw) * horiz * dt;
   f.z += -Math.cos(f.yaw) * horiz * dt;
 
