@@ -604,7 +604,17 @@ net.addEventListener('muted', (e) => UI.toast(e.detail.minutes ? `🔇 ${e.detai
 net.addEventListener('maintenance', (e) => showMaintenance(e.detail.message));
 net.addEventListener('kicked', (e) => { const d = e.detail; quitToMenu(d.banned ? `You were banned from Sky Crew by ${d.by}${d.minutes ? ` for ${d.minutes} min` : ''}.${d.reason ? ` Reason: ${d.reason}` : ''}` : `You were removed from the room by ${d.by}.${d.reason ? ` ${d.reason}` : ''}`); });
 net.addEventListener('error', (e) => { if (e.detail.code === 'muted') UI.toast(e.detail.message, 'warn'); if (e.detail.code === 'seat_taken') { me.mode = 'walk'; UI.toast('Someone else is flying.'); } if (e.detail.code === 'crew_taken') { $('#lobRouteNote').textContent = e.detail.message; UI.toast(e.detail.message); } });
-net.addEventListener('close', () => { if (playing && net.wasInRoom) { UI.toast('Disconnected from the co-op room. Continuing solo.', 'warn'); sim.host = true; syncRemotes(null); UI.roomInfo(null); } });
+net.addEventListener('close', () => {
+  if (!playing || !net.wasInRoom) return;
+  // the socket dropped mid-game: keep playing solo from exactly where we were (airport progress, flight, items)
+  const mine = net.lastRoom?.players?.find((p) => p.cid === net.cid)?.term;
+  if (mine) termLocal.step = mine;
+  termLocal.pending = null;
+  UI.toast('Disconnected from the co-op room. Continuing solo.', 'warn');
+  sim.host = true; syncRemotes(null); UI.roomInfo(null); applyAirport();
+  UI.show('#btnAdmin', myRole === 'DEVELOPER');
+  if (!$('#admin').classList.contains('hidden')) UI.show('#admin', false);
+});
 
 let sendT = 0, worldT = 0;
 function netTick(dt) {

@@ -29,7 +29,7 @@ export class Net extends EventTarget {
       };
     });
     ws.onmessage = (ev) => this.onMsg(JSON.parse(ev.data));
-    ws.onclose = (ev) => { this.room = null; this.dispatchEvent(new CustomEvent('close', { detail: { code: ev.code, reason: ev.reason } })); };
+    ws.onclose = (ev) => { this.wasInRoom = !!this.room; this.lastRoom = this.room; this.room = null; this.dispatchEvent(new CustomEvent('close', { detail: { code: ev.code, reason: ev.reason } })); };
     return this.you;
   }
 
