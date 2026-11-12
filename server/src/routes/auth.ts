@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx, UserRow } from '../lib/types.js';
 import { selfUser } from '../lib/types.js';
 import { parse, HttpError } from '../lib/http.js';
-import { hashPassword, verifyPassword, dummyVerify } from '../lib/crypto.js';
+import { hashPassword, verifyPassword, dummyVerify, sha256, safeEqual } from '../lib/crypto.js';
 import { createSession, destroySession, issueCsrf } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { sendVerificationEmail } from './account.js';
@@ -35,6 +35,23 @@ const setupSchema = z.object({
   currentPassword: z.string().min(1).max(200),
   pin: z.string().max(20),
 });
+const developerPinSchema = z.object({
+  token: z.string().min(1).max(500),
+  pin: z.string().max(20),
+  pinConfirm: z.string().max(20),
+});
+
+const DEVELOPER_PIN_BOOTSTRAP_KEY = 'developer_pin_bootstrap';
+
+function configuredBootstrapToken(ctx: Ctx): string | null {
+  const t = (ctx.config.developerPinBootstrapToken ?? '').trim();
+  return t || null;
+}
+
+/** Compare two strings without leaking the expected value through a length check. */
+function tokenMatches(provided: string, expected: string): boolean {
+  return safeEqual(sha256(provided), sha256(expected));
+}
 
 export function authRoutes(ctx: Ctx) {
   const r = Router();
@@ -153,6 +170,55 @@ export function authRoutes(ctx: Ctx) {
     await createSession(ctx, req, res, fresh);
     await audit(ctx.db, req, { action: 'auth.pin_setup', category: 'auth', targetType: 'user', targetId: fresh.id, targetLabel: handleOf(fresh) }, fresh);
     res.json({ user: selfUser(fresh) });
+  });
+
+  // One-time Developer PIN. Exists only while DEVELOPER_PIN_BOOTSTRAP_TOKEN is set.
+  // The token and the PIN are never logged. A database flag makes a second success impossible.
+  r.post('/auth/developer-pin/bootstrap', limiter, async (req, res) => {
+    const expected = configuredBootstrapToken(ctx);
+    if (!expected) throw new HttpError(404, 'Not found');
+    const body = parse(developerPinSchema, req.body);
+    const pin = requirePin(body.pin, 'PIN');
+    const confirm = requirePin(body.pinConfirm, 'Confirm PIN');
+    const actor = { id: 0, username: 'developer-pin-bootstrap', role: 'SYSTEM' };
+    const fail = async (status: number, message: string, code: string, reason: string) => {
+      await audit(ctx.db, req, { action: 'auth.developer_pin_bootstrap_failed', category: 'auth', targetType: 'user', targetLabel: 'developer', details: { reason } }, actor);
+      throw new HttpError(status, message, code);
+    };
+    if (!tokenMatches(body.token, expected)) await fail(401, 'That setup token was not accepted.', 'bad_token', 'bad_token');
+    if (pin !== confirm) await fail(400, 'The PINs do not match.', 'mismatch', 'mismatch');
+
+    const devId = await ctx.db.transaction(async (trx) => {
+      const used = await trx('site_settings').where({ key: DEVELOPER_PIN_BOOTSTRAP_KEY }).first();
+      if (used) throw new HttpError(409, 'This setup was already used.', 'already_used');
+      const dev = await trx<UserRow>('users').where({ role: 'DEVELOPER' }).orderBy('id', 'asc').first();
+      if (!dev) throw new HttpError(404, 'No Developer account to update.', 'not_found');
+      const now = new Date().toISOString();
+      const n = await trx('users').where({ id: dev.id, role: 'DEVELOPER' }).update({
+        password_hash: await hashPassword(pin),
+        pin_set: true,
+        must_change_password: false,
+        password_changed_at: now,
+      });
+      if (n !== 1) throw new HttpError(409, 'The Developer account could not be updated.', 'conflict');
+      await trx('sessions').where({ user_id: dev.id }).delete();
+      await trx('game_tokens').where({ user_id: dev.id }).delete();
+      try {
+        await trx('site_settings').insert({
+          key: DEVELOPER_PIN_BOOTSTRAP_KEY,
+          value: JSON.stringify({ used: true, userId: dev.id }),
+          updated_by: dev.id,
+          updated_at: now,
+        });
+      } catch (e) {
+        if (e instanceof HttpError) throw e;
+        throw new HttpError(409, 'This setup was already used.', 'already_used');
+      }
+      return dev.id;
+    });
+
+    await audit(ctx.db, req, { action: 'auth.developer_pin_bootstrap', category: 'auth', targetType: 'user', targetId: devId, targetLabel: 'developer' }, actor);
+    res.json({ ok: true });
   });
 
   r.post('/auth/logout', async (req, res) => {

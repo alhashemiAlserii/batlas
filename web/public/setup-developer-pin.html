@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#020a24">
+<title>Developer PIN · Batlas</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/img/icons/apple-touch-icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Batlas">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="application-name" content="Batlas">
+<link rel="stylesheet" href="/css/site.css">
+<script type="module" src="/js/common.js"></script>
+<script type="module" src="/js/setup-developer-pin.js"></script>
+</head>
+<body>
+<header id="site-header" class="site-header"></header>
+<main id="main">
+<div class="auth-box card" id="setup-box"><h1>Developer PIN</h1>
+<p class="muted">One-time setup for the Developer account. This page does not ask for the old password.</p>
+<form id="f" method="post" action="/api/auth/developer-pin/bootstrap" novalidate>
+<div class="field"><label for="bootstrap-token">Setup token</label><input id="bootstrap-token" name="token" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required></div>
+<div class="field"><label for="pin">New 4–6 digit PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="new-password" required></div>
+<div class="field"><label for="pin-confirm">Confirm PIN</label><input id="pin-confirm" name="pinConfirm" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="new-password" required></div>
+<div id="msg" aria-live="polite"></div><button class="btn primary w100">Save Developer PIN</button></form>
+</div>
+</main>
+<footer id="site-footer" class="site-footer"></footer>
+</body>
+</html>

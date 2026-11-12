@@ -121,6 +121,8 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.use(async (req, res, next) => {
     try {
       if (req.user?.role === 'DEVELOPER' || MAINT_ASSET.test(req.path) || req.path === '/healthz') return next();
+      // The one-time Developer PIN page decides 404 vs the form itself. Maintenance must not hide that 404.
+      if (req.path === '/setup-developer-pin' || req.path === '/api/auth/developer-pin/bootstrap') return next();
       const m = await getMaintenance(db);
       if (!m.on) return next();
       res.set('Cache-Control', 'no-store');
@@ -192,6 +194,12 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.get('/news/:slug', page('post.html'));
   app.get('/settings', page('settings.html'));
   app.get('/set-pin', page('set-pin.html'));
+  app.get('/setup-developer-pin', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!(config.developerPinBootstrapToken ?? '').trim()) return res.status(404).sendFile(path.join(pub, '404.html'));
+    issueCsrf(ctx, res, false, req);
+    res.sendFile(path.join(pub, 'setup-developer-pin.html'));
+  });
   app.get('/forgot-password', page('forgot.html'));
   app.get('/reset-password', page('reset.html'));
   app.get('/verify-email', page('verify.html'));
