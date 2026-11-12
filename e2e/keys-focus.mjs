@@ -14,7 +14,7 @@ for (const [name, type] of [['chromium', chromium], ['webkit', webkit]].slice(0,
     const p = await ctx.newPage();
     p.on('pageerror', (e) => errs.push(`[${label}] ${e.message}`));
     await p.goto(`${B}/login`);
-    const st = await p.evaluate(async (u) => { const c = (await (await fetch('/api/csrf')).json()).csrfToken; return (await fetch('/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': c }, body: JSON.stringify({ username: u, password: 'Sky-crew-test-pass-1' }) })).status; }, `e2e_kf${label}${name[0]}${Date.now() % 100000}`);
+    const st = await p.evaluate(async (u) => { const c = (await (await fetch('/api/csrf')).json()).csrfToken; return (await fetch('/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': c }, body: JSON.stringify({ username: u, pin: '123456' }) })).status; }, `e2e_kf${label}${name[0]}${Date.now() % 100000}`);
     if (st >= 300) throw new Error(`register ${st}`);
     await p.goto(`${B}/play/sky-crew?fps=2`); await p.waitForFunction(() => window.skyCrew?.ready, null, { timeout: 30000 }); await p.waitForSelector('#bJoin:not([disabled])');
     return p;

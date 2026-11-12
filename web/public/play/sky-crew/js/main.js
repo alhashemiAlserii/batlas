@@ -621,7 +621,7 @@ net.addEventListener('left', (e) => {
 });
 net.addEventListener('fx', (e) => {
   const { cmd, args, by } = e.detail;
-  const who = `${by.username}`;
+  const who = by.displayName || by.username;
   if (cmd === 'spawn' && sim.host) {
     const src = by.cid === myId() ? me.pos : remotes.get(by.cid)?.target || me.pos;
     for (let i = 0; i < args.count; i++) { const dir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5); sim.spawnItem(args.item, [src.x + dir.x, src.y + 1.6 + i * 0.4, src.z + dir.z], { id: args.ids?.[i] || null }); }
@@ -646,7 +646,7 @@ net.addEventListener('fx', (e) => {
 net.addEventListener('admin_denied', (e) => { $('#admMsg').textContent = `Denied: ${e.detail.reason}`; });
 net.addEventListener('admin_ok', (e) => { if (e.detail.cmd !== 'use') $('#admMsg').textContent = `Done: ${e.detail.cmd}`; });
 net.addEventListener('inventory', (e) => { devInv = e.detail; if (!$('#admin').classList.contains('hidden')) renderAdmin(); });
-net.addEventListener('chat', (e) => chatLine(e.detail.username, e.detail.role, e.detail.text));
+net.addEventListener('chat', (e) => chatLine(e.detail.displayName || e.detail.username, e.detail.role, e.detail.text));
 net.addEventListener('announce', (e) => { UI.toast(`📣 ${e.detail.by}: ${e.detail.text}`, 'warn', 9000); chatLine(`📣 ${e.detail.by}`, 'DEVELOPER', e.detail.text); });
 net.addEventListener('muted', (e) => UI.toast(e.detail.minutes ? `🔇 ${e.detail.by} muted you for ${e.detail.minutes} min.` : 'You can chat again.', 'warn'));
 net.addEventListener('maintenance', (e) => showMaintenance(e.detail.message));
@@ -1300,7 +1300,9 @@ net.addEventListener('error', (e) => { const m = errMsg[e.detail.code]; if (!m) 
 const user = await Net.me();
 if (user) {
   myRole = user.role;
-  $('#meLine').replaceChildren('Signed in as ', UI.rankBadge(user.role), UI.el('span', { class: `name-${user.role.toLowerCase()}` }, user.displayName || user.username), '. Co-op rooms use your Batlas rank.');
+  const handle = user.handle || user.username;
+  const shown = user.displayName || handle;
+  $('#meLine').replaceChildren('Signed in as ', UI.rankBadge(user.role), UI.el('span', { class: `name-${user.role.toLowerCase()}` }, shown), shown !== handle ? ` (@${handle})` : '', '. Co-op rooms use your Batlas rank.');
   $('#bCreate').disabled = false; $('#bJoin').disabled = false;
   await loadWallet();
   try { const o = await api('GET', '/api/game/sky-crew/outfit'); if (o?.outfit) { myOutfit = o.outfit; dressMe(); } } catch { /* keep the local look */ }

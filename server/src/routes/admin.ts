@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 const reasonSchema = z.object({ reason: z.string().trim().max(500).optional() });
 const roleSchema = z.object({
   role: z.enum(ROLES),
+  confirmPin: z.string().max(200).optional(),
   confirmPassword: z.string().max(200).optional(),
 });
 
@@ -51,7 +52,11 @@ export function adminRoutes(ctx: Ctx) {
     let query = ctx.db<UserRow>('users').orderBy('id', 'asc').limit(200);
     if (q) {
       const like = `%${q.replace(/[%_\\]/g, (c) => '\\' + c)}%`;
-      query = query.where((b) => b.whereRaw("username_lower LIKE ? ESCAPE '\\'", [like]).orWhereRaw("email_lower LIKE ? ESCAPE '\\'", [like]));
+      query = query.where((b) =>
+        b.whereRaw("username_lower LIKE ? ESCAPE '\\'", [like])
+          .orWhereRaw("coalesce(handle_lower, '') LIKE ? ESCAPE '\\'", [like])
+          .orWhereRaw("lower(coalesce(display_name, '')) LIKE ? ESCAPE '\\'", [like])
+          .orWhereRaw("coalesce(email_lower, '') LIKE ? ESCAPE '\\'", [like]));
     }
     if (isRole(role)) query = query.andWhere({ role });
     const users = await query;
@@ -91,23 +96,25 @@ export function adminRoutes(ctx: Ctx) {
     res.json({ ok: true });
   });
 
-  // Staff password reset (email is optional, so this replaces "forgot password" for most players).
-  // Issues a one-time temporary password, signs the player out everywhere and forces a new
-  // password at next login. canActOn: Admins only for Players/Trusted; nobody can reset a Developer.
-  r.post('/admin/users/:id/temp-password', requirePermission('players.reset_password'), async (req, res) => {
+  // Staff PIN reset (email is optional, so this is how a forgotten PIN is replaced).
+  // Issues a one-time temporary PIN, signs the player out everywhere and forces a new
+  // PIN at next login. canActOn: Admins only for Players/Trusted; nobody can reset a Developer.
+  // The PIN is returned once in this response and is never written to the audit log.
+  const resetPin = async (req: Request, res: import('express').Response) => {
     const target = await loadTarget(ctx, req);
     await guard(ctx, req, target, 'player.password_reset');
-    const temp = tempPassword();
+    const temp = tempPin();
     await ctx.db.transaction(async (trx) => {
-      await trx('users').where({ id: target.id }).update({ password_hash: await hashPassword(temp), must_change_password: true, password_changed_at: new Date().toISOString() });
+      await trx('users').where({ id: target.id }).update({ password_hash: await hashPassword(temp), pin_set: true, must_change_password: true, password_changed_at: new Date().toISOString() });
       await trx('sessions').where({ user_id: target.id }).delete();
       await trx('game_tokens').where({ user_id: target.id }).delete();
       await trx('auth_tokens').where({ user_id: target.id }).whereNull('used_at').update({ used_at: new Date().toISOString() });
     });
-    // The password itself is never logged.
     await audit(ctx.db, req, { action: 'player.password_reset', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username });
-    res.json({ ok: true, temporaryPassword: temp, note: 'Give this to the player privately. It works once; they must choose a new password after logging in.' });
-  });
+    res.json({ ok: true, temporaryPin: temp, temporaryPassword: temp, note: 'Give this PIN to the player privately. It works once; they must choose a new PIN after signing in.' });
+  };
+  r.post('/admin/users/:id/temp-password', requirePermission('players.reset_password'), resetPin);
+  r.post('/admin/users/:id/reset-pin', requirePermission('players.reset_password'), resetPin);
 
   // Permanently delete an account. Developer only (players.delete), never a Developer, never yourself.
   // The client must echo the exact username as confirmation.
@@ -120,7 +127,8 @@ export function adminRoutes(ctx: Ctx) {
       await audit(ctx.db, req, { action: 'player.delete.denied', category: 'moderation', targetType: 'user', targetId: target.id, targetLabel: target.username, details: { reason: refuse, targetRole: target.role } });
       throw new HttpError(403, refuse, 'protected');
     }
-    if (confirm !== target.username) throw new HttpError(400, `Type the username "${target.username}" to confirm.`, 'confirm_required');
+    // The client must echo the exact handle as confirmation.
+    if (confirm !== target.username && confirm !== (target.handle || target.username)) throw new HttpError(400, `Type the handle "${target.handle || target.username}" to confirm.`, 'confirm_required');
     const removed: Record<string, number> = {};
     await ctx.db.transaction(async (trx) => {
       for (const t of ['sessions', 'game_tokens', 'auth_tokens', 'game_flights']) removed[t] = await trx(t).where({ user_id: target.id }).delete();
@@ -153,9 +161,10 @@ export function adminRoutes(ctx: Ctx) {
       }
     }
     if (newRole === 'DEVELOPER') {
-      // Granting ownership-level access needs the Developer to re-confirm their password.
-      const ok = body.confirmPassword ? await verifyPassword(actor.password_hash, body.confirmPassword) : false;
-      if (!ok) throw new HttpError(403, 'Re-enter your password to grant Developer status.', 'reauth_required');
+      // Granting ownership-level access needs the Developer to re-confirm their PIN.
+      const secret = body.confirmPin ?? body.confirmPassword ?? '';
+      const ok = secret ? await verifyPassword(actor.password_hash, secret) : false;
+      if (!ok) throw new HttpError(403, 'Re-enter your PIN to grant Developer status.', 'reauth_required');
     }
     if (newRole === target.role) return res.json({ ok: true, unchanged: true });
     await ctx.db('users').where({ id: target.id }).update({ role: newRole });
@@ -193,10 +202,7 @@ function fmt(r: any) {
   };
 }
 
-/** 12 chars from an unambiguous alphabet (no 0/O/1/l/I), grouped for reading aloud: abcd-efgh-jkmn */
-function tempPassword() {
-  const A = 'abcdefghjkmnpqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(12);
-  const chars = [...bytes].map((b) => A[b % A.length]).join('');
-  return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
+/** 6 digit PIN, shown once to staff and never written to a log. */
+function tempPin() {
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
 }

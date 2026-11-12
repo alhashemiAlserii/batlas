@@ -12,7 +12,8 @@ import { requireAuth, createSession } from '../lib/session.js';
 import { hashPassword, verifyPassword, randomToken } from '../lib/crypto.js';
 import { issueToken, consumeToken } from '../lib/tokens.js';
 import { audit } from '../lib/audit.js';
-import { passwordSchema, optionalEmail } from '../lib/schemas.js';
+import { optionalEmail } from '../lib/schemas.js';
+import { handleOf, pinIsSet, requirePin } from '../lib/identity.js';
 import { IMAGE_TYPES } from './games.js';
 import { storeMedia, mediaIdFromUrl } from '../lib/media.js';
 import { deleteOwnAccount } from '../lib/account-delete.js';
@@ -26,7 +27,7 @@ export async function sendVerificationEmail(ctx: Ctx, user: UserRow) {
   await ctx.mailer.send({
     to: user.email,
     subject: 'Confirm your Batlas account email',
-    text: `Hi ${user.username},\n\nConfirm your email address for your Batlas account:\n${ctx.config.publicUrl}/verify-email?token=${token}\n\nThis link expires in 24 hours. If you didn't create a Batlas account, you can ignore this email.\n\n— Batlas`,
+    text: `Hi ${user.display_name || handleOf(user)},\n\nConfirm your email address for your Batlas account:\n${ctx.config.publicUrl}/verify-email?token=${token}\n\nThis link expires in 24 hours. If you didn't add an email on Batlas, you can ignore this email.\n\n— Batlas`,
   });
 }
 
@@ -77,8 +78,8 @@ export function accountRoutes(ctx: Ctx) {
       const token = await issueToken(ctx, u.id, 'reset_password', u.email!);
       await ctx.mailer.send({
         to: u.email!,
-        subject: 'Reset your Batlas password',
-        text: `Hi ${u.username},\n\nSomeone (hopefully you) asked to reset your Batlas password. Choose a new one here:\n${ctx.config.publicUrl}/reset-password?token=${token}\n\nThis link expires in 1 hour and can only be used once. If you didn't ask for this, ignore this email; your password stays the same.\n\n— Batlas`,
+        subject: 'Reset your Batlas PIN',
+        text: `Hi ${u.display_name || handleOf(u)},\n\nSomeone asked to reset the PIN for your Batlas account. Choose a new PIN here:\n${ctx.config.publicUrl}/reset-password?token=${token}\n\nThis link expires in 1 hour and can only be used once. If you didn't ask for this, ignore this email. Most players reset a forgotten PIN by asking a Batlas admin.\n\n— Batlas`,
       });
       await audit(ctx.db, req, { action: 'auth.password_reset_requested', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: u.username }, u);
     }
@@ -86,12 +87,13 @@ export function accountRoutes(ctx: Ctx) {
   });
 
   r.post('/auth/password/reset', limiter, emailOn, async (req, res) => {
-    const body = parse(tokenSchema.extend({ password: passwordSchema }), req.body);
+    const body = parse(tokenSchema.extend({ pin: z.string().max(20).optional(), password: z.string().max(200).optional() }), req.body);
+    const pin = requirePin(body.pin ?? body.password, 'PIN');
     const row = await consumeToken(ctx, body.token, 'reset_password');
     if (!row) throw new HttpError(400, 'This reset link is invalid, expired or already used.', 'invalid_token');
     const u = await ctx.db<UserRow>('users').where({ id: row.user_id }).first();
     if (!u || u.banned) throw new HttpError(400, 'This reset link is no longer valid.', 'invalid_token');
-    await ctx.db('users').where({ id: u.id }).update({ password_hash: await hashPassword(body.password), password_changed_at: new Date().toISOString(), must_change_password: false });
+    await ctx.db('users').where({ id: u.id }).update({ password_hash: await hashPassword(pin), pin_set: true, password_changed_at: new Date().toISOString(), must_change_password: false });
     await revokeAllSessions(ctx, u.id);
     // The reset link proves control of the email address.
     if (!u.email_verified_at && u.email_lower && u.email_lower === String(row.email).toLowerCase()) await ctx.db('users').where({ id: u.id }).update({ email_verified_at: new Date().toISOString() });
@@ -99,24 +101,38 @@ export function accountRoutes(ctx: Ctx) {
     res.json({ ok: true });
   });
 
-  // ---- change password (logged in) ----
-  r.post('/me/password', requireAuth, limiter, async (req, res) => {
-    const body = parse(z.object({ currentPassword: z.string().min(1).max(200), newPassword: passwordSchema }), req.body);
+  // ---- change PIN (logged in). /me/password is the same action for older clients. ----
+  const changePin = async (req: import('express').Request, res: import('express').Response) => {
+    const body = parse(z.object({
+      currentPin: z.string().max(200).optional(),
+      currentPassword: z.string().max(200).optional(),
+      newPin: z.string().max(20).optional(),
+      newPassword: z.string().max(200).optional(),
+    }), req.body);
+    const current = body.currentPin ?? body.currentPassword ?? '';
+    const next = requirePin(body.newPin ?? body.newPassword, 'New PIN');
     const u = req.user!;
-    if (!(await verifyPassword(u.password_hash, body.currentPassword))) throw new HttpError(403, 'Your current password is incorrect.', 'bad_credentials');
-    if (body.currentPassword === body.newPassword) throw new HttpError(400, 'Choose a password different from your current one.');
-    await ctx.db('users').where({ id: u.id }).update({ password_hash: await hashPassword(body.newPassword), password_changed_at: new Date().toISOString(), must_change_password: false });
+    if (!pinIsSet(u) || !(await verifyPassword(u.password_hash, current))) throw new HttpError(403, 'Your current PIN is incorrect.', 'bad_credentials');
+    if (current === next) throw new HttpError(400, 'Choose a PIN different from your current one.');
+    await ctx.db('users').where({ id: u.id }).update({ password_hash: await hashPassword(next), pin_set: true, password_changed_at: new Date().toISOString(), must_change_password: false });
     await revokeAllSessions(ctx, u.id); // logs out every device...
     await createSession(ctx, req, res, u); // ...then keeps this one signed in with a fresh session
-    await audit(ctx.db, req, { action: 'auth.password_change', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: u.username });
+    await audit(ctx.db, req, { action: 'auth.pin_change', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: handleOf(u) });
     res.json({ ok: true });
-  });
+  };
+  r.post('/me/pin', requireAuth, limiter, changePin);
+  r.post('/me/password', requireAuth, limiter, changePin);
 
-  // ---- optional email: add / change / remove (needs current password) ----
+  // ---- optional email: add / change / remove (needs current PIN) ----
   r.post('/me/email', requireAuth, limiter, async (req, res) => {
-    const body = parse(z.object({ email: optionalEmail, currentPassword: z.string().min(1).max(200) }), req.body);
+    const body = parse(z.object({
+      email: optionalEmail,
+      currentPin: z.string().max(200).optional(),
+      currentPassword: z.string().max(200).optional(),
+    }), req.body);
     const u = req.user!;
-    if (!(await verifyPassword(u.password_hash, body.currentPassword))) throw new HttpError(403, 'Your current password is incorrect.', 'bad_credentials');
+    const current = body.currentPin ?? body.currentPassword ?? '';
+    if (!pinIsSet(u) || !(await verifyPassword(u.password_hash, current))) throw new HttpError(403, 'Your current PIN is incorrect.', 'bad_credentials');
     const email = body.email ?? null;
     if (email && (await ctx.db('users').where({ email_lower: email }).whereNot({ id: u.id }).first())) throw new HttpError(409, 'That email is already used by another account.', 'conflict');
     const changed = (u.email_lower ?? null) !== email;
@@ -128,7 +144,7 @@ export function accountRoutes(ctx: Ctx) {
   });
 
   // ---- delete my own account ----
-  // Needs the current password AND the exact username typed. Never for a Developer (also re-checked
+  // Needs the current PIN AND the exact handle typed. Never for a Developer (also re-checked
   // inside the transaction). Website session only (not a game token). Limited per account and per IP.
   const deleteLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -141,19 +157,28 @@ export function accountRoutes(ctx: Ctx) {
   r.post('/me/delete', requireAuth, limiter, deleteLimiter, async (req, res) => {
     const u = req.user!;
     if (req.authVia !== 'session') throw new HttpError(403, 'Delete your account from the website.', 'forbidden');
-    const body = parse(z.object({ password: z.string().min(1).max(200), username: z.string().max(64) }), req.body);
-    const deny = async (reason: string) => audit(ctx.db, req, { action: 'account.self_delete.denied', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: u.username, details: { reason } });
+    const body = parse(z.object({
+      pin: z.string().max(200).optional(),
+      password: z.string().max(200).optional(),
+      handle: z.string().max(64).optional(),
+      username: z.string().max(64).optional(),
+    }), req.body);
+    const deny = async (reason: string) => audit(ctx.db, req, { action: 'account.self_delete.denied', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: handleOf(u), details: { reason } });
     if (u.role === 'DEVELOPER') {
       await deny('developer');
       throw new HttpError(403, 'Developer accounts cannot be deleted. Transfer the Developer rank first.', 'protected');
     }
-    if (!(await verifyPassword(u.password_hash, body.password))) {
-      await deny('wrong_password');
-      throw new HttpError(403, 'Your password is incorrect.', 'bad_credentials');
+    const secret = body.pin ?? body.password ?? '';
+    if (!pinIsSet(u) || !(await verifyPassword(u.password_hash, secret))) {
+      await deny('wrong_pin');
+      throw new HttpError(403, 'Your PIN is incorrect.', 'bad_credentials');
     }
-    if (body.username !== u.username) {
-      await deny('wrong_username');
-      throw new HttpError(400, `Type your username exactly ("${u.username}") to confirm.`, 'confirm_required');
+    const typed = body.handle ?? body.username;
+    const handle = handleOf(u);
+    if (typeof typed !== 'string' || typed.length === 0) throw new HttpError(400, `Type your handle exactly ("${handle}") to confirm.`, 'confirm_required');
+    if (typed !== handle) {
+      await deny('wrong_handle');
+      throw new HttpError(400, `Type your handle exactly ("${handle}") to confirm.`, 'confirm_required');
     }
     const r = await deleteOwnAccount(ctx.db, u.id, { uploadDir: ctx.config.uploadDir });
     const names = cookieNames(ctx.config.cookieSecure);

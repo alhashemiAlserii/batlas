@@ -32,7 +32,7 @@ const api = (p, method, url, body) => p.evaluate(async ({ method, url, body }) =
 }, { method, url, body });
 async function login(c, username, password, register = false) {
   await c.p.goto(`${B}/login`);
-  const r = await api(c.p, 'POST', register ? '/api/auth/register' : '/api/auth/login', register ? { username, password } : { login: username, password });
+  const r = await api(c.p, 'POST', register ? '/api/auth/register' : '/api/auth/login', register ? { username, pin: password } : { login: username, pin: password });
   if (r.status >= 300) throw new Error(`${register ? 'register' : 'login'} ${username} -> ${r.status}`);
 }
 const tap = async (c, sel) => { await c.p.waitForSelector(sel, { state: 'visible', timeout: 15000 }); await c.p.$eval(sel, (b) => { if (b.disabled) throw new Error(`${b.id} disabled`); b.click(); }); };

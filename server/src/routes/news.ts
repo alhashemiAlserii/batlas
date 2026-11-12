@@ -42,7 +42,7 @@ function out(p: any, includeBody = true) {
     status: p.status,
     pinned: !!p.pinned,
     gameId: p.game_id ?? null,
-    author: p.author_username ? { username: p.author_username, displayName: p.author_display ?? p.author_username, role: p.author_role, avatarUrl: p.author_avatar ?? '' } : null,
+    author: p.author_username ? { handle: p.author_handle || p.author_username, username: p.author_handle || p.author_username, displayName: p.author_display || p.author_handle || p.author_username, role: p.author_role, avatarUrl: p.author_avatar ?? '' } : null,
     publishedAt: p.published_at,
     updatedAt: p.updated_at,
   };
@@ -54,7 +54,7 @@ export function newsRoutes(ctx: Ctx) {
     ctx
       .db('news_posts as n')
       .leftJoin('users as u', 'u.id', 'n.author_id')
-      .select('n.*', 'u.username as author_username', 'u.display_name as author_display', 'u.role as author_role', 'u.avatar_url as author_avatar');
+      .select('n.*', 'u.username as author_username', 'u.handle as author_handle', 'u.display_name as author_display', 'u.role as author_role', 'u.avatar_url as author_avatar');
 
   // ---- public ----
   r.get('/news', async (req, res) => {

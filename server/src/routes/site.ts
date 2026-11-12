@@ -8,6 +8,7 @@ import { requirePermission } from '../lib/session.js';
 import { audit } from '../lib/audit.js';
 import { insertId } from '../db/index.js';
 import { hasPermission } from '../lib/permissions.js';
+import { displayNameSchema } from '../lib/schemas.js';
 import { getMaintenance, setMaintenance } from '../lib/maintenance.js';
 import { storeMedia, sniff, mediaOut, MEDIA_TYPES, IMAGE_MAX_BYTES, VIDEO_MAX_BYTES } from '../lib/media.js';
 import { loadTarget, guard } from './admin.js';
@@ -142,7 +143,7 @@ export function siteRoutes(ctx: Ctx, deps: { liveRooms?: LiveRoomsProvider } = {
 
   // ---------- player account management ----------
   r.patch('/admin/users/:id/profile', requirePermission('players.edit'), async (req, res) => {
-    const b = parse(z.object({ displayName: z.string().trim().min(1).max(40).optional(), bio: z.string().trim().max(500).optional() }).strict(), req.body);
+    const b = parse(z.object({ displayName: displayNameSchema.optional(), bio: z.string().trim().max(500).optional() }).strict(), req.body);
     const target = await loadTarget(ctx, req);
     await guard(ctx, req, target, 'player.profile_edit');
     const update: Record<string, unknown> = {};

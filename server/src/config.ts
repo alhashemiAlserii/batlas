@@ -33,6 +33,11 @@ export interface AppConfig {
   emailEnabled: boolean;
   outboxDir: string;
   contactRateLimit: { windowMs: number; max: number };
+  /**
+   * When set, GET /setup-developer-pin and its API accept one PIN for the Developer account.
+   * Empty or missing disables both (404). Never logged.
+   */
+  developerPinBootstrapToken: string | null;
 }
 
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -60,6 +65,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     emailEnabled: process.env.EMAIL_ENABLED === 'true',
     outboxDir: process.env.OUTBOX_DIR ?? path.join(SERVER_ROOT, 'data', 'outbox'),
     contactRateLimit: { windowMs: 60 * 60 * 1000, max: Number(process.env.CONTACT_RATE_LIMIT ?? 5) },
+    developerPinBootstrapToken: (process.env.DEVELOPER_PIN_BOOTSTRAP_TOKEN ?? '').trim() || null,
     ...overrides,
   };
 }

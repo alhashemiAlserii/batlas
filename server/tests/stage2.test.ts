@@ -152,12 +152,12 @@ describe('password reset', () => {
     expect(mail.subject).toMatch(/Reset/);
     const token = tokenFrom(mail.text);
     expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, password: 'short' })).status).toBe(400);
-    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, password: 'brand-new-password-1' })).status).toBe(200);
-    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, password: 'another-password-22' })).status).toBe(400); // single use
+    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, pin: '424242' })).status).toBe(200);
+    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, pin: '424242' })).status).toBe(400); // single use
     expect((await u.agent.get('/api/me')).body.user).toBeNull();
     expect((await other.agent.get('/api/me')).body.user).toBeNull();
-    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'forgetful', password: PW })).status).toBe(401);
-    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'forgetful', password: 'brand-new-password-1' })).status).toBe(200);
+    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'forgetful', pin: PW })).status).toBe(401);
+    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'forgetful', pin: '424242' })).status).toBe(200);
   });
 
   it('expired reset tokens are rejected', async () => {
@@ -166,14 +166,14 @@ describe('password reset', () => {
     await a.agent.post('/api/auth/password/forgot').set('x-csrf-token', a.csrf).send({ email: u.email });
     const token = tokenFrom(env.mailer.last(u.email)!.text);
     await env.db('auth_tokens').where({ user_id: u.id, purpose: 'reset_password' }).update({ expires_at: new Date(Date.now() - 1).toISOString() });
-    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, password: 'brand-new-password-1' })).status).toBe(400);
+    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, pin: '424242' })).status).toBe(400);
   });
 
   it('a verification token cannot be used as a reset token', async () => {
     const u = await register('mixup');
     const token = tokenFrom(env.mailer.last(u.email)!.text); // verify_email token
     const a = await anon();
-    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, password: 'brand-new-password-1' })).status).toBe(400);
+    expect((await a.agent.post('/api/auth/password/reset').set('x-csrf-token', a.csrf).send({ token, pin: '424242' })).status).toBe(400);
   });
 
   it('forgot-password is rate limited', async () => {
@@ -193,16 +193,16 @@ describe('change password', () => {
     const other = await anon();
     await other.agent.post('/api/auth/login').set('x-csrf-token', other.csrf).send({ login: 'changer', password: PW });
     expect((await request(env.app).post('/api/me/password').set('x-csrf-token', 'x').send({})).status).toBe(403);
-    expect((await send(u, 'post', '/api/me/password', { currentPassword: 'wrong-password!', newPassword: 'new-password-123' })).status).toBe(403);
-    const ok = await send(u, 'post', '/api/me/password', { currentPassword: PW, newPassword: 'new-password-123' });
+    expect((await send(u, 'post', '/api/me/pin', { currentPin: '999999', newPin: '424242' })).status).toBe(403);
+    const ok = await send(u, 'post', '/api/me/pin', { currentPin: PW, newPin: '424242' });
     expect(ok.status).toBe(200);
     expect((await other.agent.get('/api/me')).body.user).toBeNull(); // other device logged out
     expect((await u.agent.get('/api/me')).body.user.username).toBe('changer'); // this device gets a fresh session
     const sessions = await env.db('sessions').where({ user_id: u.id });
     expect(sessions).toHaveLength(1);
     const a = await anon();
-    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'changer', password: PW })).status).toBe(401);
-    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'changer', password: 'new-password-123' })).status).toBe(200);
+    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'changer', pin: PW })).status).toBe(401);
+    expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'changer', pin: '424242' })).status).toBe(200);
   });
 });
 

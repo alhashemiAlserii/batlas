@@ -41,7 +41,7 @@ async function overflow(page, label) {
 }
 async function login(page, user, pw) {
   await page.goto(`${B}/login`);
-  await page.fill('#login', user); await page.fill('#password', pw);
+  await page.fill('#login', user); await page.fill('#pin', pw);
   await Promise.all([page.waitForURL((u) => !u.pathname.startsWith('/login')), page.click('#f button')]);
   await page.waitForLoadState('networkidle');
 }
@@ -147,11 +147,11 @@ console.log('Phase 1: dashboard actions');
   const pp = await pctx.newPage(); watch(pp, 'player');
   const uname = 'pl_' + Date.now().toString(36).slice(-6), uname2 = uname + 'b';
   for (const u of [uname2, uname]) {
-    await pp.goto(`${B}/register`); await pp.fill('#username', u); await pp.fill('#password', 'player-pass-123456');
+    await pp.goto(`${B}/register`); await pp.fill('#handle', u); await pp.fill('#pin', '123456'); await pp.fill('#pin2', '123456');
     await Promise.all([pp.waitForURL('**/profile'), pp.click('#f button')]);
     if (u === uname2) { await pp.click('text=Log out'); await pp.waitForTimeout(300); }
   }
-  ok('register two players (username + password only)');
+  ok('register two players (handle + PIN only)');
   await tab(page, 'users');
   await page.fill('input[type=search]', uname); await page.waitForTimeout(600);
   const row = () => page.locator(`tr:has(a[href="/u/${uname}"])`).first();
@@ -162,7 +162,7 @@ console.log('Phase 1: dashboard actions');
   answer('Friendly Pilot', true); await row().locator('[data-action="edit-profile"]').click(); await page.waitForTimeout(600);
   expect(await row().textContent().then((t) => t.includes('Friendly Pilot')), 'edit player profile (display name)');
   answer('testing kick'); await row().locator('button:has-text("Kick")').click(); await page.locator('.alert.ok:has-text("kicked")').waitFor(); ok('kick');
-  answer(true); await row().locator('button:has-text("Reset password")').click(); await page.locator('.temp-pw').waitFor(); ok('temporary password');
+  answer(true); await row().locator('button:has-text("Reset PIN")').click(); await page.locator('.temp-pw').waitFor(); ok('temporary PIN');
   answer('spam'); await row().locator('button:has-text("Ban")').click(); await page.locator('.alert.ok:has-text("banned")').waitFor(); ok('ban');
   await row().locator('button:has-text("Unban")').click(); await page.locator('.alert.ok:has-text("unbanned")').waitFor(); ok('unban');
   await page.fill('input[type=search]', DEV.user); await page.waitForTimeout(600);
@@ -212,7 +212,7 @@ console.log('Phase 1: dashboard actions');
   await ap.screenshot({ scale: 'css', path: `${OUT}/maintenance-desktop.png` });
   expect((await pp.goto(`${B}/games`)).status() === 503, 'existing player session gets the maintenance page');
   expect(await pp.evaluate(async () => (await fetch('/api/me')).status) === 503, 'player API calls get 503');
-  await pp.goto(`${B}/login`); await pp.fill('#login', uname2); await pp.fill('#password', 'player-pass-123456'); await pp.click('#f button');
+  await pp.goto(`${B}/login`); await pp.fill('#login', uname2); await pp.fill('#pin', '123456'); await pp.click('#f button');
   await pp.locator('.alert.error:has-text("maintenance")').waitFor(); ok('non-Developer login refused during maintenance');
   await page.goto(`${B}/`); await page.waitForSelector('.site-banner.maint-on');
   ok('Developer still sees the site, with a "Maintenance mode is ON" banner');

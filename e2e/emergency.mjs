@@ -24,7 +24,7 @@ const api = (p, method, url, body) => p.evaluate(async ({ method, url, body }) =
   const r = await fetch(url, { method, headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: body ? JSON.stringify(body) : undefined });
   let j = null; try { j = await r.json(); } catch { /* empty */ } return { status: r.status, j };
 }, { method, url, body });
-const login = async (c, u, pw, reg) => { await c.p.goto(`${B}/login`); const r = await api(c.p, 'POST', reg ? '/api/auth/register' : '/api/auth/login', reg ? { username: u, password: pw } : { login: u, password: pw }); if (r.status >= 300) throw new Error(`login ${u} ${r.status}`); };
+const login = async (c, u, pw, reg) => { await c.p.goto(`${B}/login`); const r = await api(c.p, 'POST', reg ? '/api/auth/register' : '/api/auth/login', reg ? { username: u, pin: pw } : { login: u, pin: pw }); if (r.status >= 300) throw new Error(`login ${u} ${r.status}`); };
 const boot = async (c) => { await c.p.goto(`${B}/play/sky-crew?fps=2`); await c.p.waitForFunction(() => window.skyCrew?.ready, null, { timeout: 30000 }); await c.p.waitForSelector('#bJoin:not([disabled])'); };
 const E = (c) => c.p.evaluate(() => window.skyCrew.debug.emerg());
 const until = async (cs, pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await Promise.all(cs.map(E)); if (v.every(pred)) return true; await sleep(250); } return false; };

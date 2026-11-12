@@ -11,14 +11,14 @@
  * are passed through unchanged and never cached; only an unreachable network falls back to the cache,
  * then to /offline.html. Bump VERSION to drop every old cache on the next visit.
  */
-const VERSION = 'batlas-shell-v1';
+const VERSION = 'batlas-shell-v2';
 const PRECACHE = ['/offline.html', '/css/site.css', '/js/offline.js', '/manifest.webmanifest', '/img/icons/icon-192.png', '/img/icons/icon-512.png', '/img/icons/apple-touch-icon-180.png', '/favicon.ico'];
 
 const NEVER = /^\/(api|media|uploads|play|ws|studio-console|admin)(\/|$)|^\/healthz$|^\/sw\.js$/;
 const STATIC_NET_FIRST = /^\/(css|js)\//;
 const STATIC_CACHE_FIRST = /^\/(img|fonts)\/|^\/favicon\.ico$|^\/apple-touch-icon\.png$|^\/manifest\.webmanifest$/;
 /** Public page routes (same list as the server's page routes, minus private/gated ones). */
-const PAGES = /^\/($|games(\/[^/]+)?$|news(\/[^/]+)?$|login$|register$|profile$|u\/[^/]+$|contact$|settings$|forgot-password$|reset-password$|verify-email$|offline\.html$)/;
+const PAGES = /^\/($|games(\/[^/]+)?$|news(\/[^/]+)?$|login$|register$|profile$|u\/[^/]+$|contact$|settings$|set-pin$|forgot-password$|reset-password$|verify-email$|offline\.html$)/;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(VERSION).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));

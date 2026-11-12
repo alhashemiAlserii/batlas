@@ -9,21 +9,24 @@ import type { Role } from '../src/lib/permissions.js';
 import type { AppConfig } from '../src/config.js';
 import { MemoryMailer } from '../src/lib/mailer.js';
 
-export const PW = 'correct-horse-battery';
+/** Obvious test-only PIN. Not a real account secret. */
+export const TEST_PIN = '000000';
+/** @deprecated Same value as TEST_PIN. Older tests still pass it in the `password` field, which the server accepts as a PIN alias. */
+export const PW = TEST_PIN;
 
 /**
  * Fresh, migrated test database. In-memory SQLite by default; with TEST_DATABASE_URL set, a
  * throw-away schema in that Postgres (so parallel test files never share tables).
  */
-export async function testDb() {
+export async function testDb(opts: { migrate?: boolean } = {}) {
   const url = process.env.TEST_DATABASE_URL;
-  if (!url) { const db = createDb(':memory:'); await migrate(db); return db; }
+  if (!url) { const db = createDb(':memory:'); if (opts.migrate !== false) await migrate(db); return db; }
   const schema = `t_${process.pid}_${Math.random().toString(36).slice(2, 10)}`;
   const admin = createDb(url);
   await admin.raw(`create schema "${schema}"`);
   await admin.destroy();
   const db = createDb(url, { schema });
-  await migrate(db);
+  if (opts.migrate !== false) await migrate(db);
   // drop the schema again when the test closes the connection
   const destroy = db.destroy.bind(db);
   try {
@@ -43,10 +46,10 @@ export async function setup(overrides: Partial<AppConfig> = {}) {
   /** Creates a user directly in the DB (server-side) and returns a logged-in agent. */
   async function user(role: Role, name?: string) {
     const username = name ?? `${role.toLowerCase()}${++n}`;
-    const id = await insertId(db('users').insert({ username, username_lower: username.toLowerCase(), email: `${username}@test.dev`, email_lower: `${username}@test.dev`.toLowerCase(), password_hash: hashed, role, display_name: username, created_at: new Date().toISOString() }));
+    const id = await insertId(db('users').insert({ username, username_lower: username.toLowerCase(), handle: username, handle_lower: username.toLowerCase(), email: `${username}@test.dev`, email_lower: `${username}@test.dev`.toLowerCase(), password_hash: hashed, pin_set: true, role, display_name: username, created_at: new Date().toISOString() }));
     const agent = request.agent(app);
     const csrf = await getCsrf(agent);
-    const res = await agent.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: username, password: PW });
+    const res = await agent.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: username, pin: PW });
     if (res.status !== 200) throw new Error('login failed ' + res.status + JSON.stringify(res.body));
     return { id: Number(id), username, agent, csrf: cookieCsrf(res) ?? csrf };
   }

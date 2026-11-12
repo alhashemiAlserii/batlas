@@ -2,20 +2,24 @@
  * The ONLY way to create the first Developer (owner) account. Runs on the server machine,
  * never exposed over HTTP.
  *
- *   npm run create-developer -- --username Owner [--email you@example.com] [--password-file path] [--promote]
+ *   npm run create-developer -- --username Abood [--email you@example.com] [--password-file path] [--promote]
  *
- * Password: read from --password-file, or env DEV_PASSWORD, or generated and written to
- * --out (default ./data/developer-credentials.txt, chmod 600). It is never printed.
- * --promote upgrades an existing account (matched by username) to DEVELOPER instead.
+ * Secret: a 4–6 digit PIN from --password-file or env DEV_PASSWORD when that value is a PIN,
+ * otherwise a PIN is generated and written to --out (default ./data/developer-credentials.txt, chmod 600).
+ * A longer password in the file is stored only so the owner can set a PIN once; it is not a sign-in password.
+ * The secret is never printed.
+ * --promote upgrades an existing account (matched by handle) to DEVELOPER instead.
  */
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { createDb, migrate, insertId } from '../db/index.js';
 import { dbTarget, SERVER_ROOT } from '../config.js';
-import { hashPassword, randomToken } from '../lib/crypto.js';
+import { hashPassword } from '../lib/crypto.js';
 import { audit } from '../lib/audit.js';
-import { usernameSchema, passwordSchema } from '../lib/schemas.js';
+import { usernameSchema, passwordSchema, pinSchema } from '../lib/schemas.js';
+import { identityColumns } from '../lib/identity.js';
 
 const { values } = parseArgs({
   options: {
@@ -48,26 +52,27 @@ try {
     if (values['password-file']) password = fs.readFileSync(values['password-file'], 'utf8').trim();
     else if (process.env.DEV_PASSWORD) password = process.env.DEV_PASSWORD;
     else {
-      password = randomToken(18);
+      password = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
       generated = true;
     }
-    passwordSchema.parse(password);
+    if (!pinSchema.safeParse(password).success) passwordSchema.parse(password);
     const id = await insertId(db('users').insert({
-      username,
-      username_lower: username.toLowerCase(),
+      ...identityColumns(username),
       email,
       email_lower: email,
       password_hash: await hashPassword(password),
+      pin_set: pinSchema.safeParse(password).success,
       role: 'DEVELOPER',
-      display_name: username,
+      display_name: username.toLowerCase() === 'abood' ? 'szpab' : username,
+      must_change_password: pinSchema.safeParse(password).success,
       created_at: new Date().toISOString(),
     }));
     await audit(db, null, { action: 'developer.create.cli', category: 'roles', targetType: 'user', targetId: id, targetLabel: username }, { id: 0, username: 'server-cli', role: 'SYSTEM' });
     if (generated) {
       const out = path.resolve(values.out ?? path.join(SERVER_ROOT, 'data', 'developer-credentials.txt'));
       fs.mkdirSync(path.dirname(out), { recursive: true });
-      fs.writeFileSync(out, `username=${username}\nemail=${email ?? ''}\npassword=${password}\n`, { mode: 0o600 });
-      console.log(`Created DEVELOPER ${username}. Generated password written to ${out} (chmod 600).`);
+      fs.writeFileSync(out, `handle=${username}\nusername=${username}\nemail=${email ?? ''}\npin=${password}\n`, { mode: 0o600 });
+      console.log(`Created DEVELOPER ${username}. PIN written to ${out} (chmod 600). It is not printed here.`);
     } else {
       console.log(`Created DEVELOPER ${username}.`);
     }

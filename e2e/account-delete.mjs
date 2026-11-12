@@ -11,7 +11,7 @@ const OUT = new URL('../docs/screenshots/account-delete/', import.meta.url).path
 fs.mkdirSync(OUT, { recursive: true });
 const problems = [], results = [];
 const check = (c, m) => { (c ? results : problems).push(m); console.log(c ? '  ✓' : '  ✗', m); };
-const PW = 'e2e-password-' + Math.random().toString(36).slice(2, 10);
+const PW = '123456'; // test-only PIN, not a real account secret
 
 async function api(page, method, url, body) {
   return page.evaluate(async ({ method, url, body }) => {
@@ -29,7 +29,7 @@ async function run(name, type, device) {
   const user = `Del_${name.replace(/\W/g, '').slice(0, 8)}${Math.floor(Math.random() * 1e5)}`;
   try {
     await page.goto(`${B}/`);
-    const reg = await api(page, 'POST', '/api/auth/register', { username: user, password: PW });
+    const reg = await api(page, 'POST', '/api/auth/register', { username: user, pin: PW });
     check(reg.status === 201, `${name}: registered ${user} (${reg.status})`);
     await page.goto(`${B}/settings`);
     await page.waitForSelector('#delete-account');
@@ -53,7 +53,7 @@ async function run(name, type, device) {
     await page.waitForTimeout(500);
     check((await api(page, 'GET', '/api/me')).body?.user?.username === user, `${name}: cancelling the confirm dialog keeps the account`);
     // wrong password shows an error, account kept
-    await page.fill('#del-pw', 'definitely-wrong-pw');
+    await page.fill('#del-pw', '999999');
     page.once('dialog', (d) => d.accept());
     await btn.click();
     await page.waitForSelector('#delete-account .alert.error', { timeout: 5000 });
@@ -67,7 +67,7 @@ async function run(name, type, device) {
     check(/deleted/i.test(await page.textContent('.alert.ok')), `${name}: success message shown`);
     await page.screenshot({ path: `${OUT}${name.replace(/\W+/g, '-').toLowerCase()}-done.png` });
     check((await api(page, 'GET', '/api/me')).body?.user == null, `${name}: signed out`);
-    const login = await api(page, 'POST', '/api/auth/login', { login: user, password: PW });
+    const login = await api(page, 'POST', '/api/auth/login', { login: user, pin: PW });
     check(login.status === 401, `${name}: cannot sign in again (${login.status})`);
   } catch (e) {
     check(false, `${name}: ${e.message.split('\n')[0]}`);

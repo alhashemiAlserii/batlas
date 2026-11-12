@@ -6,13 +6,15 @@ export const LEVEL = { PLAYER: 0, TRUSTED: 1, ADMIN: 2, DEVELOPER: 3 };
 export const WEATHER = ['clear', 'cloudy', 'rain', 'storm', 'snow', 'fog'];
 export const EMERGENCIES = ['engine_failure', 'turbulence', 'weather_emergency', 'cabin_pressure', 'emergency_landing', 'evacuation', 'system_failure'];
 const label = (s) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const handleOf = (u) => u.handle || u.username;
+const labelOf = (u) => u.displayName && u.displayName !== handleOf(u) ? `${u.displayName} (@${handleOf(u)})` : handleOf(u);
 
 /** UX mirror of the server's canActOn(); server is authoritative. */
 export const canActOn = (me, t) => t.role !== 'DEVELOPER' && me.id !== t.id && LEVEL[me.role] > LEVEL[t.role];
 
 export function usersPanel(me, perms, { roles = false } = {}) {
   const msg = h('div', { 'aria-live': 'polite' });
-  const q = h('input', { type: 'search', placeholder: 'Search username or email', 'aria-label': 'Search players' });
+  const q = h('input', { type: 'search', placeholder: 'Search handle, display name or email', 'aria-label': 'Search players' });
   const roleF = h('select', { 'aria-label': 'Filter by rank' }, h('option', { value: '' }, 'All ranks'), ...Object.keys(LEVEL).map((r) => h('option', { value: r }, r)));
   const count = h('span', { class: 'muted small' });
   const tbody = h('tbody');
@@ -29,47 +31,47 @@ export function usersPanel(me, perms, { roles = false } = {}) {
   function row(u) {
     const actions = h('div', { class: 'row-actions' });
     const actionable = canActOn(me, u);
-    if (actionable && perms.has('players.kick')) actions.append(h('button', { class: 'btn small', onclick: () => { const r = prompt(`Kick ${u.username}? Reason (optional):`); if (r !== null) act(() => api('POST', `/api/admin/users/${u.id}/kick`, { reason: r || undefined }), `${u.username} kicked.`); } }, 'Kick'));
+    if (actionable && perms.has('players.kick')) actions.append(h('button', { class: 'btn small', onclick: () => { const r = prompt(`Kick ${labelOf(u)}? Reason (optional):`); if (r !== null) act(() => api('POST', `/api/admin/users/${u.id}/kick`, { reason: r || undefined }), `${labelOf(u)} kicked.`); } }, 'Kick'));
     if (actionable && perms.has('players.ban')) {
-      if (u.banned) actions.append(h('button', { class: 'btn small', onclick: () => act(() => api('POST', `/api/admin/users/${u.id}/unban`), `${u.username} unbanned.`) }, 'Unban'));
-      else actions.append(h('button', { class: 'btn small danger', onclick: () => { const r = prompt(`Ban ${u.username}? Reason:`); if (r !== null) act(() => api('POST', `/api/admin/users/${u.id}/ban`, { reason: r || undefined }), `${u.username} banned.`); } }, 'Ban'));
+      if (u.banned) actions.append(h('button', { class: 'btn small', onclick: () => act(() => api('POST', `/api/admin/users/${u.id}/unban`), `${labelOf(u)} unbanned.`) }, 'Unban'));
+      else actions.append(h('button', { class: 'btn small danger', onclick: () => { const r = prompt(`Ban ${labelOf(u)}? Reason:`); if (r !== null) act(() => api('POST', `/api/admin/users/${u.id}/ban`, { reason: r || undefined }), `${labelOf(u)} banned.`); } }, 'Ban'));
     }
     if (actionable && perms.has('players.reset_password')) actions.append(h('button', { class: 'btn small', onclick: async () => {
-      if (!confirm(`Give ${u.username} a temporary password? They will be signed out and must choose a new password when they log in.`)) return;
+      if (!confirm(`Give ${labelOf(u)} a temporary PIN? They will be signed out and must choose a new PIN when they sign in.`)) return;
       try {
-        const r = await api('POST', `/api/admin/users/${u.id}/temp-password`);
-        msg.replaceChildren(h('div', { class: 'alert ok', role: 'status' }, `Temporary password for ${u.username}: `, h('code', { class: 'temp-pw' }, r.temporaryPassword), ' — give it to them privately. It is shown only once.'));
+        const r = await api('POST', `/api/admin/users/${u.id}/reset-pin`);
+        msg.replaceChildren(h('div', { class: 'alert ok', role: 'status' }, `Temporary PIN for ${labelOf(u)}: `, h('code', { class: 'temp-pw' }, r.temporaryPin), ' — give it to them privately. It is shown only once.'));
       } catch (e) { showError(msg, e); }
-    } }, 'Reset password'));
+    } }, 'Reset PIN'));
     if (roles && actionable) {
       const assignable = ['PLAYER', 'TRUSTED', 'ADMIN', 'DEVELOPER'].filter((r) => r === 'PLAYER' || perms.has(`roles.grant.${r.toLowerCase()}`));
-      const sel = h('select', { 'aria-label': `Rank for ${u.username}` }, ...assignable.map((r) => h('option', { value: r, selected: r === u.role }, r)));
+      const sel = h('select', { 'aria-label': `Rank for ${handleOf(u)}` }, ...assignable.map((r) => h('option', { value: r, selected: r === u.role }, r)));
       sel.addEventListener('change', () => {
         const role = sel.value;
-        let confirmPassword;
+        let confirmPin;
         if (role === 'DEVELOPER') {
-          if (!confirm(`Grant DEVELOPER (owner-level) to ${u.username}? They will have full control and cannot be removed via the website.`)) { sel.value = u.role; return; }
-          confirmPassword = prompt('Re-enter your password to confirm:');
-          if (!confirmPassword) { sel.value = u.role; return; }
+          if (!confirm(`Grant DEVELOPER (owner-level) to ${labelOf(u)}? They will have full control and cannot be removed via the website.`)) { sel.value = u.role; return; }
+          confirmPin = prompt('Re-enter your PIN to confirm:');
+          if (!confirmPin) { sel.value = u.role; return; }
         }
-        act(() => api('PUT', `/api/admin/users/${u.id}/role`, { role, confirmPassword }), `${u.username} is now ${role}.`);
+        act(() => api('PUT', `/api/admin/users/${u.id}/role`, { role, confirmPin }), `${labelOf(u)} is now ${role}.`);
       });
       actions.prepend(sel);
     }
     // Developer dashboard only: permanent account deletion (the server re-checks everything).
     if (roles && perms.has('players.delete') && u.role !== 'DEVELOPER' && u.id !== me.id) actions.append(h('button', { class: 'btn small danger', 'data-action': 'delete', onclick: () => {
-      const typed = prompt(`Permanently delete the account "${u.username}"? Their sessions, tokens and flight stats are removed too. This cannot be undone.\n\nType the username to confirm:`);
+      const typed = prompt(`Permanently delete the account @${handleOf(u)}? Their sessions, tokens and flight stats are removed too. This cannot be undone.\n\nType the handle to confirm:`);
       if (typed === null) return;
-      if (typed !== u.username) { alert('The username did not match. Nothing was deleted.'); return; }
-      act(() => api('DELETE', `/api/admin/users/${u.id}`, { confirm: typed }), `${u.username} deleted.`);
+      if (typed !== handleOf(u)) { alert('The handle did not match. Nothing was deleted.'); return; }
+      act(() => api('DELETE', `/api/admin/users/${u.id}`, { confirm: typed }), `${handleOf(u)} deleted.`);
     } }, 'Delete account'));
     if (actionable && perms.has('players.edit')) actions.append(h('button', { class: 'btn small', 'data-action': 'edit-profile', onclick: () => {
-      const dn = prompt(`New display name for ${u.username} (leave as is to keep):`, u.displayName);
+      const dn = prompt(`New display name for ${labelOf(u)} (leave as is to keep):`, u.displayName);
       if (dn === null) return;
       const clearBio = u.bio ? confirm('Also clear their bio?') : false;
-      const body = { displayName: dn.trim() || u.username };
+      const body = { displayName: dn.trim() || handleOf(u) };
       if (clearBio) body.bio = '';
-      act(() => api('PATCH', `/api/admin/users/${u.id}/profile`, body), `${u.username}'s profile updated.`);
+      act(() => api('PATCH', `/api/admin/users/${u.id}/profile`, body), `${labelOf(u)}'s profile updated.`);
     } }, 'Edit profile'));
     if (!actions.childElementCount) actions.append(h('span', { class: 'muted small' }, u.role === 'DEVELOPER' ? 'Protected' : '—'));
     return h('tr', {},

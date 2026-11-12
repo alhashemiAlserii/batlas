@@ -24,7 +24,7 @@ export const PERMISSIONS = [
   'players.kick',
   'moderation.view',
   'players.view',
-  'players.reset_password', // staff-issued one-time temporary password
+  'players.reset_password', // staff-issued one-time temporary PIN
   'players.delete', // permanently delete an account (Developer only)
   'players.edit', // reset a player's display name / bio (moderation)
   'players.online', // see who is online right now
