@@ -11,8 +11,8 @@
  * are passed through unchanged and never cached; only an unreachable network falls back to the cache,
  * then to /offline.html. Bump VERSION to drop every old cache on the next visit.
  */
-const VERSION = 'batlas-shell-v2';
-const PRECACHE = ['/offline.html', '/css/site.css', '/js/offline.js', '/manifest.webmanifest', '/img/icons/icon-192.png', '/img/icons/icon-512.png', '/img/icons/apple-touch-icon-180.png', '/favicon.ico'];
+const VERSION = 'batlas-shell-v3';
+const PRECACHE = ['/offline.html', '/css/site.css', '/css/fonts.css', '/js/offline.js', '/manifest.webmanifest', '/img/icons/icon-192.png', '/img/icons/icon-512.png', '/img/icons/apple-touch-icon-180.png', '/favicon.ico', '/fonts/barlow-condensed/latin-400-normal.woff2', '/fonts/barlow-condensed/latin-600-normal.woff2'];
 
 const NEVER = /^\/(api|media|uploads|play|ws|studio-console|admin)(\/|$)|^\/healthz$|^\/sw\.js$/;
 const STATIC_NET_FIRST = /^\/(css|js)\//;

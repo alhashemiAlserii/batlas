@@ -146,10 +146,10 @@ async function renderChrome() {
     const right = h('div', { class: 'nav-right' });
     const links = h('div', { class: 'nav-links' }, link('/', 'Home'), link('/games', 'Games'), link('/news', 'News'), link('/contact', 'Contact'));
     const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
-      h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` }, h('img', { class: 'brand-mark', src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 }), h('span', { class: 'sr-only', 'data-studio-name': '' }, studio),
-        null),
-      h('button', { class: 'menu-btn', 'aria-label': 'Menu', 'aria-expanded': 'false', onclick: (e) => { const o = nav.classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); } }, '☰'),
-      links, right);
+      h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` }, h('img', { class: 'brand-mark', src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 }), h('span', { class: 'sr-only', 'data-studio-name': '' }, studio)),
+      h('button', { class: 'menu-btn', 'aria-label': 'Menu', 'aria-expanded': 'false', onclick: (e) => { const o = nav.classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); e.currentTarget.textContent = o ? 'Close' : 'Menu'; } }, 'Menu'),
+      links, right,
+      h('span', { class: 'nav-tag' }, h('i', { class: 'dot', 'aria-hidden': 'true' }), 'One handle, every game'));
     header.replaceChildren(nav);
     try {
       const me = await getMe();
@@ -170,13 +170,16 @@ async function renderChrome() {
   document.querySelectorAll('main [data-studio-name]').forEach((e) => { e.textContent = studio; });
   if (footer) {
     footer.replaceChildren(
-      h('div', { class: 'cols' },
-        h('div', { class: 'foot-brand' }, h('img', { src: '/img/batlas-mark.png', alt: studio, width: 164, height: 120 }), h('p', { class: 'small' }, 'Chaotic co-op games you play with friends, right in your browser. One account for every game.')),
-        h('nav', { 'aria-label': 'Footer' }, h('h4', {}, 'Explore'), h('a', { href: '/games' }, 'Games'), h('a', { href: '/news' }, 'News'), h('a', { href: '/play/sky-crew' }, 'Play Sky Crew')),
-        h('div', {}, h('h4', {}, 'Studio'), h('a', { href: '/contact' }, 'Contact'), h('a', { href: '/register' }, 'Create account'), h('a', { href: '/login' }, 'Log in'))),
       h('div', { class: 'inner' },
-        h('span', {}, `© ${new Date().getFullYear()} `, studio, '. All rights reserved.'),
-        h('span', {}, h('a', { href: '/games' }, 'Games'), ' · ', h('a', { href: '/contact' }, 'Contact'))));
+        h('div', { class: 'foot-brand' },
+          h('img', { src: '/img/batlas-mark.png', alt: studio, width: 164, height: 120 }),
+          h('p', {}, 'Independent games, played in the browser.')),
+        h('nav', { 'aria-label': 'Footer' },
+          h('a', { href: '/games' }, 'Games'),
+          h('a', { href: '/news' }, 'News'),
+          h('a', { href: '/contact' }, 'Contact'),
+          h('a', { href: '/play/sky-crew' }, 'Play Sky Crew')),
+        h('span', { class: 'legal' }, `© ${new Date().getFullYear()} ${studio}`)));
   }
 }
 

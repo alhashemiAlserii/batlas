@@ -7,7 +7,7 @@
     "cleartext": false,
     "allowNavigation": ["batlas-2je9.onrender.com"]
   },
-  "backgroundColor": "#020a24",
+  "backgroundColor": "#111316",
   "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false },
   "android": { "allowMixedContent": false }
 }

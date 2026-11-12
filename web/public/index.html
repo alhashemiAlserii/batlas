@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#020a24">
+<meta name="theme-color" content="#111316">
 <title>Batlas — Games Studio</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
@@ -22,34 +22,39 @@
 <header id="site-header" class="site-header"></header>
 <main id="main">
 
-<section class="hero2" aria-labelledby="hero-title">
-  <div>
-    <span class="eyebrow">✦ Indie game studio</span>
-    <h1 id="hero-title"><span data-studio-name>Batlas</span> <span class="grad-text">Games</span></h1>
-    <p class="lead">We build chaotic co-op games you play with friends, right in your browser. No installs, no email needed: one Batlas account works across every game we make.</p>
-    <div class="actions">
-      <a class="btn primary lg" id="hero-play" href="/play/sky-crew">▶ Play Sky Crew</a>
-      <a class="btn ghost lg" href="/games">Browse games</a>
-      <a class="btn ghost lg" id="hero-join" href="/register">Create account</a>
-    </div>
-    <div class="stats" id="hero-stats" aria-label="Studio at a glance"></div>
+<section class="hero-edit" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow">Batlas studio</p>
+    <h1 id="hero-title">Bring the crew.</h1>
   </div>
-  <div class="hero-art" aria-hidden="true"><div class="disc"></div><img src="/img/batlas-logo-640.jpg" alt="" width="640" height="640"><span class="plane">✈</span></div>
+  <div class="hero-side">
+    <p>Co-op games for the people you actually play with. Open a page, share a room code, and go.</p>
+    <div class="actions">
+      <a class="btn primary lg go" id="hero-play" href="/play/sky-crew">Play Sky Crew</a>
+    </div>
+    <p class="micro">iPhone, iPad and Mac. <a id="hero-join" href="/register">Create an account</a>. No email needed.</p>
+  </div>
 </section>
 
-<div class="section-head"><h2>Featured game</h2><a href="/games">All games →</a></div>
+<div class="rule" id="collection">
+  <span>The collection</span>
+  <span id="collection-count">Games</span>
+</div>
 <div id="featured"><p class="muted">Loading…</p></div>
 
-<div class="section-head"><h2>Coming soon</h2></div>
-<p class="section-sub">What we are building next.</p>
+<div class="rule" id="upcoming-rule"><span>In development</span></div>
 <div id="upcoming" class="grid"></div>
 
-<div class="section-head" id="news"><h2>Latest news</h2><a href="/news">All news →</a></div>
+<div class="rule" id="news">
+  <span>Studio notes</span>
+  <a href="/news">All news</a>
+</div>
 <div id="news-list" class="news-cards"><p class="muted">Loading…</p></div>
 
-<section class="cta-band" id="cta-band">
-  <div><h2>Fly with your friends</h2><p class="muted m0">Make a free account with a handle and a PIN. No email needed.</p></div>
-  <a class="btn primary lg" href="/register">Create your account</a>
+<section class="close-band" id="cta-band">
+  <h2>A handle and a PIN.</h2>
+  <p>One Batlas account works in every game we ship. Four to six digits. No email required.</p>
+  <a class="btn go" href="/register">Create an account</a>
 </section>
 </main>
 <footer id="site-footer" class="site-footer"></footer>
