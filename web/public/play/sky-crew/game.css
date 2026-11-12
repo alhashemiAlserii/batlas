@@ -220,13 +220,16 @@ body.touch #hudWallet { bottom: auto; top: calc(12px + env(safe-area-inset-top))
   .stars { font-size: 24px; margin: 2px 0 4px; } #resTable { font-size: 12px; } #resTable td { padding: 2px; }
 }
 
-/* ---------- portrait phones: ask to rotate (tablets keep portrait) ---------- */
-.rotate-hint { display: none; }
-@media (pointer: coarse) and (orientation: portrait) and (max-width: 600px) {
-  .rotate-hint { display: flex; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; text-align: center; padding: 24px; background: radial-gradient(ellipse at center, #0c2260, #02061a); }
-  .rotate-hint .rot-icon { font-size: 64px; display: inline-block; animation: rot 1.8s ease-in-out infinite; }
-  .rotate-hint b { display: block; font-size: 22px; margin-top: 10px; }
-}
+/* ---------- portrait phones: ask to rotate (tablets and computers never do) ----------
+   Toggled by orient.js (html.phone-portrait). A CSS orientation/max-width query stays
+   stuck on Safari: this page cannot scroll, and the locked viewport keeps the layout
+   width from page load, so rotating a phone to landscape left the hint up. That query
+   also treated a phone-sized layout viewport as a phone, which iPad portrait and a
+   narrow Mac window hit. */
+.rotate-hint { display: none; pointer-events: none; }
+html.phone-portrait .rotate-hint { display: flex; pointer-events: auto; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; text-align: center; padding: 24px; background: radial-gradient(ellipse at center, #0c2260, #02061a); }
+html.phone-portrait .rotate-hint .rot-icon { font-size: 64px; display: inline-block; animation: rot 1.8s ease-in-out infinite; }
+html.phone-portrait .rotate-hint b { display: block; font-size: 22px; margin-top: 10px; }
 @keyframes rot { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(90deg); } }
 
 /* ---------- airport terminal ---------- */
