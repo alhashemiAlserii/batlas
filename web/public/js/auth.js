@@ -11,10 +11,15 @@ f.addEventListener('submit', async (e) => {
   const data = Object.fromEntries(new FormData(f));
   try {
     if (!data.email) delete data.email;
+    if (!data.displayName) delete data.displayName;
+    if (data.pin2 != null && data.pin2 !== data.pin) throw new Error('The PINs do not match.');
+    delete data.pin2;
     const r = await api('POST', isRegister ? '/api/auth/register' : '/api/auth/login', data);
-    location.href = r.user?.mustChangePassword ? '/settings?force=1' : dest;
+    location.href = r.user?.mustChangePin || r.user?.mustChangePassword ? '/settings?force=1' : dest;
   } catch (err) {
-    showError(msg, err);
+    if (err?.data?.code === 'pin_setup_required') {
+      msg.replaceChildren(h('div', { class: 'alert error', role: 'alert' }, err.message + ' ', h('a', { href: '/set-pin' }, 'Set a PIN')));
+    } else showError(msg, err);
     btn.disabled = false;
   }
 });

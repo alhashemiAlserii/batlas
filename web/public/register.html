@@ -22,8 +22,10 @@
 <header id="site-header" class="site-header"></header>
 <main id="main">
 <div class="auth-box card"><h1>Create account</h1>
-<form id="f" novalidate><div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" minlength="3" maxlength="20" required><p class="small muted">3–20 letters, numbers or _</p></div>
-<div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required><p class="small muted">At least 10 characters</p></div>
+<form id="f" novalidate><div class="field"><label for="handle">Handle</label><input id="handle" name="handle" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" minlength="3" maxlength="20" required><p class="small muted">3–20 letters, numbers or _. This is how you sign in (@name).</p></div>
+<div class="field"><label for="displayName">Display name</label><input id="displayName" name="displayName" maxlength="24" autocomplete="nickname"><p class="small muted">What friends see in chat, the lobby and the leaderboard. You can leave this blank and use your handle.</p></div>
+<div class="field"><label for="pin">PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="new-password" required><p class="small muted">4 to 6 digits. No email needed.</p></div>
+<div class="field"><label for="pin2">Repeat PIN</label><input id="pin2" name="pin2" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="new-password" required></div>
 <details class="field optional-email"><summary>Add email (optional)</summary><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email"><p class="small muted">Not required. You can add it later in Settings.</p></div></details>
 <div id="msg" aria-live="polite"></div><button class="btn primary w100">Create account</button></form>
 <p class="small muted">Already have an account? <a href="/login">Log in</a></p></div>

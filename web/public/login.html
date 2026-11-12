@@ -22,10 +22,11 @@
 <header id="site-header" class="site-header"></header>
 <main id="main">
 <div class="auth-box card"><h1>Log in</h1>
-<form id="f" novalidate><div class="field"><label for="login">Username</label><input id="login" name="login" autocomplete="username" required></div>
-<div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+<form id="f" novalidate><div class="field"><label for="login">Handle</label><input id="login" name="login" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required><p class="small muted">The name you sign in with, like Abood. Not case-sensitive.</p></div>
+<div class="field"><label for="pin">PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="current-password" required><p class="small muted">4 to 6 digits</p></div>
 <div id="msg" aria-live="polite"></div><button class="btn primary w100">Log in</button></form>
-<p class="small muted">Forgot your password? Ask a Batlas admin to give you a temporary one.</p>
+<p class="small muted">Forgot your PIN? Ask a Batlas admin to give you a temporary one.</p>
+<p class="small muted">Had an account before PINs? <a href="/set-pin">Set a PIN</a> with your current password.</p>
 <p class="small muted">New here? <a href="/register">Create an account</a></p></div>
 </main>
 <footer id="site-footer" class="site-footer"></footer>

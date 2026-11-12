@@ -130,7 +130,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   const send: Send = (c, msg) => {
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit, klass: c.klass, term: c.term.step });
+  const publicPlayer = (c: Client) => ({ cid: c.cid, username: c.user!.username, handle: c.user!.username, displayName: c.user!.displayName, role: c.user!.role, avatarUrl: c.user!.avatarUrl, crew: c.crew, state: c.state, gear: [...c.equipped], frozen: c.frozen, muted: c.mutedUntil > Date.now(), outfit: c.outfit, klass: c.klass, term: c.term.step });
   // Hidden Developers are left out of everyone else's player list.
   const roomInfo = (r: Room, viewer?: Client) => ({ t: 'room', code: r.code, hostCid: r.hostCid, pilotCid: r.pilotCid, weather: r.weather, hour: r.hour, locked: r.locked, config: r.config, airport: r.airport, players: [...r.clients.values()].filter((p) => !p.hidden || p === viewer).map(publicPlayer) });
   const broadcastRoom = (r: Room, except?: Client) => { for (const c of r.clients.values()) if (c !== except) send(c, roomInfo(r, c)); };
@@ -287,7 +287,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       if (!isDev(c) || !can(c, 'dev.commands')) { await audit(c, 'broadcast.denied', {}); return 'Only the Developer can broadcast.'; }
       const text = cleanText(args.text);
       if (!text) return 'Write a message first.';
-      for (const o of clients) if (o.user) send(o, { t: 'announce', text, by: c.user!.username });
+      for (const o of clients) if (o.user) send(o, { t: 'announce', text, by: c.user!.displayName || c.user!.username });
       await audit(c, 'broadcast', { text, rooms: rooms.size });
       return null;
     }
@@ -298,7 +298,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       const ps = [...room.clients.values()];
       for (const o of ps) {
         if (o === c) { leaveRoom(o, 'closed'); send(o, { t: 'room_left', reason: 'closed' }); continue; }
-        send(o, { t: 'kicked', by: c.user!.username, reason: 'The Developer closed this room.' });
+        send(o, { t: 'kicked', by: c.user!.displayName || c.user!.username, reason: 'The Developer closed this room.' });
         leaveRoom(o, 'closed');
       }
       rooms.delete(room.code);
@@ -306,7 +306,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       return null;
     }
     if (!r) return 'Join a room first.';
-    const by = { cid: c.cid, username: c.user!.username, role: c.user!.role };
+    const by = { cid: c.cid, username: c.user!.username, displayName: c.user!.displayName, role: c.user!.role };
     const fx = (extra: Record<string, unknown> = {}, base = args) => broadcast(r, { t: 'fx', cmd, args: { ...base, ...extra }, by });
     const target = typeof args.cid === 'string' ? r.clients.get(args.cid) : undefined;
 
@@ -327,7 +327,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         const g = await guardTarget(c, 'kick', target); if (g) return g;
         const reason = cleanText(args.reason);
         await audit(c, 'kick', { reason }, target);
-        eject(target!, 'kicked', { by: c.user!.username, reason });
+        eject(target!, 'kicked', { by: c.user!.displayName || c.user!.username, reason });
         return null;
       }
       case 'ban': {
@@ -341,9 +341,9 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
           if (!bridge.ban) return 'Site bans are not available on this server.';
           const res = await bridge.ban({ actorUserId: c.user!.userId, targetUserId: target!.user!.userId, reason });
           if (!res.ok) return res.reason ?? 'The website refused the ban.';
-        } else gameBans.set(target!.user!.userId, { until: Date.now() + minutes * 60_000, by: c.user!.username, reason });
+        } else gameBans.set(target!.user!.userId, { until: Date.now() + minutes * 60_000, by: c.user!.displayName || c.user!.username, reason });
         await audit(c, 'ban', { reason, scope: site ? 'site' : 'game', minutes: site ? null : minutes }, target);
-        eject(target!, 'kicked', { by: c.user!.username, reason, banned: true, minutes: site ? null : minutes });
+        eject(target!, 'kicked', { by: c.user!.displayName || c.user!.username, reason, banned: true, minutes: site ? null : minutes });
         return null;
       }
       case 'mute': {
@@ -351,7 +351,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         const g = await guardTarget(c, 'mute', target); if (g) return g;
         const minutes = args.on === false ? 0 : Math.max(1, Math.min(MUTE_MINUTES_MAX, Math.floor(Number(args.minutes) || 10)));
         target!.mutedUntil = minutes ? Date.now() + minutes * 60_000 : 0;
-        send(target!, { t: 'muted', minutes, by: c.user!.username });
+        send(target!, { t: 'muted', minutes, by: c.user!.displayName || c.user!.username });
         broadcastRoom(r);
         await audit(c, minutes ? 'mute' : 'unmute', { minutes }, target);
         return null;
@@ -367,7 +367,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         if (item !== undefined && !ITEM_BY_KEY.has(item)) return 'Unknown item.';
         const g = await bridge.grant({ actorUserId: c.user!.userId, targetUserId: target.user.userId, credits, item, remove: !!args.remove });
         if (!g.ok) return g.reason ?? 'Refused.';
-        send(target, { t: 'wallet', balance: g.balance, by: c.user!.username, credits: g.credits ?? 0, item: g.item ?? null, removed: !!g.removed });
+        send(target, { t: 'wallet', balance: g.balance, by: c.user!.displayName || c.user!.username, credits: g.credits ?? 0, item: g.item ?? null, removed: !!g.removed });
         if (item && args.remove && target.klass && item === `class:${target.klass}`) { target.klass = null; broadcastRoom(r!); }
         return null;
       }
@@ -563,7 +563,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         }
         c.user = u; // the ONLY source of name/rank/permissions
         if (u.outfit) c.outfit = u.outfit;
-        send(c, { t: 'welcome', you: { cid: c.cid, username: u.username, displayName: u.displayName, role: u.role, permissions: u.permissions, avatarUrl: u.avatarUrl, outfit: c.outfit, balance: u.balance ?? 0 } });
+        send(c, { t: 'welcome', you: { cid: c.cid, username: u.username, handle: u.username, displayName: u.displayName, role: u.role, permissions: u.permissions, avatarUrl: u.avatarUrl, outfit: c.outfit, balance: u.balance ?? 0 } });
       })();
       return;
     }
@@ -622,7 +622,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         const now = Date.now(); if (now - c.lastChat < 700) return; c.lastChat = now;
         const text = cleanText(m.text);
         if (!text || c.hidden) return;
-        return broadcast(r, { t: 'chat', cid: c.cid, username: c.user.username, role: c.user.role, text });
+        return broadcast(r, { t: 'chat', cid: c.cid, username: c.user.username, displayName: c.user.displayName, role: c.user.role, text });
       }
       case 'world':
         if (!r || r.hostCid !== c.cid) return; // only the host's simulation counts

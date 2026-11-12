@@ -24,6 +24,7 @@ import { audit } from '../lib/audit.js';
 import { randomToken, sha256, safeEqual } from '../lib/crypto.js';
 import { canActOn, hasPermission, ITEM_TIERS, permissionsFor } from '../lib/permissions.js';
 import { insertId } from '../db/index.js';
+import { findUserByHandle } from '../lib/identity.js';
 import { getMaintenance, maintenanceBlocks } from '../lib/maintenance.js';
 
 const GAME_TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -252,19 +253,21 @@ export function gameRoutes(ctx: Ctx) {
     const rows = await ctx.db('game_flights as f')
       .join('users as u', 'u.id', 'f.user_id')
       .where('f.game_slug', 'sky-crew').andWhere('u.banned', false)
-      .groupBy('f.user_id', 'u.username', 'u.display_name', 'u.role', 'u.avatar_url')
-      .select('u.username', 'u.display_name', 'u.role', 'u.avatar_url')
+      .groupBy('f.user_id', 'u.username', 'u.handle', 'u.display_name', 'u.role', 'u.avatar_url')
+      .select('u.username', 'u.handle', 'u.display_name', 'u.role', 'u.avatar_url')
       .max({ best: 'f.score' }).count({ flights: '*' })
       .orderBy('best', 'desc').limit(10);
     res.json({
-      leaderboard: rows.map((x: any, i: number) => ({ rank: i + 1, username: x.username, displayName: x.display_name || x.username, role: x.role, avatarUrl: x.avatar_url || null, bestScore: Number(x.best), flights: Number(x.flights) })),
+      leaderboard: rows.map((x: any, i: number) => {
+        const handle = x.handle || x.username;
+        return { rank: i + 1, handle, username: handle, displayName: x.display_name || handle, role: x.role, avatarUrl: x.avatar_url || null, bestScore: Number(x.best), flights: Number(x.flights) };
+      }),
       note: 'Scores are reported by players\' browsers.',
     });
   });
 
   r.get('/users/:username/game-stats', async (req, res) => {
-    const name = String(req.params.username).toLowerCase().slice(0, 32);
-    const u = await ctx.db<UserRow>('users').where({ username_lower: name }).first();
+    const u = await findUserByHandle(ctx.db, String(req.params.username));
     if (!u || u.banned) throw new HttpError(404, 'Not found');
     res.json({ skyCrew: await flightStats(u.id) });
   });

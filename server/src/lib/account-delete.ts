@@ -64,7 +64,7 @@ export async function deleteOwnAccount(db: Knex, userId: number, opts: { ip?: st
     anonymised.contact_messages = await trx('contact_messages').where({ user_id: u.id }).update({ user_id: null, name: anon, email: `${anon}@deleted.invalid`, ip: null });
 
     // ---- audit log: keep every row, remove what identifies the person
-    const names = [u.username, u.display_name, u.email].filter((s): s is string => !!s && s.length >= 3);
+    const names = [...new Set([u.handle, u.username, u.display_name, u.email].filter((s): s is string => !!s && s.length >= 3))];
     const exact = new Set(names.map((s) => s.toLowerCase()));
     const words = new RegExp(`(?<![A-Za-z0-9_])(${names.map(esc).join('|')})(?![A-Za-z0-9_])`, 'gi');
     let n = 0;

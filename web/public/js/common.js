@@ -63,8 +63,9 @@ export function avatar(u, size = 'sm') {
 }
 export function userChip(u, link = true) {
   const role = (u.role || 'PLAYER').toLowerCase();
-  const name = h('span', { class: `name-${role}` }, u.displayName || u.username);
-  return h('span', { class: 'user-chip' }, avatar(u), link ? h('a', { href: `/u/${encodeURIComponent(u.username)}` }, name) : name, rankBadge(u.role));
+  const name = h('span', { class: `name-${role}` }, u.displayName || u.handle || u.username);
+  const handle = u.handle || u.username;
+  return h('span', { class: 'user-chip' }, avatar(u), link ? h('a', { href: `/u/${encodeURIComponent(handle)}` }, name) : name, rankBadge(u.role));
 }
 
 let meP;
@@ -153,7 +154,7 @@ async function renderChrome() {
     try {
       const me = await getMe();
       if (me.user) {
-        if (me.user.mustChangePassword && location.pathname !== '/settings') { location.href = '/settings?force=1'; return; }
+        if ((me.user.mustChangePin || me.user.mustChangePassword) && location.pathname !== '/settings') { location.href = '/settings?force=1'; return; }
         if (me.permissions.has('admin.panel')) links.append(link('/admin', 'Admin'));
         right.append(
           h('a', { href: '/profile' }, userChip(me.user, false)),

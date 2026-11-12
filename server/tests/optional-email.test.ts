@@ -80,7 +80,7 @@ describe('staff password reset (temporary password)', () => {
     const r = await send(admin, `/api/admin/users/${victim.id}/temp-password`);
     expect(r.status).toBe(200);
     const temp = r.body.temporaryPassword as string;
-    expect(temp).toMatch(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+    expect(temp).toMatch(/^\d{6}$/);
     expect((await victim.agent.get('/api/me')).body.user).toBeNull(); // signed out
     const a = await anon();
     expect((await a.agent.post('/api/auth/login').set('x-csrf-token', a.csrf).send({ login: 'forgot_it', password: PW })).status).toBe(401);
@@ -94,7 +94,7 @@ describe('staff password reset (temporary password)', () => {
     expect((await a.agent.get('/api/games')).status).toBe(200); // public reads still fine
     expect((await a.agent.get('/api/me')).body.user.mustChangePassword).toBe(true);
     // choose a new password
-    const ch = await a.agent.post('/api/me/password').set('x-csrf-token', csrf).send({ currentPassword: temp, newPassword: 'my-own-new-pass-1' });
+    const ch = await a.agent.post('/api/me/pin').set('x-csrf-token', csrf).send({ currentPin: temp, newPin: '424242' });
     expect(ch.status, JSON.stringify(ch.body)).toBe(200);
     expect((await a.agent.get('/api/me')).body.user.mustChangePassword).toBe(false);
     const csrf2 = cookieCsrf(ch) ?? csrf; // new session => new CSRF token

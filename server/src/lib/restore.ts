@@ -187,6 +187,24 @@ function prepareRow(t: string, r: Record<string, unknown>, i: number, cols: Map<
     if (!cols.has(k)) throw new RestoreError(`table ${t} row ${i}: column "${k}" does not exist in the target schema`);
     out[k] = convert(v, cols.get(k)!, `table ${t} row ${i} column ${k}`);
   }
+  if (t === 'users') {
+    // Backups taken before handles existed: fill the new columns. Do not invent a PIN.
+    if (cols.has('handle') && !Object.prototype.hasOwnProperty.call(r, 'handle') && typeof out.username === 'string') out.handle = out.username;
+    if (cols.has('handle_lower') && !Object.prototype.hasOwnProperty.call(r, 'handle_lower')) {
+      const h = String(out.handle ?? out.username ?? '');
+      if (h) out.handle_lower = h.toLowerCase();
+    }
+    if (cols.has('display_name') && !Object.prototype.hasOwnProperty.call(r, 'display_name') && out.username) out.display_name = out.username;
+    if (cols.has('pin_set') && !Object.prototype.hasOwnProperty.call(r, 'pin_set')) out.pin_set = false;
+    const lower = String(out.username_lower ?? '').toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(r, 'handle') && lower === 'abood' && out.role === 'DEVELOPER') {
+      if (cols.has('username')) out.username = 'Abood';
+      if (cols.has('username_lower')) out.username_lower = 'abood';
+      if (cols.has('handle')) out.handle = 'Abood';
+      if (cols.has('handle_lower')) out.handle_lower = 'abood';
+      if (cols.has('display_name')) out.display_name = 'szpab';
+    }
+  }
   if (t === 'media' && Buffer.isBuffer(out.data)) {
     if (out.size != null && Number(out.size) !== out.data.length) throw new RestoreError(`table media row ${i}: data is ${out.data.length} bytes but size says ${out.size}`);
     if (out.sha256 && crypto.createHash('sha256').update(out.data).digest('hex') !== out.sha256) throw new RestoreError(`table media row ${i}: sha256 mismatch (corrupt media)`);

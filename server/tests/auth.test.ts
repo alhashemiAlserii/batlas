@@ -27,9 +27,11 @@ describe('auth', () => {
     expect(out.status).toBe(200);
     expect((await a.get('/api/me')).body.user).toBeNull();
 
-    const login = await a.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: 'P1@X.com', password: PW });
+    const login = await a.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: 'PiLoT_oNe', pin: PW });
     expect(login.status).toBe(200);
-    expect((await a.get('/api/me')).body.user.username).toBe('pilot_one');
+    expect((await a.get('/api/me')).body.user.handle).toBe('pilot_one');
+    const csrf2 = cookieCsrf(login) ?? csrf;
+    expect((await a.post('/api/auth/login').set('x-csrf-token', csrf2).send({ login: 'p1@x.com', pin: PW })).status).toBe(401);
   });
 
   it('rejects wrong password and duplicate accounts', async () => {

@@ -312,7 +312,7 @@ async function coop() {
     await p.goto(`${B}/login`);
     const r = await p.evaluate(async ({ username, password, register }) => {
       const csrf = (await (await fetch('/api/csrf')).json()).csrfToken;
-      const res = await fetch(register ? '/api/auth/register' : '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify(register ? { username, password } : { login: username, password }) });
+      const res = await fetch(register ? '/api/auth/register' : '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify(register ? { username, pin: password } : { login: username, pin: password }) });
       return res.status;
     }, { username, password, register });
     if (r >= 300) throw new Error(`${register ? 'register' : 'login'} ${username} -> ${r}`);

@@ -30,7 +30,7 @@ import { mountRestoreEndpoint } from './routes/restore-endpoint.js';
 /** Paths that keep working in maintenance mode for everyone (static assets for the maintenance page). */
 const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/(favicon\.ico|sw\.js|manifest\.webmanifest|offline\.html|apple-touch-icon\.png)$/;
 /** API calls that keep working in maintenance mode (login itself refuses non-Developers with 503). */
-const MAINT_API_OPEN = new Set(['GET /api/csrf', 'GET /api/site', 'GET /api/maintenance', 'GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/game/verify', 'POST /api/game/audit', 'POST /api/game/ban', 'POST /api/game/owned', 'POST /api/game/salary', 'POST /api/game/grant', 'GET /api/internal/backup']);
+const MAINT_API_OPEN = new Set(['GET /api/csrf', 'GET /api/site', 'GET /api/maintenance', 'GET /api/health', 'POST /api/auth/login', 'POST /api/auth/pin/setup', 'POST /api/auth/logout', 'POST /api/game/verify', 'POST /api/game/audit', 'POST /api/game/ban', 'POST /api/game/owned', 'POST /api/game/salary', 'POST /api/game/grant', 'GET /api/internal/backup']);
 
 /** Unlisted route for the Developer dashboard. Not linked anywhere public; protected server-side regardless. */
 export const DEV_DASHBOARD_PATH = '/studio-console';
@@ -129,7 +129,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
         if (MAINT_API_OPEN.has(`${req.method} ${req.path}`)) return next();
         return res.status(503).json({ error: 'Batlas is under maintenance. Please try again later.', code: 'maintenance', message: m.message, eta: m.eta });
       }
-      if (req.path === '/login' && req.method === 'GET') return next(); // so the Developer can still sign in
+      if ((req.path === '/login' || req.path === '/set-pin') && req.method === 'GET') return next(); // so the Developer can still sign in or set a PIN
       issueCsrf(ctx, res, false, req);
       return res.status(503).sendFile(path.join(WEB_ROOT, 'public', 'maintenance.html'));
     } catch (e) {
@@ -191,6 +191,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.get('/news', page('news.html'));
   app.get('/news/:slug', page('post.html'));
   app.get('/settings', page('settings.html'));
+  app.get('/set-pin', page('set-pin.html'));
   app.get('/forgot-password', page('forgot.html'));
   app.get('/reset-password', page('reset.html'));
   app.get('/verify-email', page('verify.html'));

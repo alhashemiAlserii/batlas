@@ -85,7 +85,7 @@ export function buildPanel({ you, room, myCid, send, live, inv, gear, flight, ca
       el('div', { class: 'setrow' }, sel, btn('Give', () => send('wallet', { cid: p.cid, item: sel.value }), '', { 'data-act': 'give' }), btn('Take away', () => send('wallet', { cid: p.cid, item: sel.value, remove: true }), 'danger', { 'data-act': 'take' })));
   })))]);
   T('teleport', '🌀 Teleport', P.has('teleport'), () => [sec('Teleport me to', grid(...SPOTS.map(([id, l]) => btn(l, () => send('teleport', { to: id }), '', { 'data-spot': id })))),
-    others.length ? sec('Teleport me to a player', grid(...others.map((p) => btn(p.username, () => send('teleport', { toPlayer: p.cid }))))) : null]);
+    others.length ? sec('Teleport me to a player', grid(...others.map((p) => btn(p.displayName || p.username, () => send('teleport', { toPlayer: p.cid }))))) : null]);
   T('npc', '🧍 NPCs', P.has('npc.control'), () => [sec(`Passengers (${flight?.pax ?? '?'} aboard)`, grid(
     btn('➕ Spawn passenger', () => send('npc', { action: 'spawn', count: 1 }), '', { 'data-npc': 'spawn' }), btn('➕ ×4', () => send('npc', { action: 'spawn', count: 4 })), btn('➖ Remove one', () => send('npc', { action: 'remove', count: 1 }), '', { 'data-npc': 'remove' }),
     btn('😌 Calm all', () => send('npc', { action: 'calm' }), '', { 'data-npc': 'calm' }), btn('😱 Panic all', () => send('npc', { action: 'panic' }), 'danger', { 'data-npc': 'panic' }),

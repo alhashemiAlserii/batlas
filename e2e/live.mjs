@@ -4,7 +4,7 @@ import { chromium, webkit, devices } from 'playwright';
 import fs from 'node:fs';
 const B = process.argv[2] || 'https://batlas-2je9.onrender.com';
 const OUT = '/workspace/studio/docs/screenshots/live';
-const PW = 'Live-check-' + Math.random().toString(36).slice(2, 12);
+const PW = '123456'; // test-only PIN. This script is for a deployed site and is not run here.
 const results = []; const users = [];
 const ok = (m) => { results.push(['ok', m]); console.log('✔ ' + m); };
 const bad = (m) => { results.push(['bad', m]); console.log('✘ ' + m); };
@@ -13,14 +13,14 @@ const tag = Date.now() % 100000;
 
 async function register(p, username) {
   await p.goto(`${B}/register`, { waitUntil: 'networkidle' });
-  await p.fill('#username', username); await p.fill('#password', PW);
+  await p.fill('#handle', username); await p.fill('#pin', PW); await p.fill('#pin2', PW);
   await Promise.all([p.waitForURL((u) => !u.pathname.startsWith('/register'), { timeout: 60000 }), p.click('#f button')]);
   users.push(username);
   await p.waitForLoadState('networkidle');
 }
 async function login(p, username, password) {
   await p.goto(`${B}/login`, { waitUntil: 'networkidle' });
-  await p.fill('#login', username); await p.fill('#password', password);
+  await p.fill('#login', username); await p.fill('#pin', password);
   await Promise.all([p.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 60000 }), p.click('#f button')]);
   await p.waitForLoadState('networkidle');
 }

@@ -10,7 +10,7 @@ await p.goto(`${B}/login`);
 const out = await p.evaluate(async ({ username, password }) => {
   const csrf = (await (await fetch('/api/csrf')).json()).csrfToken;
   const h = { 'content-type': 'application/json', 'x-csrf-token': csrf };
-  const l = await fetch('/api/auth/login', { method: 'POST', headers: h, body: JSON.stringify({ login: username, password }) });
+  const l = await fetch('/api/auth/login', { method: 'POST', headers: h, body: JSON.stringify({ login: username, pin: password }) });
   if (!l.ok) return `login ${l.status}`;
   const c2 = (await (await fetch('/api/csrf')).json()).csrfToken; h['x-csrf-token'] = c2;
   const ex = await fetch('/api/games/sky-crew'); if (ex.ok) return 'already seeded';

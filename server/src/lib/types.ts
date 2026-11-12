@@ -7,6 +7,11 @@ export interface UserRow {
   id: number;
   username: string;
   username_lower: string;
+  /** Unique sign-in name. Same value as `username` (kept for older clients and backups). */
+  handle?: string | null;
+  handle_lower?: string | null;
+  /** False until this account has replaced its password with a PIN. */
+  pin_set?: number | boolean | null;
   email: string | null;
   email_lower: string | null;
   password_hash: string;
@@ -43,10 +48,13 @@ declare global {
 }
 
 export function publicUser(u: UserRow) {
+  const handle = (u.handle || u.username || '').trim();
+  const display = (u.display_name ?? '').trim() || handle;
   return {
     id: u.id,
-    username: u.username,
-    displayName: u.display_name ?? u.username,
+    handle,
+    username: handle, // alias: older clients still read `username` as the sign-in name
+    displayName: display,
     role: u.role,
     bio: u.bio ?? '',
     avatarUrl: u.avatar_url ?? '',
@@ -55,7 +63,14 @@ export function publicUser(u: UserRow) {
 }
 
 export function selfUser(u: UserRow) {
-  return { ...publicUser(u), email: u.email ?? '', emailVerified: !!u.email_verified_at, mustChangePassword: !!u.must_change_password };
+  const mustChangePin = !!u.must_change_password;
+  return {
+    ...publicUser(u),
+    email: u.email ?? '',
+    emailVerified: !!u.email_verified_at,
+    mustChangePin,
+    mustChangePassword: mustChangePin, // alias so older pages still send the player to choose a new PIN
+  };
 }
 
 export function adminUser(u: UserRow) {

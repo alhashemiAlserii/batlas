@@ -31,6 +31,7 @@ export async function seed(db: Knex) {
   await db('wallets').insert({ user_id: users[2], balance: 120, updated_at: iso(22) });
   for (const [i, d] of [200, -80].entries()) await db('wallet_ledger').insert({ user_id: users[2], delta: d, balance_after: [200, 120][i], kind: i ? 'purchase' : 'salary', ref: `r${i}`, details: '{}', created_at: iso(22 + i) });
   await db('owned_items').insert({ user_id: users[2], item_key: 'outfit:test', source: 'purchase', created_at: iso(23) });
+  await db('auth_lockouts').insert({ scope: 'ip', subject: '203.0.113.5', failures: 1, window_start: iso(24) });
   for (let i = 0; i < 7; i++) await db('audit_logs').insert({ actor_id: users[0], actor_username: 'u0', actor_role: 'DEVELOPER', action: `test.${i}`, category: 'admin', created_at: iso(30 + i) });
   return { users, media: [m1, m2] };
 }

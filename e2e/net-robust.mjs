@@ -33,7 +33,7 @@ const menuErr = (p) => p.evaluate(() => !document.querySelector('#menuErr').clas
 const tag = Date.now().toString(36).slice(-5);
 const A = await mk('player');
 await A.p.goto(`${B}/login`);
-check(await api(A.p, 'POST', '/api/auth/register', { username: `e2e_net${tag}`, password: 'Sky-crew-test-pass-1' }) < 300, 'register a test player');
+check(await api(A.p, 'POST', '/api/auth/register', { username: `e2e_net${tag}`, pin: '123456' }) < 300, 'register a test player');
 await boot(A.p);
 
 // 1) the game server closes the socket before 'welcome': fast error, socket forgotten, buttons usable again
@@ -79,7 +79,7 @@ await A.p.click('#bLobLeave');
 // 5) the Developer closes the room they are playing in: continues solo as host, nothing frozen
 const D = await mk('dev');
 await D.p.goto(`${B}/login`);
-check(await api(D.p, 'POST', '/api/auth/login', { login: devUser, password: devPw }) < 300, 'Developer signs in');
+check(await api(D.p, 'POST', '/api/auth/login', { login: devUser, pin: devPw }) < 300, 'Developer signs in');
 await boot(D.p);
 await D.p.click('#bCreate');
 await waitFor(D.p, () => !!window.skyCrew.state().room?.code);

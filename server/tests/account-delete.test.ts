@@ -86,11 +86,8 @@ describe('POST /api/me/delete (delete my own account)', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const anon = `deleted-user-${p.id}`;
     expect(r.body.deleted).toBe(anon);
-    // login and the old session are gone
+    // the old session is gone; the login attempt is checked after the audit assertions
     expect((await p.agent.get('/api/me')).body.user).toBeNull();
-    const fresh = request.agent(env.app);
-    const csrf = await getCsrf(fresh);
-    expect((await fresh.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: 'Pilot_Sam', password: PW })).status).toBe(401);
     // data
     expect(await env.db('users').where({ id: p.id }).first()).toBeUndefined();
     for (const t of ['sessions', 'game_tokens', 'auth_tokens', 'game_flights', 'game_profiles', 'owned_items', 'wallet_ledger', 'wallets']) expect(await count(t, { user_id: p.id })).toBe(0);
@@ -119,6 +116,9 @@ describe('POST /api/me/delete (delete my own account)', () => {
     const entry = all.find((x: any) => x.action === 'account.self_delete');
     expect(entry).toMatchObject({ actor_username: anon, target_label: anon, target_id: String(p.id), ip: null, category: 'auth' });
     expect(JSON.parse(entry.details).removed).toMatchObject({ game_flights: 1, game_tokens: 1, avatars: 1, auth_tokens: 1, wallets: 1, wallet_ledger: 1, owned_items: 1, game_profiles: 1 });
+    const fresh = request.agent(env.app);
+    const csrf = await getCsrf(fresh);
+    expect((await fresh.post('/api/auth/login').set('x-csrf-token', csrf).send({ login: 'Pilot_Sam', pin: PW })).status).toBe(401);
     // the Developer is untouched
     expect((await dev.agent.get('/api/me')).body.user.username).toBe('abood');
   });

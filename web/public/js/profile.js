@@ -6,7 +6,7 @@ let meFailed = false;
 // A failed /api/me (offline, or aborted because the user is already navigating away) is NOT "logged out":
 // redirecting to /login then would hijack the navigation the user just started.
 try { me = await getMe(); } catch { meFailed = true; }
-let username = parts[1] === 'u' ? decodeURIComponent(parts[2] || '') : me.user?.username;
+let username = parts[1] === 'u' ? decodeURIComponent(parts[2] || '') : (me.user?.handle || me.user?.username);
 if (!username && meFailed) { root?.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Could not load your profile. Check your connection and reload.'))); }
 else if (!username) { location.href = '/login?next=/profile'; }
 else {
@@ -17,7 +17,7 @@ else {
     root.replaceChildren(
       h('div', { class: `card panel-${role === 'developer' ? 'dev' : role}` },
         h('div', { class: 'profile-head' }, avatar(user, 'lg'), h('div', {}, h('div', { class: 'panel-head' }, h('h1', { class: `name-${role}` }, user.displayName), rankBadge(user.role)),
-        h('p', { class: 'muted' }, '@', user.username, ' · joined ', fmtDate(user.createdAt)))),
+        h('p', { class: 'muted' }, '@', user.handle || user.username, ' · joined ', fmtDate(user.createdAt)))),
         user.banned ? h('div', { class: 'alert error' }, 'This account is banned.') : null,
         h('p', { class: 'desc' }, user.bio || (mine ? 'You have not written a bio yet.' : ''))),
     );
@@ -33,9 +33,9 @@ else {
       const msg = h('div', { 'aria-live': 'polite' });
       const form = h('form', { class: 'card', novalidate: true },
         h('h2', {}, 'Edit profile'),
-        h('div', { class: 'field' }, h('label', { for: 'dn' }, 'Display name'), h('input', { id: 'dn', name: 'displayName', maxlength: 40, value: user.displayName })),
+        h('div', { class: 'field' }, h('label', { for: 'dn' }, 'Display name'), h('input', { id: 'dn', name: 'displayName', maxlength: 24, value: user.displayName }), h('p', { class: 'small muted' }, 'This is the name other people see in chat, the lobby, the leaderboard and the game.')),
         h('div', { class: 'field' }, h('label', { for: 'bio' }, 'Bio'), (() => { const t = h('textarea', { id: 'bio', name: 'bio', maxlength: 500 }); t.value = user.bio; return t; })()),
-        h('p', { class: 'small muted' }, me.user.email ? ['Email: ', me.user.email, ' (private) · '] : 'No email (optional) · ', h('a', { href: '/settings' }, 'Avatar, password & email settings')),
+        h('p', { class: 'small muted' }, me.user.email ? ['Email: ', me.user.email, ' (private) · '] : 'No email (optional) · ', h('a', { href: '/settings' }, 'Handle, PIN, avatar and email')),
         msg, h('button', { class: 'btn primary' }, 'Save'));
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
