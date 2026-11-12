@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#020a24">
+<meta name="theme-color" content="#111316">
 <title>Set a PIN · Batlas</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
@@ -21,14 +21,14 @@
 <body>
 <header id="site-header" class="site-header"></header>
 <main id="main">
-<div class="auth-box card"><h1>Set a PIN</h1>
+<div class="auth-box card"><p class="eyebrow">Batlas account</p><h1>Set a PIN</h1>
 <p class="muted">Accounts made with a password need a PIN before they can sign in again. This page asks for that password once. After this, you sign in with your handle and PIN only.</p>
 <form id="f" novalidate>
 <div class="field"><label for="login">Handle</label><input id="login" name="login" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></div>
 <div class="field"><label for="currentPassword">Current password</label><input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required><p class="small muted">The password this account used before PINs. Staff can set a PIN for you instead.</p></div>
 <div class="field"><label for="pin">New PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="new-password" required><p class="small muted">4 to 6 digits</p></div>
 <div class="field"><label for="pin2">Repeat PIN</label><input id="pin2" name="pin2" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="new-password" required></div>
-<div id="msg" aria-live="polite"></div><button class="btn primary w100">Save PIN and sign in</button></form>
+<div id="msg" aria-live="polite"></div><button class="btn primary w100 go">Save PIN and sign in</button></form>
 <p class="small muted"><a href="/login">Back to log in</a></p></div>
 </main>
 <footer id="site-footer" class="site-footer"></footer>

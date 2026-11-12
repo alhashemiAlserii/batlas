@@ -239,7 +239,7 @@ function statsPanel() {
     const max = Math.max(1, ...s.dailySignups.map((d) => d.count));
     const chart = svg('svg', { viewBox: `0 0 ${W} ${H + 20}`, class: 'chart', role: 'img', 'aria-label': 'Sign-ups per day, last 30 days' });
     const defs = svg('defs'); const grad = svg('linearGradient', { id: 'barGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
-    grad.append(svg('stop', { offset: '0%', 'stop-color': '#19d3e6' }), svg('stop', { offset: '100%', 'stop-color': '#1e6bff' })); defs.append(grad); chart.append(defs);
+    grad.append(svg('stop', { offset: '0%', 'stop-color': '#eef0f2' }), svg('stop', { offset: '100%', 'stop-color': '#8b969e' })); defs.append(grad); chart.append(defs);
     s.dailySignups.forEach((d, i) => {
       const bh = (d.count / max) * (H - 20);
       const r = svg('rect', { x: pad + i * bw + 2, y: H - bh, width: Math.max(1, bw - 4), height: bh, rx: 3, class: 'bar' });

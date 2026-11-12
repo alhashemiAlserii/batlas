@@ -9,7 +9,7 @@ const sameSite = (u) => { try { return new URL(u).origin === SITE.origin; } catc
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280, height: 800, minWidth: 360, minHeight: 600,
-    backgroundColor: '#020a24', title: 'Batlas',
+    backgroundColor: '#111316', title: 'Batlas',
     icon: path.join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
@@ -18,7 +18,7 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => { if (!sameSite(url)) shell.openExternal(url); return { action: sameSite(url) ? 'allow' : 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!sameSite(url)) { e.preventDefault(); shell.openExternal(url); } });
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
-    if (isMain && code !== -3) win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<body style="background:#020a24;color:#fff;font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0"><div style="text-align:center"><h1>Batlas is unreachable</h1><p>${desc}. Check your connection.</p><p><a style="color:#19d3e6" href="${SITE.href}">Try again</a></p></div></body>`)}`);
+    if (isMain && code !== -3) win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<body style="background:#111316;color:#fff;font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0"><div style="text-align:center"><h1>Batlas is unreachable</h1><p>${desc}. Check your connection.</p><p><a style="color:#d5dde4" href="${SITE.href}">Try again</a></p></div></body>`)}`);
   });
   win.loadURL(SITE.href);
 }

@@ -6,9 +6,9 @@ try {
   document.title = `${p.title} · Batlas`;
   const img = /^(https?:\/\/|\/)/.test(p.coverImage) ? p.coverImage : '';
   root.replaceChildren(...[
-    h('a', { href: '/news', class: 'small' }, '← All news'),
+    h('a', { href: '/news', class: 'back-link' }, '← All news'),
     h('h1', {}, p.title),
-    h('div', { class: 'news-meta' }, p.pinned ? h('span', { class: 'pill pinned' }, '📌 Pinned') : null, h('span', {}, fmtDay(p.publishedAt)), p.author ? userChip(p.author) : null),
+    h('div', { class: 'news-meta' }, p.pinned ? h('span', { class: 'pill pinned' }, 'Pinned') : null, h('span', {}, fmtDay(p.publishedAt)), p.author ? userChip(p.author) : null),
     img ? h('div', { class: 'cover' }, h('img', { src: img, alt: '' })) : null,
     p.summary ? h('p', { class: 'muted' }, p.summary) : null,
     h('div', { class: 'body' }, p.body)].filter(Boolean));

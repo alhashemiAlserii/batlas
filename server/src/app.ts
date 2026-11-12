@@ -28,7 +28,7 @@ import { getMaintenance } from './lib/maintenance.js';
 import { mountRestoreEndpoint } from './routes/restore-endpoint.js';
 
 /** Paths that keep working in maintenance mode for everyone (static assets for the maintenance page). */
-const MAINT_ASSET = /^\/(css|js|img|media|uploads)\/|^\/(favicon\.ico|sw\.js|manifest\.webmanifest|offline\.html|apple-touch-icon\.png)$/;
+const MAINT_ASSET = /^\/(css|js|img|fonts|media|uploads)\/|^\/(favicon\.ico|sw\.js|manifest\.webmanifest|offline\.html|apple-touch-icon\.png)$/;
 /** API calls that keep working in maintenance mode (login itself refuses non-Developers with 503). */
 const MAINT_API_OPEN = new Set(['GET /api/csrf', 'GET /api/site', 'GET /api/maintenance', 'GET /api/health', 'POST /api/auth/login', 'POST /api/auth/pin/setup', 'POST /api/auth/logout', 'POST /api/game/verify', 'POST /api/game/audit', 'POST /api/game/ban', 'POST /api/game/owned', 'POST /api/game/salary', 'POST /api/game/grant', 'GET /api/internal/backup']);
 

@@ -15,6 +15,7 @@ else {
     const mine = me.user && me.user.id === user.id;
     const role = user.role.toLowerCase();
     root.replaceChildren(
+      h('p', { class: 'eyebrow' }, mine ? 'Your profile' : 'Player'),
       h('div', { class: `card panel-${role === 'developer' ? 'dev' : role}` },
         h('div', { class: 'profile-head' }, avatar(user, 'lg'), h('div', {}, h('div', { class: 'panel-head' }, h('h1', { class: `name-${role}` }, user.displayName), rankBadge(user.role)),
         h('p', { class: 'muted' }, '@', user.handle || user.username, ' · joined ', fmtDate(user.createdAt)))),

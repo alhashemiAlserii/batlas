@@ -1,6 +1,6 @@
 import { api, h, fmtDay, rankBadge, safeUrl, timeUntil } from './common.js';
 import { openLightbox } from './lightbox.js';
-import { coverOf } from './ui.js';
+import { coverOf, builtinSkyCrew } from './ui.js';
 
 const slug = decodeURIComponent(location.pathname.split('/')[2] || '');
 const root = document.getElementById('game');
@@ -50,38 +50,41 @@ function actions(g) {
   const row = h('div', { class: 'game-actions' });
   const play = safeUrl(g.playUrl);
   const live = g.status === 'published' || g.status === 'upcoming';
-  if (play && live && g.settings.playEnabled !== false) row.append(h('a', { class: 'btn primary lg', href: play, id: 'play-btn' }, g.status === 'upcoming' ? '▶ Play early build' : '▶ Play in browser'));
+  if (play && live && g.settings.playEnabled !== false) row.append(h('a', { class: 'btn primary lg go', href: play, id: 'play-btn' }, g.status === 'upcoming' ? 'Play early build' : `Play ${g.title}`));
   // The server only fills `download` when the file exists and downloads are enabled.
   const dl = safeUrl(g.download);
-  if (dl) row.append(h('a', { class: 'btn lg', href: dl, id: 'download-btn', rel: 'noopener', download: dl.startsWith('/') ? '' : null }, g.latestVersion ? `⬇ Download v${g.latestVersion.version}` : '⬇ Download'));
-  if (g.screenshots.length) row.append(h('button', { class: 'btn lg ghost', type: 'button', id: 'gallery-btn', onclick: (e) => openLightbox(shots(g), 0, e.currentTarget) }, `🖼 Screenshots (${shots(g).length})`));
+  if (dl) row.append(h('a', { class: 'btn lg', href: dl, id: 'download-btn', rel: 'noopener', download: dl.startsWith('/') ? '' : null }, g.latestVersion ? `Download v${g.latestVersion.version}` : 'Download'));
+  if (g.screenshots.length) row.append(h('button', { class: 'btn lg ghost', type: 'button', id: 'gallery-btn', onclick: (e) => openLightbox(shots(g), 0, e.currentTarget) }, `Screenshots (${shots(g).length})`));
   return row;
 }
 
 const shots = (g) => g.screenshots.map(safeUrl).filter(Boolean).map((src, i) => ({ src, alt: `${g.title} screenshot ${i + 1}` }));
 
-try {
-  const { game: g } = await api('GET', `/api/games/${encodeURIComponent(slug)}`);
+async function renderGame(g) {
   document.title = `${g.title} · Batlas`;
-  const cover = coverOf(g);
-  const backdrop = h('div', { class: 'backdrop' });
-  if (cover) backdrop.style.backgroundImage = `url("${encodeURI(cover)}")`;
   const until = g.releaseDate ? timeUntil(g.releaseDate + 'T00:00:00') : '';
-  const top = h('section', { class: 'game-top' }, backdrop,
-    h('div', { class: 'inner' },
-      mediaBox(g),
-      h('div', {},
-        h('div', { class: 'inline' },
-          h('span', { class: `pill ${g.status}`, id: 'status-pill' }, g.status === 'upcoming' ? 'Upcoming' : 'Out now'),
-          g.status === 'upcoming' ? h('span', { class: 'release', id: 'release-date' }, g.releaseDate ? `📅 Releases ${fmtDay(g.releaseDate)}${until ? ` · ${until}` : ''}` : 'Release date TBA') : null),
+  const play = safeUrl(g.playUrl);
+  const live = (g.status === 'published' || g.status === 'upcoming') && g.settings.playEnabled !== false && play;
+  const top = h('section', { class: 'game-sheet' },
+    h('a', { class: 'back-link', href: '/games' }, '← All games'),
+    h('div', { class: 'game-split' },
+      h('div', { class: 'game-art' }, mediaBox(g)),
+      h('div', { class: 'game-intro' },
+        h('p', { class: 'eyebrow' }, g.status === 'upcoming' ? 'In development' : 'In the browser'),
         h('h1', {}, g.title),
-        h('p', { class: 'tagline' }, g.tagline),
+        h('p', { class: 'tagline' }, g.tagline || ''),
+        h('div', { class: 'meta-row' },
+          h('span', { class: `pill ${g.status}`, id: 'status-pill' }, g.status === 'upcoming' ? 'Upcoming' : 'Out now'),
+          g.version ? h('span', { class: 'meta-chip' }, `v${g.version}`) : null,
+          g.platforms?.length ? h('span', { class: 'meta-chip' }, g.platforms.join(' · ')) : null,
+          g.status === 'upcoming' ? h('span', { class: 'release', id: 'release-date' }, g.releaseDate ? `Releases ${fmtDay(g.releaseDate)}${until ? ` · ${until}` : ''}` : 'Release date TBA') : null),
         g.settings.playEnabled === false ? h('p', { class: 'notice', id: 'play-notice' }, g.settings.maintenanceMessage || 'Playing is paused for a moment while we update the game.') : null,
         actions(g),
+        live ? h('p', { class: 'micro' }, 'Opens in this browser. Your handle stays signed in.') : null,
         h('dl', { class: 'facts' },
-          g.version ? [h('dt', {}, 'Version'), h('dd', {}, g.version)] : null,
+          g.version ? [h('dt', {}, 'Version'), h('dd', {}, `v${g.version}`)] : null,
           g.latestVersion ? [h('dt', {}, 'Updated'), h('dd', {}, fmtDay(g.latestVersion.releasedAt))] : null,
-          g.platforms.length ? [h('dt', {}, 'Platforms'), h('dd', {}, g.platforms.join(', '))] : null,
+          g.platforms?.length ? [h('dt', {}, 'Where'), h('dd', {}, g.platforms.join(', '))] : null,
           g.status === 'upcoming' ? [h('dt', {}, 'Release'), h('dd', {}, g.releaseDate ? fmtDay(g.releaseDate) : 'TBA')] : null))));
 
   const gallery = shots(g).length ? h('section', { id: 'screenshots' }, h('h2', {}, 'Screenshots'),
@@ -103,8 +106,14 @@ try {
 
   root.replaceChildren(top, h('div', { class: 'game-cols' }, main, side));
   if (g.slug === 'sky-crew' && g.settings.showLeaderboard !== false) root.append(await leaderboard());
+}
+
+try {
+  const { game: g } = await api('GET', `/api/games/${encodeURIComponent(slug)}`);
+  await renderGame(g);
 } catch (e) {
-  root.replaceChildren(h('div', { class: 'card center-box' }, h('h1', {}, 'Game not found'), h('a', { class: 'btn', href: '/games' }, 'Back to games')));
+  if (slug === 'sky-crew' && e.status === 404) await renderGame(builtinSkyCrew);
+  else root.replaceChildren(h('div', { class: 'card center-box' }, h('p', { class: 'eyebrow' }, 'Batlas'), h('h1', {}, 'Game not found'), h('a', { class: 'btn', href: '/games' }, 'All games')));
 }
 
 async function leaderboard() {
