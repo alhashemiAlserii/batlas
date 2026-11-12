@@ -286,7 +286,7 @@ All designs below are original to Sky Crew (see `docs/ASSETS.md`). Nothing is co
   - The 6 classes (Ace Pilot, Cabin Pro, Mechanic, Navigator, Security Chief, Baggage Master) each have a real in-game perk.
   - The Developer can grant or take credits and items from F2 → **Wallet**. Every grant is audit-logged.
 - **Phones and tablets:**
-  - Phones play in landscape; phone portrait shows a "turn your phone sideways" hint. iPad works in both orientations.
+  - Phones play in landscape; phone portrait shows a "turn your phone sideways" hint. iPad works in both orientations (no rotate overlay). Desktops never show it. The hint is decided in `web/public/play/sky-crew/js/orient.js` from the screen's short side and the live viewport (visualViewport / orientation events), not a CSS `orientation` query: Safari leaves that query stuck after a rotation when the page cannot scroll.
   - Layouts respect the notch and home-bar safe areas.
   - There is a touch **sprint** toggle (🏃).
 - **Edit controls (Settings → 🎮 Edit controls, touch devices):** drag any on-screen control to a new place: joystick, interact, jump, sprint, camera, chat, gadget buttons, flight buttons, the Dev/staff panel button, pause.
@@ -302,7 +302,8 @@ All designs below are original to Sky Crew (see `docs/ASSETS.md`). Nothing is co
   - `e2e/terminal.mjs`: solo and co-op airport flow, forged steps, departure hold, Skip airport.
   - `e2e/economy.mjs`: salary, shop, classes, Developer wallet grants.
   - `e2e/controls.mjs`: WebKit at iPhone 844×390 and 932×430 and iPad: drag, resize, opacity, clamping, no gameplay while editing, reload persistence, per-orientation layouts, reset.
-  - `e2e/mobile.mjs`: WebKit phone landscape, iPad landscape and portrait, phone-portrait rotate hint, terminal views, passengers walking through, HUD overlap, FPS sample.
+  - `e2e/mobile.mjs`: WebKit phone landscape, iPad landscape and portrait (768×1024 and 820×1180), phone-portrait rotate hint, terminal views, passengers walking through, HUD overlap, FPS sample.
+  - `e2e/orientation.mjs`: WebKit rotate-hint matrix. iPhone portrait shows the hint; iPhone landscape (844×390 and 932×430) does not; iPad portrait (768×1024 and 820×1180) and landscape do not; desktop does not; an iPad-sized screen with a phone-sized layout viewport does not; rotating a phone viewport from portrait to landscape dismisses the hint and Solo starts. The same file checks the Safari stale-viewport cases against `shouldShowRotateHint`.
   - `e2e/sky-crew.mjs` and `e2e/dev-tools.mjs`: the cabin and flight suites. They skip the airport because it has its own suite.
 - Screenshots: `docs/screenshots/revision/` (`terminal/`, `controls/`, `mobile/`, `economy/`, `dev/`, `e2e/`, and the `before-*.png` shots).
 - FPS numbers in the tests come from software GL (SwiftShader) in a container, so they are a floor, not what a real iPad does. Check on a real device.

@@ -1,4 +1,5 @@
-// Sky Crew phone/tablet e2e (WebKit): landscape phones 844x390 + 932x430, iPad landscape + portrait, phone portrait
+// Sky Crew phone/tablet e2e (WebKit): landscape phones 844x390 + 932x430, iPad landscape + portrait
+// (768x1024 and 820x1180), phone portrait
 // rotate hint; airport terminal in view, passengers walking through it, HUD/touch controls on screen and not
 // overlapping, frame rate sample (software GL here, so the FPS is a floor, not the real device number).
 import { webkit, devices } from 'playwright';
@@ -17,6 +18,7 @@ const SIZES = [
   { name: 'iphone-844x390', vp: [844, 390], ua: PH, phone: true },
   { name: 'iphone-932x430', vp: [932, 430], ua: PH, phone: true },
   { name: 'ipad-landscape-1180x820', vp: [1180, 820], ua: PAD },
+  { name: 'ipad-portrait-768x1024', vp: [768, 1024], ua: PAD },
   { name: 'ipad-portrait-820x1180', vp: [820, 1180], ua: PAD },
   { name: 'iphone-portrait-390x844', vp: [390, 844], ua: PH, phone: true, portrait: true },
 ];

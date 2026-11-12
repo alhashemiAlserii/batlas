@@ -13,7 +13,8 @@ import { Net } from './net.js';
 import * as UI from './ui.js';
 import { Gadgets } from './gadgets.js';
 import { buildPanel } from './devpanel.js';
-import { initControls, openEditor, resetLayout, ctl, controlsDebug } from './controls.js';
+import { initControls, openEditor, resetLayout, ctl, controlsDebug, applyLayout } from './controls.js';
+import { installRotateHint, shouldShowRotateHint } from './orient.js';
 
 const $ = (s) => document.querySelector(s);
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 && /iPad|iPhone|Android|Mobile/i.test(navigator.userAgent);
@@ -45,7 +46,15 @@ let keyShadowT = 0; // medium (iPad): the cabin shadow map is refreshed at ~12 H
 const audio = new Audio();
 scene.add(ship.plane);
 ship.plane.add(camera);
-addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+function resizeView() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / Math.max(1, innerHeight);
+  camera.updateProjectionMatrix();
+}
+// Phone portrait overlay. Installed before the first await so it is correct while the world loads,
+// and so a Safari rotation (visualViewport / orientationchange) resizes the view even when the
+// layout viewport's resize event is late or missing.
+const rotateHint = installRotateHint(window, () => { resizeView(); applyLayout(); });
 
 const eventsConfig = await (await fetch('/play/sky-crew/events.json')).json();
 const net = new Net();
@@ -1354,6 +1363,8 @@ requestAnimationFrame(frame);
 // ---------------- test / debug hooks (used by the automated browser tests) ----------------
 window.skyCrew = {
   ready: true,
+  shouldRotate: shouldShowRotateHint,
+  rotate: () => rotateHint.debug(),
   state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, rearT: +ship.doors.rear.t.toFixed(3), cargoT: +ship.doors.cargo.t.toFixed(3), rearPassable: ship.doors.rear.passable }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, pilotCid: net.room.pilotCid ?? null, hidden: !!net.room.hidden, locked: !!net.room.locked, airport: net.room.airport, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
   teleport: (x, y, z) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); },
   look: (yaw, pitch) => { me.yaw = yaw; me.pitch = pitch; },
