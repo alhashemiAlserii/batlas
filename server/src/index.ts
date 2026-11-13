@@ -1,5 +1,6 @@
 import { createDb, migrate } from './db/index.js';
 import { bootstrapDeveloper } from './lib/bootstrap.js';
+import { ensureBuiltInGames } from './lib/seed-games.js';
 import { createApp, DEV_DASHBOARD_PATH } from './app.js';
 import { loadConfig, dbTarget } from './config.js';
 import { attachGameServer, WS_PATH } from './game-server/server.js';
@@ -9,6 +10,7 @@ const config = loadConfig();
 const db = createDb(dbTarget(config));
 await migrate(db);
 await bootstrapDeveloper(db);
+await ensureBuiltInGames(db);
 const { app } = createApp(db);
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';

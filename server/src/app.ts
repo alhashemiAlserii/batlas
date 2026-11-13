@@ -161,6 +161,8 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.get('/verify-email', page('verify.html'));
   app.get('/play/sky-crew', page('play/sky-crew/index.html'));
   app.get('/play/sky-crew/', (_req, res) => res.redirect(301, '/play/sky-crew'));
+  app.get('/play/highcrag', page('play/highcrag/index.html'));
+  app.get('/play/highcrag/', (_req, res) => res.redirect(301, '/play/highcrag'));
 
   app.get('/admin', gated('admin.panel', 'admin.html', false));
   app.get('/admin/app.js', gated('admin.panel', 'admin.js', true));

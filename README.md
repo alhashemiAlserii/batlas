@@ -257,6 +257,19 @@ The overlay shows only the tools your rank allows. **The game server re-checks e
   - Every Developer join is audit-logged as `ingame.dev.join`, with what was bypassed.
   - Admins and Players keep the normal full/locked rules.
 
+## Highcrag (early build)
+
+Play at **`/play/highcrag`**. It is a single-player survival climbing game, and it is fully separate from Sky Crew: it has its own folder, no game server and no database tables. It reuses the vendored Three.js read-only.
+
+- **Listing:** on boot, `server/src/lib/seed-games.ts` adds a `highcrag` row (status *Upcoming*, play URL `/play/highcrag`) **only if that slug does not exist yet**. After that the Developer dashboard is in charge. Other games are never touched.
+- **Loop:** each mountain is generated from a seed (`?seed=N` picks one). You start on the beach and climb terraced cliff bands: Saltwind Shore, Mossgrove (thornbrush), Frostline (cold, blizzards) and the Ember Crown (gusts, thin air). Light the beacon on the summit to finish.
+- **Climbing:** hold left mouse (or R, or the ✋ touch button) facing a rock wall. W/S climb up and down, A/D move sideways, and Space lunges upward. Climbing drains stamina, and when it runs out you let go. Falls injure you.
+- **Survival:** hunger, cold and injury fill the stamina bar from the right and lower your maximum stamina. If they fill it, you black out and wake at the last lit campfire with an empty pack.
+- **Items** (3 slots, E to take, F to use, Q to drop): berries, glowcaps (a gamble), rations, bandages, hand warmers, fizz tonic, and pitons (place one while climbing, then hang next to it to rest).
+- **Campfires** are checkpoints. They warm you and slowly heal you.
+- **Best time** is stored in the browser (`localStorage`). Nothing is sent to the server.
+- **Files:** `web/public/play/highcrag/`: `index.html`, `game.css`, `js/terrain.js` (heightfield and biomes), `js/main.js` (player, survival, items, UI, touch) and `js/audio.js` (WebAudio sound effects).
+
 ## Browser testing
 
 - Automated API tests: `cd server && npm test`.
