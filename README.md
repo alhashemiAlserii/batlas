@@ -383,7 +383,14 @@ New permissions: `players.edit`, `players.online` (Admin + Developer), `media.up
 
 ## Highcrag (early build)
 
-Play at **`/play/highcrag`**. It is a single-player survival climbing game, and it is fully separate from Sky Crew: it has its own folder, no game server and no database tables. It reuses the vendored Three.js read-only.
+Play at **`/play/highcrag`**. It is a survival climbing game for 1 to 4 players, and it is fully separate from Sky Crew. It has its own folder, its own co-op server (`server/src/highcrag/server.ts`, WebSocket `/ws/highcrag`) and no database tables. It reuses the vendored Three.js and the site's game-token check read-only.
+
+- **Co-op (up to 4, Batlas account needed):** **Create co-op room** gives a 5-letter code, and friends type it and **Join** (or open `/play/highcrag?room=CODE`). Names come from the server's check of the website game token, never from the client.
+  - Everyone climbs the same seeded mountain. The room creator uploads the item and campfire layout once, so every browser engine agrees.
+  - The server owns the shared state: first claim wins an item, drops are shared, lit campfires are a team checkpoint, pitons are shared, and the beacon finishes the climb for everyone. Late joiners get all of it.
+  - **Down, not out:** in co-op, blacking out leaves you down for 25 s. A teammate presses **E** next to you to help you up with your pack. Otherwise (or with Enter / the button) you respawn at the campfire with an empty pack.
+  - **Pull up:** stand on a ledge just above a climbing teammate and press **E** to haul them up (costs you a little stamina).
+  - Movement is relayed at about 12 Hz. Messages are validated, flood-limited, and limited to same-origin browsers. Rooms close when the last climber leaves. The co-op server runs only when `GAME_SERVER_KEY` is set, like Sky Crew's.
 
 - **Listing:** on boot, `server/src/lib/seed-games.ts` adds a `highcrag` row (status *Upcoming*, play URL `/play/highcrag`) **only if that slug does not exist yet**. After that the Developer dashboard is in charge. Other games are never touched.
 - **Loop:** each mountain is generated from a seed (`?seed=N` picks one). You start on the beach and climb terraced cliff bands: Saltwind Shore, Mossgrove (thornbrush), Frostline (cold, blizzards) and the Ember Crown (gusts, thin air). Light the beacon on the summit to finish.
@@ -392,7 +399,7 @@ Play at **`/play/highcrag`**. It is a single-player survival climbing game, and 
 - **Items** (3 slots, E to take, F to use, Q to drop): berries, glowcaps (a gamble), rations, bandages, hand warmers, fizz tonic, and pitons (place one while climbing, then hang next to it to rest).
 - **Campfires** are checkpoints. They warm you and slowly heal you.
 - **Best time** is stored in the browser (`localStorage`). Nothing is sent to the server.
-- **Files:** `web/public/play/highcrag/`: `index.html`, `game.css`, `js/terrain.js` (heightfield and biomes), `js/main.js` (player, survival, items, UI, touch) and `js/audio.js` (WebAudio sound effects).
+- **Files:** `web/public/play/highcrag/`: `index.html`, `game.css`, `js/terrain.js` (heightfield and biomes), `js/main.js` (player, survival, items, co-op, UI, touch), `js/net.js` (co-op client) and `js/audio.js` (WebAudio sound effects). Tests: `server/tests/highcrag.test.ts`, `server/tests/highcrag-coop.test.ts`.
 
 ## Browser testing
 

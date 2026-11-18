@@ -3,6 +3,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { Terrain, BANDS, bandAt, makeRng, R, HALF, fbm } from './terrain.js';
 import { Sfx } from './audio.js';
+import { HNet } from './net.js';
 
 const $ = (s) => document.querySelector(s);
 const V3 = THREE.Vector3;
@@ -104,9 +105,10 @@ function itemMesh(type) {
 }
 
 // ---------------- climber model (original design) ----------------
-function makeClimber() {
+const SLOT_COLORS = [0xff7a29, 0x2f9bff, 0x3ddc84, 0xc86bff];
+function makeClimber(color = SLOT_COLORS[0]) {
   const g = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0xff7a29 });
+  const jacket = new THREE.MeshLambertMaterial({ color });
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b3550 });
   const skin = new THREE.MeshLambertMaterial({ color: 0xf1c6a0 });
   const hat = new THREE.MeshLambertMaterial({ color: 0x1fc7c7 });
@@ -140,6 +142,7 @@ function makeClimber() {
     armR: limb(0.12, 0.56, jacket, 0.36, 1.3),
     legL: limb(0.15, 0.62, dark, -0.13, 0.64),
     legR: limb(0.15, 0.62, dark, 0.13, 0.64),
+    jacket,
   };
   return g;
 }
@@ -339,7 +342,7 @@ function spawnItem(root, type, pos) {
   const mesh = itemMesh(type);
   mesh.position.set(pos.x, pos.y + 0.45, pos.z);
   root.add(mesh);
-  return { type, mesh, pos: pos.clone(), taken: false, phase: Math.random() * 6 };
+  return { id: null, type, mesh, pos: pos.clone(), taken: false, phase: Math.random() * 6 };
 }
 
 // ---------------- player & game state ----------------
@@ -405,6 +408,7 @@ addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'Space') { jumpPressed = true; e.preventDefault(); }
   if (e.code === 'KeyE') interact();
+  if (e.code === 'Enter' && P.isDown) giveUp();
   if (e.code === 'KeyF') useItem();
   if (e.code === 'KeyQ') dropItem();
   if (e.code.startsWith('Digit')) { const d = Number(e.code.slice(5)) - 1; if (d >= 0 && d < 3) { sel = d; renderInv(); } }
@@ -523,8 +527,9 @@ const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padSt
 
 // ---------------- interactions ----------------
 function interact() {
-  if (state !== 'play') return;
+  if (state !== 'play' || P.isDown) return;
   const me = P.mode === 'climb' ? climberWorldPos() : P.pos;
+  if (coop.on && coopInteract(me)) return;
   let best = null, bd = 2.4;
   for (const it of world.items) {
     if (it.taken) continue;
@@ -534,6 +539,12 @@ function interact() {
   if (best) {
     const slot = inv[sel] === null ? sel : inv.indexOf(null);
     if (slot < 0) { toast('Your pack is full (Q drops the selected item)'); return; }
+    if (coop.on) {
+      // The server decides who gets it (first claim wins).
+      if (!best.id) { toast('Still syncing the mountain…'); return; }
+      if (!coop.pending.has(best.id)) { coop.pending.add(best.id); net.send({ t: 'take', id: best.id }); }
+      return;
+    }
     inv[slot] = best.type;
     best.taken = true;
     best.mesh.visible = false;
@@ -543,23 +554,42 @@ function interact() {
     toast(`Picked up ${ITEMS[best.type].name}`);
     return;
   }
-  for (const c of world.camps) {
-    if (!c.lit && c.pos.distanceTo(me) < 3.6) { lightCamp(c); return; }
+  for (const [i, c] of world.camps.entries()) {
+    if (!c.lit && c.pos.distanceTo(me) < 3.6) {
+      if (coop.on) net.send({ t: 'camp', i }); else lightCamp(c);
+      return;
+    }
   }
-  if (!world.beacon.lit && world.beacon.pos.distanceTo(me) < 4.5) lightBeacon();
+  if (!world.beacon.lit && world.beacon.pos.distanceTo(me) < 4.5) {
+    if (coop.on) net.send({ t: 'beacon' }); else lightBeacon();
+  }
 }
 
-function lightCamp(c) {
+function lightCamp(c, by = null, silent = false) {
+  if (c.lit) return;
   c.lit = true;
   c.flame.visible = true;
   c.flagMat.color.setHex(0xff7a29);
-  checkpoint = c.pos.clone().add(new V3(1.6, 0, 1.2));
+  // The highest lit campfire is the (shared) checkpoint.
+  const best = world.camps.filter((k) => k.lit).sort((a, b) => b.pos.y - a.pos.y)[0];
+  checkpoint = best.pos.clone().add(new V3(1.6, 0, 1.2));
+  if (silent) return;
   sfx.ignite();
-  toast(`🔥 Campfire lit: ${c.band.name}. Checkpoint saved.`);
+  toast(by ? `🔥 ${by} lit the ${c.band.name} campfire. Checkpoint saved.` : `🔥 Campfire lit: ${c.band.name}. Checkpoint saved.`);
+}
+
+function addPiton(at) {
+  const n = world.T.normal(at.x, at.z, new V3());
+  const m = itemMesh('piton');
+  m.children[m.children.length - 1].visible = false;
+  m.position.copy(at);
+  m.rotation.y = Math.atan2(-n.x, -n.z) + Math.PI / 2;
+  world.pitonGroup.add(m);
+  world.pitons.push(at);
 }
 
 function useItem() {
-  if (state !== 'play') return;
+  if (state !== 'play' || P.isDown) return;
   const t = inv[sel];
   if (!t) return;
   let used = true;
@@ -576,12 +606,8 @@ function useItem() {
     else {
       const n = world.T.normal(P.cx, P.cz, tmpN);
       const at = new V3(P.cx, world.T.height(P.cx, P.cz), P.cz).addScaledVector(n, 0.12);
-      const m = itemMesh('piton');
-      m.children[m.children.length - 1].visible = false;
-      m.position.copy(at);
-      m.rotation.y = Math.atan2(-n.x, -n.z) + Math.PI / 2;
-      world.pitonGroup.add(m);
-      world.pitons.push(at);
+      addPiton(at);
+      if (coop.on) net.send({ t: 'piton', p: [at.x, at.y, at.z] });
       stats.pitons++;
       sfx.piton();
       toast('Piton set. Hang here to rest.');
@@ -594,10 +620,11 @@ function useItem() {
 }
 
 function dropItem() {
-  if (state !== 'play' || !inv[sel] || P.mode !== 'ground') return;
+  if (state !== 'play' || !inv[sel] || P.mode !== 'ground' || P.isDown) return;
   const f = new V3(Math.sin(P.facing), 0, Math.cos(P.facing));
   const x = P.pos.x + f.x, z = P.pos.z + f.z;
-  world.items.push(spawnItem(world.root, inv[sel], new V3(x, gy(x, z), z)));
+  if (coop.on) net.send({ t: 'drop', type: inv[sel], p: [x, gy(x, z), z] }); // appears for everyone when the server confirms
+  else world.items.push(spawnItem(world.root, inv[sel], new V3(x, gy(x, z), z)));
   inv[sel] = null;
   renderInv();
 }
@@ -653,7 +680,7 @@ function release(msg) {
 function land(impact) {
   P.mode = 'ground';
   P.vel.y = 0;
-  if (impact > 32) { sfx.land(true); stats.falls++; blackout('You fell too far…'); return; }
+  if (impact > 32) { sfx.land(true); stats.falls++; if (!P.isDown) blackout('You fell too far…'); return; }
   if (impact > 12) {
     const dmg = (impact - 12) * 0.028;
     S.injury = Math.min(1, S.injury + dmg);
@@ -668,6 +695,8 @@ function land(impact) {
 let shake = 0;
 function updatePlayer(dt) {
   const T = world.T;
+  if (P.isDown && P.mode === 'climb') release();
+  if (P.isDown && P.mode === 'ground') { P.pos.y = gy(P.pos.x, P.pos.z); return; }
   const inp = inputVec();
   const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
   const right = new V3(Math.cos(camYaw), 0, -Math.sin(camYaw));
@@ -755,7 +784,7 @@ function updatePlayer(dt) {
       P.pos.y = g;
       const water = T.height(P.pos.x, P.pos.z) < -0.8;
       land(water ? 0 : -P.vel.y);
-    } else if (grabHeld() && P.regrabLock <= 0 && S.stamina > 0.03 && -P.vel.y < 16) {
+    } else if (!P.isDown && grabHeld() && P.regrabLock <= 0 && S.stamina > 0.03 && -P.vel.y < 16) {
       const hy = P.pos.y + 1.05;
       const toPeak = new V3(world.T.summit.x - P.pos.x, 0, world.T.summit.z - P.pos.z);
       if (tryGrab(Math.sin(P.facing), Math.cos(P.facing), hy) || tryGrab(fwd.x, fwd.z, hy) || tryGrab(toPeak.x, toPeak.z, hy)) {
@@ -824,6 +853,12 @@ function lerpAngle(a, b, t) {
 // ---------------- survival, hazards, events ----------------
 const showStatus = {};
 function updateSurvival(dt) {
+  if (P.isDown) {
+    P.downT -= dt;
+    $('#downTxt').textContent = `A teammate can help you up (E). Respawning at the campfire in ${Math.max(0, Math.ceil(P.downT))} s.`;
+    if (P.downT <= 0) giveUp();
+    return;
+  }
   const y = P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y;
   const band = bandAt(y);
   stats.maxAlt = Math.max(stats.maxAlt, y);
@@ -874,9 +909,44 @@ function updateSurvival(dt) {
 }
 
 function blackout(msg) {
-  if (state !== 'play') return;
-  state = 'dead';
+  if (state !== 'play' || P.isDown) return;
   stats.blackouts++;
+  if (coop.on && coop.remotes.size > 0) {
+    // Co-op: you go down where you are and teammates have a short window to help you up.
+    P.isDown = true;
+    P.downT = 25;
+    sfx.blackout();
+    toast(msg);
+    net.send({ t: 'down' });
+    $('#downbox').classList.remove('hidden');
+    return;
+  }
+  respawnAtCamp(msg);
+}
+
+function giveUp() {
+  if (!P.isDown) return;
+  P.isDown = false;
+  $('#downbox').classList.add('hidden');
+  net.send({ t: 'up' });
+  respawnAtCamp('Everything goes dark…');
+}
+
+function revived(byName) {
+  if (!P.isDown) return;
+  P.isDown = false;
+  $('#downbox').classList.add('hidden');
+  S.cold = 0;
+  S.injury = Math.min(S.injury, 0.2);
+  S.hunger = Math.min(S.hunger, 0.4);
+  S.stamina = maxSt() * 0.5;
+  net.send({ t: 'up' });
+  sfx.pickup();
+  toast(`🤝 ${byName} helped you up!`);
+}
+
+function respawnAtCamp(msg) {
+  state = 'dead';
   sfx.blackout();
   $('#fadeTxt').textContent = msg;
   const f = $('#fade');
@@ -898,11 +968,15 @@ function blackout(msg) {
   setTimeout(() => f.classList.add('hidden'), 2600);
 }
 
-function lightBeacon() {
+function lightBeacon(by = null) {
+  if (world.beacon.lit) return;
   world.beacon.lit = true;
   world.beacon.flame.visible = true;
   world.beacon.flagMat.color.setHex(0xff7a29);
   sfx.win();
+  P.isDown = false;
+  $('#downbox').classList.add('hidden');
+  $('#pause').classList.add('hidden');
   state = 'won';
   document.exitPointerLock?.();
   const best = store.get('best', null);
@@ -925,6 +999,10 @@ function lightBeacon() {
     row('Pitons placed', String(stats.pitons));
     row('Mountain', `#${world.seed}`);
     if (isBest) row('', '★ New personal best!', 'best');
+    const team = [...coop.remotes.values()].map((r) => r.name);
+    $('#resTeam').textContent = coop.on ? `${by ? `${by} lit the beacon. ` : ''}${team.length ? `Climbed with ${team.join(', ')}.` : ''}` : '';
+    $('#btnAgain').textContent = coop.on ? 'Back to menu' : 'Climb again';
+    $('#btnNew2').classList.toggle('hidden', coop.on);
     $('#hud').classList.add('hidden');
     $('#results').classList.remove('hidden');
   }, 1800);
@@ -1027,25 +1105,36 @@ function updateScene(dt, now) {
   if (P.render.distanceTo(target) > 6) P.render.copy(target);
   P.render.lerp(target, 1 - Math.exp(-20 * dt));
   climber.position.copy(P.render);
-  climber.rotation.y = P.facing;
-  const L = climber.userData;
-  const s = Math.sin(P.anim);
-  if (P.mode === 'climb') {
+  poseClimber(climber, P.isDown ? 'down' : P.mode, P.facing, P.anim);
+  sfx.ambience(clamp((y - 20) / 260, 0.05, 0.4) + storm * 0.3 + gust.k * (band.id === 'crown' ? 0.3 : 0), nearest && nd < 12 ? 0.25 * (1 - nd / 12) : 0);
+}
+
+function poseClimber(model, mode, facing, anim) {
+  const L = model.userData;
+  const s = Math.sin(anim);
+  model.rotation.set(0, facing, 0);
+  L.armL.rotation.z = 0.08; L.armR.rotation.z = -0.08;
+  if (mode === 'climb') {
     L.armL.rotation.x = -2.6 + s * 0.35;
     L.armR.rotation.x = -2.6 - s * 0.35;
     L.legL.rotation.x = -0.5 - s * 0.3;
     L.legR.rotation.x = -0.5 + s * 0.3;
     L.armL.rotation.z = 0.15; L.armR.rotation.z = -0.15;
-  } else if (P.mode === 'air') {
+  } else if (mode === 'air') {
     L.armL.rotation.x = L.armR.rotation.x = -1.2;
     L.armL.rotation.z = 0.8; L.armR.rotation.z = -0.8;
     L.legL.rotation.x = 0.3; L.legR.rotation.x = -0.3;
+  } else if (mode === 'down') {
+    // Lying on their back, arms out.
+    model.rotation.set(-Math.PI / 2, facing, 0, 'YXZ');
+    model.position.y += 0.25;
+    L.armL.rotation.x = L.armR.rotation.x = 0;
+    L.armL.rotation.z = 1.2; L.armR.rotation.z = -1.2;
+    L.legL.rotation.x = L.legR.rotation.x = 0;
   } else {
     L.armL.rotation.x = s * 0.7; L.armR.rotation.x = -s * 0.7;
-    L.armL.rotation.z = 0.08; L.armR.rotation.z = -0.08;
     L.legL.rotation.x = -s * 0.8; L.legR.rotation.x = s * 0.8;
   }
-  sfx.ambience(clamp((y - 20) / 260, 0.05, 0.4) + storm * 0.3 + gust.k * (band.id === 'crown' ? 0.3 : 0), nearest && nd < 12 ? 0.25 * (1 - nd / 12) : 0);
 }
 
 // ---------------- HUD ----------------
@@ -1084,10 +1173,40 @@ function updateHud(dt) {
   if (S.boostT > 0) tag('🧃 Fizz', 'good');
   showStatus.piton = false;
 
+  const ri = $('#roominfo');
+  ri.classList.toggle('hidden', !coop.on);
+  if (coop.on) {
+    ri.replaceChildren();
+    const head = document.createElement('div');
+    head.append('Room ');
+    const code = document.createElement('span'); code.className = 'code'; code.textContent = coop.code;
+    head.append(code, ` · ${coop.remotes.size + 1}/4`);
+    ri.append(head);
+    const line = (name, slot, txt) => {
+      const d = document.createElement('div'); d.className = 'pl';
+      const n = document.createElement('span');
+      const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = `#${SLOT_COLORS[slot % 4].toString(16).padStart(6, '0')}`;
+      n.append(sw, name);
+      const t = document.createElement('i'); t.textContent = txt;
+      d.append(n, t); ri.append(d);
+    };
+    const tag = (m, alt) => (m === 'down' ? '💤 down' : `${m === 'climb' ? '🧗 ' : ''}${Math.max(0, Math.round(alt))} m`);
+    line('You', coop.slot, tag(P.isDown ? 'down' : P.mode, y));
+    for (const r of coop.remotes.values()) line(r.name, r.slot, r.st ? tag(r.st.m, r.st.alt) : '…');
+  }
+
   // Context prompt.
   const me = P.mode === 'climb' ? climberWorldPos() : P.pos;
   let prompt = '';
-  if (world.items.some((it) => !it.taken && it.mesh.position.distanceTo(me) < 3)) prompt = `${isTouch ? 'E' : '[E]'} pick up`;
+  const key = isTouch ? 'E' : '[E]';
+  if (coop.on && !P.isDown) {
+    const downMate = [...coop.remotes.values()].find((r) => r.st?.m === 'down' && r.pos.distanceTo(me) < 2.8);
+    const pullMate = pullTarget();
+    if (downMate) prompt = `${key} help ${downMate.name} up`;
+    else if (pullMate) prompt = `${key} pull ${pullMate.name} up`;
+  }
+  if (prompt || P.isDown) { /* co-op prompt above */ }
+  else if (world.items.some((it) => !it.taken && it.mesh.position.distanceTo(me) < 3)) prompt = `${isTouch ? 'E' : '[E]'} pick up`;
   else if (world.camps.some((c) => !c.lit && c.pos.distanceTo(me) < 3.6)) prompt = `${isTouch ? 'E' : '[E]'} light campfire`;
   else if (!world.beacon.lit && world.beacon.pos.distanceTo(me) < 4.5) prompt = `${isTouch ? 'E' : '[E]'} light the summit beacon`;
   else if (P.mode === 'climb') prompt = isTouch ? 'Release ✋ to let go · ⤒ lunge' : 'Release to let go · Space lunge';
@@ -1098,6 +1217,260 @@ function updateHud(dt) {
   }
   $('#prompt').textContent = prompt;
   $('#prompt').classList.toggle('hidden', !prompt);
+}
+
+// ---------------- co-op ----------------
+const net = new HNet();
+const coop = { on: false, code: null, slot: 0, remotes: new Map(), pending: new Set(), sendAcc: 0 };
+
+function makeTag(text, bg = 'rgba(2,10,36,0.72)') {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const x = c.getContext('2d');
+  x.font = 'bold 28px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  const w = Math.min(250, x.measureText(text).width + 30);
+  x.fillStyle = bg;
+  if (x.roundRect) { x.beginPath(); x.roundRect((256 - w) / 2, 8, w, 48, 14); x.fill(); } else x.fillRect((256 - w) / 2, 8, w, 48);
+  x.fillStyle = '#fff';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText(text, 128, 33, 236);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, fog: false, transparent: true }));
+  sp.scale.set(1.8, 0.45, 1);
+  sp.renderOrder = 10;
+  sp.visible = false;
+  scene.add(sp);
+  return sp;
+}
+
+function addRemote(p) {
+  if (coop.remotes.has(p.cid) || p.cid === net.you?.cid) return;
+  const model = makeClimber(SLOT_COLORS[p.slot % 4]);
+  model.visible = false;
+  scene.add(model);
+  coop.remotes.set(p.cid, {
+    cid: p.cid, name: p.name, slot: p.slot, model, st: null, pos: new V3(), facing: 0, anim: 0,
+    tag: makeTag(p.name), help: makeTag('💤 Help me up!', 'rgba(140,30,40,0.8)'),
+  });
+}
+function removeRemote(cid) {
+  const r = coop.remotes.get(cid);
+  if (!r) return;
+  for (const o of [r.model, r.tag, r.help]) {
+    scene.remove(o);
+    o.traverse((k) => { k.geometry?.dispose(); k.material?.map?.dispose(); k.material?.dispose(); });
+  }
+  coop.remotes.delete(cid);
+}
+const clearRemotes = () => { for (const cid of [...coop.remotes.keys()]) removeRemote(cid); };
+const nameOf = (cid) => coop.remotes.get(cid)?.name ?? 'A teammate';
+
+function updateRemotes(dt) {
+  const k = 1 - Math.exp(-12 * dt);
+  for (const r of coop.remotes.values()) {
+    if (!r.st) continue;
+    const target = new V3(r.st.p[0], r.st.p[1], r.st.p[2]);
+    if (!r.model.visible || r.pos.distanceTo(target) > 10) { r.pos.copy(target); r.model.visible = true; }
+    const before = r.pos.clone();
+    r.pos.lerp(target, k);
+    r.anim += before.distanceTo(r.pos) * (r.st.m === 'climb' ? 3.4 : 2.2);
+    r.facing = lerpAngle(r.facing, r.st.f, k);
+    r.model.position.copy(r.pos);
+    poseClimber(r.model, r.st.m, r.facing, r.anim);
+    const down = r.st.m === 'down';
+    r.tag.visible = true;
+    r.tag.position.copy(r.pos).add(new V3(0, down ? 1.0 : 2.35, 0));
+    r.help.visible = down;
+    r.help.position.copy(r.pos).add(new V3(0, 1.55, 0));
+  }
+}
+
+function pullTarget() {
+  if (!coop.on || P.mode !== 'ground' || P.isDown) return null;
+  for (const r of coop.remotes.values()) {
+    if (r.st?.m !== 'climb') continue;
+    const hd = Math.hypot(r.pos.x - P.pos.x, r.pos.z - P.pos.z);
+    const dy = P.pos.y - r.pos.y;
+    if (hd < 2.6 && dy > 0.3 && dy < 3.4) return r;
+  }
+  return null;
+}
+
+function coopInteract(me) {
+  for (const r of coop.remotes.values()) {
+    if (r.st?.m === 'down' && r.pos.distanceTo(me) < 2.8) {
+      net.send({ t: 'revive', to: r.cid });
+      toast(`🤝 Helping ${r.name} up…`);
+      return true;
+    }
+  }
+  const pr = pullTarget();
+  if (pr) {
+    net.send({ t: 'pull', to: pr.cid, p: [P.pos.x, P.pos.y, P.pos.z] });
+    S.stamina = Math.max(0, S.stamina - 0.1);
+    sfx.grab();
+    toast(`💪 You haul ${pr.name} up!`);
+    return true;
+  }
+  return false;
+}
+
+function applyLayout(items, camps) {
+  for (const it of world.items) {
+    world.root.remove(it.mesh);
+    it.mesh.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+  }
+  world.items = items.map(([id, type, x, y, z, taken]) => {
+    const it = spawnItem(world.root, type, new V3(x, y, z));
+    it.id = id;
+    if (taken) { it.taken = true; it.mesh.visible = false; }
+    return it;
+  });
+  (camps || []).forEach((p, i) => {
+    const c = world.camps[i];
+    if (c && !c.lit) { c.pos.set(p[0], p[1], p[2]); c.group.position.copy(c.pos); }
+  });
+}
+
+function enterRoom(m) {
+  clearRemotes();
+  coop.on = true;
+  coop.code = m.code;
+  coop.pending.clear();
+  resetRun(true, m.seed);
+  coop.slot = m.players.find((p) => p.cid === m.you)?.slot ?? 0;
+  climber.userData.jacket.color.setHex(SLOT_COLORS[coop.slot]);
+  for (const p of m.players) addRemote(p);
+  for (const [cid, st] of Object.entries(m.states || {})) {
+    const r = coop.remotes.get(Number(cid));
+    if (r) r.st = st;
+  }
+  if (m.layout) applyLayout(m.layout.items, m.layout.camps);
+  else net.send({ t: 'layout', items: world.items.map((i) => [i.type, i.pos.x, i.pos.y, i.pos.z]), camps: world.camps.map((c) => [c.pos.x, c.pos.y, c.pos.z]) });
+  for (const i of m.lit || []) if (world.camps[i]) lightCamp(world.camps[i], null, true);
+  for (const p of m.pitons || []) addPiton(new V3(p[0], p[1], p[2]));
+  if (m.beacon) { world.beacon.lit = true; world.beacon.flame.visible = true; }
+  try { history.replaceState(null, '', `?room=${m.code}`); } catch { /* ignore */ }
+  setCoopUi();
+  startPlay();
+  toast(`Room ${m.code}: share this code so friends can join.`);
+}
+
+function leaveCoopLocal() {
+  coop.on = false;
+  coop.code = null;
+  coop.pending.clear();
+  clearRemotes();
+  climber.userData.jacket.color.setHex(SLOT_COLORS[0]);
+  if (P.isDown) { P.isDown = false; $('#downbox').classList.add('hidden'); }
+  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+  setCoopUi();
+}
+function leaveCoop() {
+  net.leave();
+  leaveCoopLocal();
+  resetRun(true);
+}
+function setCoopUi() {
+  $('#btnRestart').classList.toggle('hidden', coop.on);
+  $('#btnLeave').classList.toggle('hidden', !coop.on);
+  $('#roominfo').classList.toggle('hidden', !coop.on);
+}
+
+net.addEventListener('msg', (e) => {
+  const m = e.detail;
+  if (!world || !coop.on) return;
+  const mine = m.by === net.you?.cid;
+  switch (m.t) {
+    case 'joined': addRemote(m.player); toast(`👋 ${m.player.name} joined the climb`); break;
+    case 'left': toast(`${nameOf(m.cid)} left the room`); removeRemote(m.cid); break;
+    case 'st': { const r = coop.remotes.get(m.cid); if (r) r.st = m; break; }
+    case 'layout': applyLayout(m.items, m.camps); break;
+    case 'taken': {
+      coop.pending.delete(m.id);
+      const it = world.items.find((i) => i.id === m.id);
+      if (it) { it.taken = true; it.mesh.visible = false; }
+      if (mine) {
+        const slot = inv[sel] === null ? sel : inv.indexOf(null);
+        if (slot < 0) {
+          net.send({ t: 'drop', type: m.type, p: [P.pos.x, gy(P.pos.x, P.pos.z), P.pos.z] });
+          toast('Your pack is full, so you set it down.');
+        } else {
+          inv[slot] = m.type;
+          sel = slot;
+          renderInv();
+          sfx.pickup();
+          toast(`Picked up ${ITEMS[m.type].name}`);
+        }
+      }
+      break;
+    }
+    case 'take_no': coop.pending.delete(m.id); toast('Someone else grabbed it first!'); break;
+    case 'dropped': { const it = spawnItem(world.root, m.type, new V3(m.p[0], m.p[1], m.p[2])); it.id = m.id; world.items.push(it); break; }
+    case 'camp': if (world.camps[m.i]) lightCamp(world.camps[m.i], mine ? null : nameOf(m.by)); break;
+    case 'piton': addPiton(new V3(m.p[0], m.p[1], m.p[2])); break;
+    case 'beacon': if (state !== 'won' && state !== 'menu') lightBeacon(mine ? 'You' : m.name); break;
+    case 'down': if (coop.remotes.has(m.cid)) toast(`💤 ${nameOf(m.cid)} is down! Get to them and press E.`); break;
+    case 'revive': {
+      const r = coop.remotes.get(m.from);
+      if (P.isDown && r && r.pos.distanceTo(P.pos) < 4.5) revived(r.name);
+      break;
+    }
+    case 'pull': {
+      const r = coop.remotes.get(m.from);
+      if (!r || P.mode !== 'climb' || P.isDown || !m.p) break;
+      const at = new V3(m.p[0], m.p[1], m.p[2]);
+      if (at.distanceTo(climberWorldPos()) > 5.5) break;
+      P.mode = 'ground';
+      P.pos.set(at.x, gy(at.x, at.z), at.z);
+      P.vel.set(0, 0, 0);
+      P.regrabLock = 0.8;
+      P.regenDelay = 0.4;
+      sfx.grab();
+      toast(`💪 ${r.name} pulled you up!`);
+      break;
+    }
+  }
+});
+net.addEventListener('close', () => {
+  if (!coop.on) return;
+  leaveCoopLocal();
+  toast('Lost the connection to the co-op room. You can keep climbing solo.');
+});
+
+async function coopAction(kind) {
+  const msg = $('#coopMsg');
+  msg.className = 'small';
+  sfx.unlock();
+  const code = $('#roomCode').value.trim().toUpperCase();
+  if (kind === 'join' && !/^[A-Z]{5}$/.test(code)) { msg.className = 'small err'; msg.textContent = 'Type the 5-letter room code.'; return; }
+  msg.textContent = 'Connecting…';
+  try {
+    await net.connect();
+    const m = kind === 'create' ? await net.create(world.seed) : await net.join(code);
+    msg.textContent = '';
+    enterRoom(m);
+  } catch (err) {
+    msg.className = 'small err';
+    msg.textContent = err?.status === 401 ? 'Please sign in again.' : err?.message || 'Something went wrong.';
+  }
+}
+$('#btnCreate').addEventListener('click', () => coopAction('create'));
+$('#btnJoin').addEventListener('click', () => coopAction('join'));
+$('#roomCode').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') coopAction('join'); });
+$('#roomCode').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5); });
+$('#btnLeave').addEventListener('click', () => { leaveCoop(); showMenu(); });
+$('#btnGiveUp').addEventListener('click', () => giveUp());
+{
+  const roomParam = new URLSearchParams(location.search).get('room');
+  if (roomParam) $('#roomCode').value = roomParam.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
+  HNet.me().then((u) => {
+    $('#coopSignedOut').classList.toggle('hidden', !!u);
+    $('#coopSignedIn').classList.toggle('hidden', !u);
+    if (!u && roomParam) $('#coopMsg').textContent = `Sign in to join room ${$('#roomCode').value}.`;
+  });
 }
 
 // ---------------- menus ----------------
@@ -1135,8 +1508,8 @@ $('#btnStart').addEventListener('click', () => { if (!world) resetRun(true); sta
 $('#btnNew').addEventListener('click', () => { resetRun(false); $('#seedRow').textContent = `Mountain #${world.seed}`; sfx.unlock(); sfx.click(); });
 $('#btnResume').addEventListener('click', startPlay);
 $('#btnRestart').addEventListener('click', () => { resetRun(true); startPlay(); });
-$('#btnQuit').addEventListener('click', () => { resetRun(true); showMenu(); });
-$('#btnAgain').addEventListener('click', () => { resetRun(true); startPlay(); });
+$('#btnQuit').addEventListener('click', () => { if (coop.on) leaveCoop(); else resetRun(true); showMenu(); });
+$('#btnAgain').addEventListener('click', () => { if (coop.on) { leaveCoop(); showMenu(); } else { resetRun(true); startPlay(); } });
 $('#btnNew2').addEventListener('click', () => { resetRun(false); startPlay(); });
 $('#btnPause').addEventListener('click', () => { if (isTouch) pause(); else document.exitPointerLock?.(); });
 $('#setVol').addEventListener('input', (e) => { sfx.setVolume(Number(e.target.value)); store.set('vol', sfx.vol); });
@@ -1167,6 +1540,15 @@ function frame(now) {
   } else if (state === 'menu') {
     camYaw += dt * 0.05;
   }
+  if (coop.on && state !== 'menu') {
+    coop.sendAcc += dt;
+    if (coop.sendAcc >= 1 / 12) {
+      coop.sendAcc = 0;
+      const alt = P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y;
+      net.send({ t: 'st', p: [P.render.x, P.render.y, P.render.z], f: Math.atan2(Math.sin(P.facing), Math.cos(P.facing)), m: P.isDown ? 'down' : P.mode, a: 0, alt });
+    }
+  }
+  updateRemotes(dt);
   updateCamera(dt);
   updateScene(dt, now / 1000);
   renderer.render(scene, camera);
@@ -1179,6 +1561,8 @@ window.__highcrag = {
   get player() { return { mode: P.mode, x: P.pos.x, y: P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y, z: P.pos.z }; },
   get vitals() { return { ...S }; },
   get inv() { return [...inv]; },
+  get coop() { return { on: coop.on, code: coop.code, down: !!P.isDown, remotes: [...coop.remotes.values()].map((r) => ({ cid: r.cid, name: r.name, m: r.st?.m ?? null, x: r.pos.x, y: r.pos.y, z: r.pos.z })) }; },
+  blackout: () => blackout('test'),
   world: () => world,
   teleport: (x, z) => teleport(new V3(x, 0, z)),
   setYaw: (y) => { camYaw = y; },
