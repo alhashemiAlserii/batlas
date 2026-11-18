@@ -6,6 +6,7 @@ import { loadConfig, dbTarget } from './config.js';
 import { attachGameServer, WS_PATH } from './game-server/server.js';
 import { httpSiteBridge } from './game-server/bridge.js';
 import { siteMaintenance } from './game-server/maintenance.js';
+import { attachHighcragServer, HC_WS_PATH } from './highcrag/server.js';
 
 const config = loadConfig();
 const db = createDb(dbTarget(config));
@@ -46,6 +47,9 @@ if (config.gameServerKey) {
   // The game server verifies players through the site's HTTP API (same as a separate process would).
   gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey), isMaintenance: siteMaintenance(db) });
   console.log(`Sky Crew game server on ws://localhost:${port}${WS_PATH}`);
+  // Highcrag co-op: its own rooms on its own path; only shares the site's sign-in check.
+  attachHighcragServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey) });
+  console.log(`Highcrag co-op server on ws://localhost:${port}${HC_WS_PATH}`);
 } else console.log('GAME_SERVER_KEY not set: co-op game server disabled.');
 
 // Render (and most hosts) send SIGTERM on deploys: finish open requests, then close the DB pool.
