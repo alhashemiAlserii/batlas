@@ -107,6 +107,13 @@ h2 { margin: 0 0 10px; }
 #touch { position: fixed; inset: 0; z-index: 11; pointer-events: none; }
 #joy { position: absolute; left: 24px; bottom: 28px; width: 130px; height: 130px; border-radius: 50%; background: rgba(17,19,22,.4); border: 2px solid rgba(243,244,245,.55); pointer-events: auto; touch-action: none; }
 #joyKnob { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(243,244,245,.92); }
+#yoke { position: absolute; left: calc(18px + env(safe-area-inset-left)); bottom: calc(22px + env(safe-area-inset-bottom)); width: 168px; height: 168px; border-radius: 50%; pointer-events: auto; touch-action: none; display: grid; place-items: center; background: radial-gradient(circle at 50% 45%, rgba(17,19,22,.15), rgba(17,19,22,.62)); border: 2px solid rgba(243,244,245,.6); }
+#yokeWheel { width: 128px; height: 128px; border-radius: 50%; border: 12px solid rgba(243,244,245,.94); box-shadow: inset 0 0 0 10px rgba(17,19,22,.72), 0 10px 18px rgba(0,0,0,.35); position: relative; }
+#yokeWheel i { position: absolute; left: 50%; top: 50%; width: 46%; height: 8px; margin-top: -4px; background: rgba(243,244,245,.88); transform-origin: 0 50%; border-radius: 4px; }
+#yokeWheel i:nth-child(1) { transform: rotate(-90deg); }
+#yokeWheel i:nth-child(2) { transform: rotate(30deg); }
+#yokeWheel i:nth-child(3) { transform: rotate(150deg); }
+#yokeWheel b { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: #e4c36a; box-shadow: 0 0 0 3px rgba(17,19,22,.8); }
 #tbtns { position: absolute; right: 20px; bottom: 28px; display: grid; grid-template-columns: repeat(2, 64px); gap: 12px; pointer-events: auto; }
 #tbtns button, #tFlight button, #tDial { width: 64px; height: 64px; border-radius: 50%; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; line-height: 1.05; padding: 4px; background: rgba(17,19,22,.78); color: #f4f6f8; border: 1px solid rgba(243,244,245,.5); touch-action: none; }
 #tDial { position: absolute; right: calc(140px + env(safe-area-inset-right)); bottom: calc(400px + env(safe-area-inset-bottom)); width: 72px; height: 72px; display: grid; place-items: center; pointer-events: auto; }
@@ -259,6 +266,8 @@ body.touch #hudWallet { bottom: auto; top: calc(12px + env(safe-area-inset-top))
   #toasts { top: calc(8px + env(safe-area-inset-top)); width: min(420px, 50vw); font-size: 12px; }
   #joy { width: 104px; height: 104px; bottom: calc(12px + env(safe-area-inset-bottom)); left: calc(14px + env(safe-area-inset-left)); }
   #joyKnob { left: 29px; top: 29px; width: 46px; height: 46px; }
+  #yoke { width: 132px; height: 132px; }
+  #yokeWheel { width: 100px; height: 100px; border-width: 9px; }
   #tbtns { grid-template-columns: repeat(3, 52px); gap: 8px; bottom: calc(12px + env(safe-area-inset-bottom)); right: calc(14px + env(safe-area-inset-right)); }
   #tbtns button, #tDial { width: 52px; height: 52px; font-size: 10px; }
   #tDial { bottom: calc(78px + env(safe-area-inset-bottom)); right: calc(390px + env(safe-area-inset-right)); }
@@ -321,6 +330,7 @@ body.ctl-editing .ctl-force.hidden { display: inline-block !important; }
 body.ctl-editing #tFlight.ctl-force.hidden { display: grid !important; }
 body.ctl-editing #tDial.ctl-force.hidden, body.ctl-editing #tPri.ctl-force.hidden { display: grid !important; }
 body.ctl-editing #joy.ctl-force { display: block !important; }
+body.ctl-editing #yoke.ctl-force.hidden { display: grid !important; }
 body.ctl-editing .ctl-force { outline: 2px dashed rgba(255,255,255,.55); outline-offset: 3px; }
 body.ctl-editing .ctl-force.ctl-sel { outline: 3px solid #ffd23f; }
 .card.howto { width: min(580px, 100%); }

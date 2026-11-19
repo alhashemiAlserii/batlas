@@ -40,8 +40,10 @@ export class Batch {
     return geo;
   }
   mesh(opts = {}) {
-    const { basic = false, side = THREE.FrontSide, shadows = true, ...rest } = opts;
-    const mat = basic ? new THREE.MeshBasicMaterial({ vertexColors: true, side, ...rest }) : new THREE.MeshLambertMaterial({ vertexColors: true, side, ...rest });
+    const { basic = false, side = THREE.FrontSide, shadows = true, roughness = 0.72, metalness = 0.06, ...rest } = opts;
+    const mat = basic
+      ? new THREE.MeshBasicMaterial({ vertexColors: true, side, ...rest })
+      : new THREE.MeshStandardMaterial({ vertexColors: true, side, roughness, metalness, envMapIntensity: 0.55, ...rest });
     const m = new THREE.Mesh(this.geometry(), mat);
     m.castShadow = shadows; m.receiveShadow = shadows;
     return m;

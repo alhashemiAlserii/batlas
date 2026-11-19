@@ -35,7 +35,7 @@
       <div class="fcol"><span class="flabel">GEAR</span><b id="fGear" class="gear-dn">DN</b></div>
       <div class="fcol"><span class="flabel">FLP</span><b id="fFlaps">UP</b></div>
       <div id="fWarn"></div>
-      <div id="fHelp">W/S pitch · A/D steer · R/F throttle · G gear · C flaps · B belt · N call · E leave</div>
+      <div id="fHelp">Drag the yoke · W/S pitch · A/D steer · R/F throttle · G gear · C flaps · B belt · N call · E leave</div>
     </div>
     <div id="gpath" class="hidden" aria-label="Landing guide">
       <div class="gp-title">LANDING GUIDE <span id="gpDest"></span></div>
@@ -63,6 +63,9 @@
 
   <div id="touch" class="hidden">
     <div id="joy"><div id="joyKnob"></div></div>
+    <div id="yoke" class="hidden" aria-label="Steering yoke">
+      <div id="yokeWheel"><i></i><i></i><i></i><b></b></div>
+    </div>
     <button id="tDial" type="button" class="hidden" aria-label="Throttle, hold to increase">
       <svg viewBox="0 0 64 64" class="dial" aria-hidden="true"><circle cx="32" cy="32" r="26" class="dial-track"></circle><circle cx="32" cy="32" r="26" class="dial-fill"></circle></svg>
       <span>Thr</span>
@@ -167,7 +170,7 @@
       <p class="howto-kicker">The hold is open, the cabin is filling, and someone will want a drink before you level off.</p>
       <h2>How to play</h2>
       <h3>Your first steps</h3>
-      <p>Stow the bags in the forward hold, board the passengers and see them into their seats, then close the rear door and the cargo door. Run the checklist: seatbelt sign, a short welcome, gear down and lights on. Take the captain's seat and lift off. In the air, answer the calls, deal with a flare or a spill if one starts, then line up, lower the gear and land.</p>
+      <p>Stow the bags in the forward hold, board the passengers and see them into their seats, then close the rear door, the side cargo door and the tail ramp. The tail ramp counts as the cargo door on the checklist. Run the checklist: seatbelt sign, a short welcome, gear down and lights on. Take the captain's seat and lift off. In the air, answer the calls, deal with a flare or a spill if one starts, then line up, lower the gear and land.</p>
       <section class="how-group"><h3>Move</h3>
         <div class="how-row"><span class="how-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk the cabin, the hold and the apron</span></div>
         <div class="how-row"><span class="how-keys"><kbd>Shift</kbd></span><span>Sprint</span></div>
@@ -186,6 +189,7 @@
         <div class="how-row"><span class="how-keys"><kbd>Q</kbd></span><span>Throw it. An open door in flight is a parachute, a refund and a fine</span></div>
       </section>
       <section class="how-group"><h3>In a seat</h3>
+        <div class="how-row"><span class="how-keys"><kbd>Yoke</kbd></span><span>Drag the control wheel. Left and right banks, push and pull pitches. It springs back to centre. On a phone or iPad the wheel sits where the move stick was.</span></div>
         <div class="how-row"><span class="how-keys"><kbd>W</kbd><kbd>S</kbd></span><span>Pitch</span></div>
         <div class="how-row"><span class="how-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Steer and bank</span></div>
         <div class="how-row"><span class="how-keys"><kbd>R</kbd><kbd>F</kbd></span><span>Throttle up and down</span></div>
@@ -202,9 +206,9 @@
         <div class="how-row"><span class="how-keys"><kbd>V</kbd></span><span>First person or third person</span></div>
         <div class="how-row"><span class="how-keys"><kbd>Esc</kbd></span><span>Pause</span></div>
       </section>
-      <p class="how-note">Touch: a move stick, plus round buttons labelled Jump, Use, Run and Throw. Throw shows up while you are carrying something. In the captain's seat, hold the throttle dial and it fills as power comes on. Gear, flaps and leave sit beside it. Open Options to drag, resize or reset each control. The layout is saved on this device, separately for landscape and portrait.</p>
+      <p class="how-note">Touch: a move stick, plus round buttons labelled Jump, Use, Run and Throw. Throw shows up while you are carrying something. In the captain's seat the stick becomes a yoke: drag it left and right to bank, push and pull to pitch, and it springs back to centre. Hold the throttle dial and it fills as power comes on. The throttle lever in the cockpit moves with it. Gear, flaps and leave sit beside it. Open Options to drag, resize or reset each control. The layout is saved on this device, separately for landscape and portrait.</p>
       <p class="how-note">Gamepad, on foot: left stick walks, right stick looks. A jump, B use, X throw, Y run. The D-pad matches the galley slots. Start pauses. Back opens the duty card.</p>
-      <p class="how-note">Gamepad, in a seat: the captain's left stick pitches and steers, and the triggers add and cut throttle. A belt, B leave, X gear, Y flaps. Bumpers are lights and the announcement.</p>
+      <p class="how-note">Gamepad, in a seat: the captain's left stick pitches and steers, and the triggers add and cut throttle. The yoke in front of both seats moves with that input. A belt, B leave, X gear, Y flaps. Bumpers are lights and the announcement.</p>
       <div class="actions"><button id="bHowClose" class="primary" type="button">Back</button></div>
     </div>
   </div>

@@ -3,6 +3,7 @@
 const KEY = 'skycrew.controls.v1';
 export const CONTROLS = [
   { id: 'joy', label: 'Move stick' },
+  { id: 'yoke', label: 'Steering yoke' },
   { id: 'tE', label: 'Use' },
   { id: 'tJ', label: 'Jump' },
   { id: 'tRun', label: 'Run' },

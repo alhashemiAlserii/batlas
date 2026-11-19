@@ -151,7 +151,7 @@ function setExpression(ch, kind) {
 }
 
 // ---------------------------------------------------------------- the character
-const MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+const MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.02, envMapIntensity: 0.35 });
 /**
  * look: { skin, shirt, shirt2, pattern: plain|stripes|dots|split, pants, skirt, dress, shoes, hair, hairColor, hat, hatColor,
  *         glasses: 0|1|2(sun), beard, moustache, height, girth, headSize, legs, shoulders, eyeSize, uniform: pilot|copilot|cabin|cargo|null, bag }
@@ -444,7 +444,7 @@ function buildClips(d) {
   clips.flail = sampleClip('flail', 0.4, 30, (t, k) => { const p = base(); const w = S(k * TAU), w2 = C(k * TAU * 2); arms(p, [-2.3 + w * 0.9, 0, 0.6 + w2 * 0.5], [-2.3 - w * 0.9, 0, -0.6 - w2 * 0.5]); p['forearm.L'] = [-0.5 + w2 * 0.4, 0, 0]; p['forearm.R'] = [-0.5 - w2 * 0.4, 0, 0]; p['thigh.L'] = [w * 0.9, 0, 0.2]; p['thigh.R'] = [-w * 0.9, 0, -0.2]; p['shin.L'] = [-0.6 - w2 * 0.4, 0, 0]; p['shin.R'] = [-0.6 + w2 * 0.4, 0, 0]; p.head = [-0.3, w * 0.5, 0]; return p; }, rest);
   clips.parachute = sampleClip('parachute', 1.6, 12, (t, k) => { const p = base(); const w = S(k * TAU); arms(p, [-2.9, 0, 0.55], [-2.9, 0, -0.55]); p['forearm.L'] = p['forearm.R'] = [-0.25, 0, 0]; p['thigh.L'] = [0.25 + w * 0.2, 0, 0.1]; p['thigh.R'] = [0.25 - w * 0.2, 0, -0.1]; p['shin.L'] = p['shin.R'] = [-0.4, 0, 0]; p.head = [-0.35, w * 0.2, 0]; return p; }, rest);
   clips.jump = sampleClip('jump', 0.5, 20, (t, k) => { const p = base(); arms(p, [-0.8, 0, 0.9], [-0.8, 0, -0.9]); p['thigh.L'] = [0.7, 0, 0]; p['thigh.R'] = [0.2, 0, 0]; p['shin.L'] = [-1.0, 0, 0]; p['shin.R'] = [-0.5, 0, 0]; return p; }, rest);
-  clips.pilotSit = sampleClip('pilotSit', 3, 8, (t, k) => { const p = sitPose(t); arms(p, [1.0, 0, 0.15], [1.0, 0, -0.15]); p['forearm.L'] = p['forearm.R'] = [0.6, 0, 0]; p.head = [0, S(k * TAU) * 0.1, 0]; return p; }, rest);
+  clips.pilotSit = sampleClip('pilotSit', 3, 8, (t, k) => { const p = sitPose(t); arms(p, [1.15, 0.22, 0.4], [1.15, -0.22, -0.4]); p['forearm.L'] = p['forearm.R'] = [0.85, 0, 0]; p.head = [-0.06, S(k * TAU) * 0.08, 0]; return p; }, rest);
   void legDrop;
   return clips;
 }
