@@ -1,8 +1,16 @@
 import { h, fmtDay, timeUntil, safeUrl } from './common.js';
 
 export const statusLabel = (g) => (g.status === 'upcoming' ? 'Coming soon' : g.status === 'published' ? 'Out now' : g.status);
-export const coverOf = (g) => safeUrl(g.coverImage) || safeUrl(g.trailerPoster) || safeUrl(g.screenshots?.[0]) || '';
-const markArt = (url) => !url || /batlas-(logo|mark)/.test(url);
+/** Official Sky Crew cover. The studio wave stays the site mark; this photo is the game's. */
+export const SKY_CREW_COVER = '/img/sky-crew-cover.jpg';
+const MARK = /batlas-(logo|mark)/;
+export const coverOf = (g) => {
+  const c = safeUrl(g?.coverImage) || safeUrl(g?.trailerPoster) || safeUrl(g?.screenshots?.[0]) || '';
+  // A fresh catalog (or one still pointing at the studio wave) should show the game's own cover.
+  if (g?.slug === 'sky-crew' && (!c || MARK.test(c))) return SKY_CREW_COVER;
+  return c;
+};
+const markArt = (url) => !url || MARK.test(url);
 
 /** Shipped with the site. Used when the studio catalog has not been filled in yet. */
 export const builtinSkyCrew = {
@@ -13,7 +21,7 @@ export const builtinSkyCrew = {
   tagline: 'Load the bags, board the passengers, keep everyone calm, and land with your friends.',
   description: 'Sky Crew is a co-op cabin game you play in the browser. Pick up bags, board passengers, take a crew seat, and fly together. One Batlas handle and a 4–6 digit PIN is the whole account. No email.',
   playUrl: '/play/sky-crew',
-  coverImage: '/img/batlas-logo-640.jpg',
+  coverImage: '/img/sky-crew-cover.jpg',
   platforms: ['Browser', 'Up to 8 players'],
   screenshots: [],
   settings: { playEnabled: true, showLeaderboard: true, featured: true },

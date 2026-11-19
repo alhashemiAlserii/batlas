@@ -304,6 +304,7 @@ a.card.game-card:hover, a.card.news-card:hover, .featured:hover {
 .featured .f-media { aspect-ratio: 21 / 9; min-height: 220px; }
 .featured:has(.is-mark) { grid-template-columns: minmax(200px, 280px) 1fr; align-items: stretch; }
 .featured .f-media.is-mark { aspect-ratio: auto; min-height: 220px; padding: 28px; }
+img[src$="sky-crew-cover.jpg"] { object-position: center 38%; }
 .game-card .cover img, .news-card .thumb img, .featured .f-media img, .featured .f-media video {
   width: 100%;
   height: 100%;

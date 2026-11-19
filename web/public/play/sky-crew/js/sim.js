@@ -2,7 +2,7 @@
 // The HOST (or a solo player) runs the full simulation; other clients render snapshots.
 import * as THREE from '../../vendor/three.module.js';
 import * as CANNON from '../../vendor/cannon-es.js';
-import { makeCharacter, animateCharacter, randomPassengerLook, bubble } from './characters.js';
+import { makeCharacter, animateCharacter, pokeRagdoll, randomPassengerLook, bubble } from './characters.js';
 import { HALF_W, Z_TAIL, Z_NOSE, CEIL, GEAR_H, DEST, ORIGIN, ROUTES, MATERIALS, setRoute, REAR_DOOR, CARGO_DOOR, Z_HOLD0, Z_HOLD1 } from './world.js';
 import { newFlight, distTo } from './flight.js';
 import { paxTerminalPath, paxTerminalStart } from './terminal.js';
@@ -421,6 +421,7 @@ export class Sim {
 
   // ---------------- main update (host) ----------------
   update(dt, ctx) {
+    this._crew = ctx?.crew || [];
     this.t += dt;
     const f = this.flight;
     // phase machine
@@ -491,10 +492,39 @@ export class Sim {
     }
     // an open door in the air is terrifying
     if (!this.flight.onGround && (this.ship.doors.rear.open || this.ship.doors.cargo.open)) for (const p of this.pax) if (p.state === 'seated') { p.panicT = Math.max(p.panicT, 0.5); p.mood -= dt * 2; }
+    this.applyBumps(dt);
     // passengers
     for (const p of this.pax) this.updatePax(p, dt, flying, turb);
     // objective counters
     this.updateCounts();
+  }
+
+  /** Luggage and running crew can knock a standing passenger over. Visual only, plus a short pause so they don't moonwalk. */
+  applyBumps(dt) {
+    const crew = this._crew || [];
+    for (const p of this.pax) {
+      if (p.downT > 0) p.downT = Math.max(0, p.downT - dt);
+      if (p._bumpCd > 0) p._bumpCd -= dt;
+      if (p.downT > 0.05 || p._bumpCd > 0) continue;
+      if (p.state === 'seated' || p.state === 'lost' || p.state === 'carried' || p.state === 'thrown' || p.frozenT > 0) continue;
+      let hit = 0;
+      for (const it of this.items.values()) {
+        if (!it.inWorld || it.heldBy) continue;
+        const v = it.body.velocity;
+        const sp = Math.hypot(v.x, v.y, v.z);
+        if (sp < 3.2 || sp > 24) continue;
+        if (it.mesh.position.distanceTo(p.mesh.position) < 0.72) { hit = sp > 6 ? 1.4 : 0.7; break; }
+      }
+      if (!hit) for (const c of crew) {
+        const sp = Math.hypot(c.vx || 0, c.vz || 0);
+        if (sp < 3.1 || Math.abs((c.y || 0) - p.mesh.position.y) > 1.4) continue;
+        if (Math.hypot(c.x - p.mesh.position.x, c.z - p.mesh.position.z) < 0.64) { hit = sp > 4.6 ? 1.35 : 0.65; break; }
+      }
+      if (!hit) continue;
+      p._bumpCd = 0.85;
+      if (hit >= 1.05) { p.downT = 1.15; p.mood = Math.max(0, p.mood - 3); }
+      else pokeRagdoll(p.mesh, hit);
+    }
   }
 
   updatePax(p, dt, flying, turb) {
@@ -505,6 +535,7 @@ export class Sim {
     if (this.grav?.pax === p) return; // floating in the Developer's gravity beam
     if (p.state === 'thrown') { this.updateThrown(p, dt); return; }
     if (p.state === 'return') {
+      if (p.downT > 0) return;
       const pos = p.mesh.position, farZ = Math.abs(pos.z - p.seat.z) > 0.25;
       // walk back via the aisle: step out to the aisle, along it, then into the row
       const tgt = farZ ? (Math.abs(pos.x) > 0.2 ? new THREE.Vector3(0, 0, pos.z) : new THREE.Vector3(0, 0, p.seat.z)) : new THREE.Vector3(p.seat.x, 0, p.seat.z), d = tgt.sub(pos), dist = d.length();
@@ -516,6 +547,7 @@ export class Sim {
     if (p.state === 'queue') { p.delay -= dt; if (p.delay <= 0) p.state = 'walk'; }
     if (p.state === 'walk') {
       const tgt = p.path[p.wp];
+      if (p.downT > 0) { p.waiting = true; return; } // flat on the floor; they get up and carry on
       if (p.wp === (p.doorWp ?? 1) && !this.ship.doors.rear.passable) { p.waiting = true; return; }
       if (p.pauseT > 0) { p.pauseT -= dt; p.waiting = true; return; } // at a desk / in the scanner
       p.waiting = false;
@@ -637,7 +669,7 @@ export class Sim {
   snapshot(includePlane) {
     const r = (n) => Math.round(n * 1000) / 1000;
     const it = [...this.items.values()].map((i) => [i.id, i.type, r(i.mesh.position.x), r(i.mesh.position.y), r(i.mesh.position.z), r(i.mesh.quaternion.x), r(i.mesh.quaternion.y), r(i.mesh.quaternion.z), r(i.mesh.quaternion.w), i.heldBy || '', i.manifest ? 1 : 0]);
-    const px = this.pax.map((p) => [p.id, r(p.mesh.position.x), r(p.mesh.position.y), r(p.mesh.position.z), r(p.mesh.rotation.y), p.state, p.request || '', Math.round(p.mood), (p.panicT > 0 ? 1 : 0) | (p.sleep ? 2 : 0) | (p.dance > 0 ? 4 : 0) | (p.frozenT > 0 ? 8 : 0) | (p.cheerT > 0 ? 16 : 0) | (p.birthdayT > 0 ? 32 : 0), p.flashT > 0 ? p.bubbleKind : '', p.carriedBy || '', p.sizeK || 1]);
+    const px = this.pax.map((p) => [p.id, r(p.mesh.position.x), r(p.mesh.position.y), r(p.mesh.position.z), r(p.mesh.rotation.y), p.state, p.request || '', Math.round(p.mood), (p.panicT > 0 ? 1 : 0) | (p.sleep ? 2 : 0) | (p.dance > 0 ? 4 : 0) | (p.frozenT > 0 ? 8 : 0) | (p.cheerT > 0 ? 16 : 0) | (p.birthdayT > 0 ? 32 : 0) | (p.downT > 0.08 ? 64 : 0), p.flashT > 0 ? p.bubbleKind : '', p.carriedBy || '', p.sizeK || 1]);
     return {
       seed: this.seed, ph: this.phase, doors: { rear: this.ship.doors.rear.open, cargo: this.ship.doors.cargo.open }, ground: this.groundOn,
       it, px, ev: this.events.filter((e) => !e.done).map((e) => [e.id, Math.round(e.t), e.deadline || 0]), turb: r(this.turb), weather: this.weather, hour: this.hour, cfg: this.config || null,
@@ -707,7 +739,7 @@ export class Sim {
       p.carriedBy = carrier || null;
       if (state === 'lost') { p.state = state; continue; }
       p.target = new THREE.Vector3(x, y, z); if (state !== 'thrown') { p.mesh.rotation.y = ry; p.mesh.rotation.x = 0; } p.state = state; p.request = req || null; p.mood = mood;
-      p.panicT = flags & 1 ? 1 : 0; p.sleep = !!(flags & 2); p.dance = flags & 4 ? 1 : 0; p.frozenT = flags & 8 ? Math.max(p.frozenT || 0, 0.4) : 0; p.cheerT = flags & 16 ? 0.4 : 0; p.birthdayT = flags & 32 ? 1 : 0; p.sizeK = sizeK || 1; p.flashT = flash ? 1 : 0; p.bubbleKind = flash || null;
+      p.panicT = flags & 1 ? 1 : 0; p.sleep = !!(flags & 2); p.dance = flags & 4 ? 1 : 0; p.frozenT = flags & 8 ? Math.max(p.frozenT || 0, 0.4) : 0; p.cheerT = flags & 16 ? 0.4 : 0; p.birthdayT = flags & 32 ? 1 : 0; p.downT = flags & 64 ? Math.max(p.downT || 0, 0.25) : 0; p.sizeK = sizeK || 1; p.flashT = flash ? 1 : 0; p.bubbleKind = flash || null;
     }
     for (const p of [...this.pax]) if (!pseen.has(p.id)) { this.ship.plane.remove(p.mesh); this.pax = this.pax.filter((q) => q !== p); }
   }
@@ -726,7 +758,7 @@ export class Sim {
       const chute = p.state === 'lost' && p.fx?.t > 0.7;
       const airborne = p.state === 'carried' || p.state === 'thrown' || (p.state === 'lost' && !chute);
       const frozen = p.frozenT > 0;
-      animateCharacter(p.mesh, frozen ? 0 : dt, { moving: (p.state === 'walk' && !p.waiting) || p.state === 'return' || p._moving, running: p.state === 'return', sitting: seated, panic: p.panicT > 0 || airborne, flail: airborne, parachute: chute, dance: p.dance > 0, cheer: p.cheerT > 0, sleep: p.sleep && seated, angry: seated && p.mood < 30, happy: p.mood > 75, grumpy: !!p.request && p.reqT > 12 });
+      animateCharacter(p.mesh, frozen ? 0 : dt, { moving: (p.state === 'walk' && !p.waiting) || p.state === 'return' || p._moving, running: p.state === 'return', sitting: seated, panic: p.panicT > 0 || airborne, flail: airborne, parachute: chute, dance: p.dance > 0, cheer: p.cheerT > 0, sleep: p.sleep && seated, angry: seated && p.mood < 30, happy: p.mood > 75, grumpy: !!p.request && p.reqT > 12, falling: !seated && (p.downT || 0) > 0.08 });
       if (p.cheerT > 0 && this.host) p.cheerT -= dt;
       if (p.birthdayT > 0 && this.host) p.birthdayT -= dt;
       if (p.birthdayT > 0 && !p.partyHat) { p.partyHat = makePartyHat(); (p.mesh.userData.bones?.find((b) => b.name === 'head') || p.mesh).add(p.partyHat); } else if (!(p.birthdayT > 0) && p.partyHat) { p.partyHat.parent?.remove(p.partyHat); p.partyHat = null; }
@@ -737,7 +769,7 @@ export class Sim {
       if (kind !== p.shownBubble) {
         if (p.bubble) p.mesh.remove(p.bubble);
         p.bubble = kind ? bubble(kind) : null;
-        if (p.bubble) { p.bubble.position.y = seated ? 1.6 : 2.0; p.mesh.add(p.bubble); }
+        if (p.bubble) { p.bubble.position.y = seated ? 1.15 : 1.48; p.mesh.add(p.bubble); }
         p.shownBubble = kind;
       }
     }
