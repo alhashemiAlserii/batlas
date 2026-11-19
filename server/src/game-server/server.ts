@@ -102,6 +102,7 @@ function sanitizeState(s: any): Record<string, unknown> | null {
     moving: !!s.moving,
     run: !!s.run,
     fly: !!s.fly,
+    dn: Math.max(0, Math.min(3, clampNum(s.dn, 3))),
   };
 }
 

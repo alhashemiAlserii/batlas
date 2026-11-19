@@ -5,7 +5,7 @@ import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, set
 import { Sim, ITEM_DEFS } from './sim.js';
 import { stepFlight, KT, FT, distTo, relBearing, glidePath } from './flight.js';
 import { Audio } from './audio.js';
-import { makeCrew, animateCharacter, nameTag, RANK_COLORS } from './characters.js';
+import { makeCrew, animateCharacter, pokeRagdoll, nameTag, RANK_COLORS } from './characters.js';
 import { buildTerminal, TERM_SPAWN, STATIONS, stepIdx } from './terminal.js';
 import { wallet, loadWallet, renderShop, fmtC, owns } from './shop.js';
 import { CLASS_INFO, turbulenceFactor, glideWindow, serveReach, fixReach, carryLimit, tailwind, PERK } from './perks.js';
@@ -66,7 +66,7 @@ sim.onRoute = () => refreshRouteUi();
 // ---------------- player ----------------
 const R = 0.3, H = 1.7, EYE = 1.58, STEP = 0.45;
 const SPAWN = new THREE.Vector3(7.5, -GEAR_H, 17.5); // on the apron, behind and right of the aircraft, facing the rear door
-const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, moving: false, frozen: false, flying: false };
+const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, moving: false, frozen: false, flying: false, downT: 0 };
 const DEFAULT_OUTFIT = { outfit: 'captain', hat: 'captain', color: 0, skin: 1 };
 let myOutfit = (() => { try { return { ...DEFAULT_OUTFIT, ...JSON.parse(localStorage.getItem('skycrew.outfit') || 'null') }; } catch { return { ...DEFAULT_OUTFIT }; } })();
 let myClass = null; // class for the next flight (server-checked in rooms)
@@ -122,7 +122,21 @@ addEventListener('mousemove', (e) => {
   else if (dragLook) { look(e.clientX - dragLook.x, e.clientY - dragLook.y, 0.004); dragLook = { x: e.clientX, y: e.clientY }; }
 });
 document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && playing && !paused && !overlayOpen()) setPaused(true); });
-function look(dx, dy, s) { me.yaw -= dx * s; me.pitch = Math.max(-1.45, Math.min(1.45, me.pitch - dy * s)); }
+function look(dx, dy, s) {
+  // A page-zoom or a gesture spike (double-tap on iPad) reports a huge delta and yanks the view into the floor.
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 120 || Math.abs(dy) > 120) return;
+  me.yaw -= dx * s; me.pitch = Math.max(-1.45, Math.min(1.45, me.pitch - dy * s));
+}
+// iPad Safari still double-tap zooms some pages even with user-scalable=no. Swallow the second tap and pinch gestures.
+document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('dblclick', (e) => { if (!e.target.closest?.('input, textarea, select')) e.preventDefault(); });
+let lastTapEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = performance.now();
+  if (now - lastTapEnd < 300 && e.cancelable) e.preventDefault();
+  lastTapEnd = now;
+}, { passive: false });
 const overlayOpen = () => !$('#shop').classList.contains('hidden') || !$('#results').classList.contains('hidden') || !$('#admin').classList.contains('hidden') || !$('#chatBox').classList.contains('hidden');
 
 // touch: joystick + look + buttons
@@ -210,8 +224,9 @@ function unstick(cols) {
   return false;
 }
 function updatePlayer(dt) {
-  if (me.mode === 'pilot') { me.pos.set(-0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; return; }
-  if (me.mode === 'copilot') { me.pos.set(0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; return; }
+  if (me.mode === 'pilot') { me.pos.set(-0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
+  if (me.mode === 'copilot') { me.pos.set(0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
+  if (me.downT > 0) me.downT = Math.max(0, me.downT - dt);
   let fx = 0, fz = 0;
   if (keys.has('KeyW') || keys.has('ArrowUp')) fz -= 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) fz += 1;
@@ -219,6 +234,7 @@ function updatePlayer(dt) {
   if (keys.has('KeyD') || keys.has('ArrowRight')) fx += 1;
   fx += touch.mx; fz += touch.my;
   const L = Math.hypot(fx, fz); if (L > 1) { fx /= L; fz /= L; }
+  if (me.downT > 0.02) { fx = 0; fz = 0; } // flat on the floor until the knockdown timer ends
   if (me.frozen || gadgets.frozenT > 0) { me.vel.set(0, Math.min(0, me.vel.y), 0); fx = 0; fz = 0; }
   const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4) * gadgets.speedMul();
   me.sprint = speed > 5 && L > 0.1;
@@ -238,7 +254,7 @@ function updatePlayer(dt) {
   else if (keys.has('Space') && me.onGround) { me.vel.y = 4.3 * gadgets.jumpMul(); me.onGround = false; }
   me.vel.y -= (gadgets.has('super_jump') && me.vel.y < 0 ? 7 : 9.8) * dt; // super jump: floaty fall
   if (sim.turb > 0.3 && me.onGround && Math.random() < sim.turb * dt * 2) { me.vel.x += (Math.random() - 0.5) * sim.turb * 2.5; me.vel.z += (Math.random() - 0.5) * sim.turb * 2.5; }
-  me.moving = L > 0.1;
+  me.moving = me.downT < 0.02 && L > 0.1;
   const cols = solids();
   unstick(cols);
   const steps = Math.ceil(dt / 0.012);
@@ -261,6 +277,49 @@ function updatePlayer(dt) {
   }
   // safety nets: fell out of the world, or left outside at departure
   if (me.pos.y < -GEAR_H - 6 || (!sim.groundOn && !sim.inCabin(me.pos))) { teleport('cabin'); UI.toast('You hopped aboard just in time.'); }
+}
+let bumpCd = 0;
+/** A hard bump. Carrying something only stumbles — the bag stays in the arms. A real fall sets downT, which is the only extra byte on the wire. */
+function knockMe(power) {
+  if (me.mode !== 'walk' || me.downT > 0.05 || bumpCd > 0 || gadgets?.has('noclip')) return;
+  const carry = !!(heldItem() || heldPax());
+  if (power >= 1.12 && !carry) { me.downT = 1.15; me.vel.x *= 0.12; me.vel.z *= 0.12; }
+  else pokeRagdoll(myAvatar, Math.min(0.95, power));
+  bumpCd = 0.8;
+}
+function senseBumps(dt) {
+  bumpCd = Math.max(0, bumpCd - dt);
+  if (me.mode !== 'walk' || !me.onGround || me.downT > 0.05 || bumpCd > 0 || gadgets?.has('noclip')) return;
+  const spd = Math.hypot(me.vel.x, me.vel.z);
+  for (const r of remotes.values()) {
+    const dx = me.pos.x - r.mesh.position.x, dz = me.pos.z - r.mesh.position.z, d = Math.hypot(dx, dz);
+    const rel = Math.hypot(me.vel.x - (r.vx || 0), me.vel.z - (r.vz || 0));
+    if (d < 0.64 && d > 0.02 && rel > 2.6 && Math.abs(me.pos.y - r.mesh.position.y) < 1.3) {
+      knockMe(rel > 4.3 ? 1.4 : 0.75);
+      const push = (0.64 - d) * 0.4;
+      me.pos.x += (dx / d) * push; me.pos.z += (dz / d) * push;
+      return;
+    }
+  }
+  for (const it of sim.items.values()) {
+    if (it.heldBy || !it.body) continue;
+    const v = it.body.velocity, sp = Math.hypot(v.x, v.y, v.z);
+    if (sp < 3.3 || sp > 24) continue;
+    const dx = me.pos.x - it.mesh.position.x, dy = (me.pos.y + 0.55) - it.mesh.position.y, dz = me.pos.z - it.mesh.position.z;
+    if (dx * dx + dy * dy + dz * dz < 0.7 * 0.7) { knockMe(sp > 6.2 ? 1.45 : 0.8); return; }
+  }
+  if (spd > 3.2) for (const p of sim.pax) {
+    if (p.state === 'seated' || p.state === 'lost' || p.state === 'carried' || p.state === 'thrown') continue;
+    if (Math.abs(me.pos.y - p.mesh.position.y) < 1.3 && Math.hypot(me.pos.x - p.mesh.position.x, me.pos.z - p.mesh.position.z) < 0.6) {
+      knockMe(spd > 4.6 ? 1.3 : 0.7); return;
+    }
+  }
+  if (sim.turb > 1.2 && Math.random() < dt * 0.65) pokeRagdoll(myAvatar, 0.55);
+}
+function crewBodies() {
+  const out = [{ x: me.pos.x, y: me.pos.y, z: me.pos.z, vx: me.vel.x, vz: me.vel.z }];
+  for (const r of remotes.values()) out.push({ x: r.mesh.position.x, y: r.mesh.position.y, z: r.mesh.position.z, vx: r.vx || 0, vz: r.vz || 0 });
+  return out;
 }
 const SPOTS = { cockpit: [0, 0, -12.2], cargo: [0, 0, -10.5], cabin: [0, 0, 0], galley: [0, 0, 10.4], apron: [SPAWN.x, SPAWN.y, SPAWN.z] };
 function teleport(spot) {
@@ -567,12 +626,17 @@ function syncRemotes(room) {
   }
 }
 function updateRemotes(dt) {
-  for (const r of remotes.values()) {
+  for (const [cid, r] of remotes) {
+    const prevX = r.mesh.position.x, prevZ = r.mesh.position.z;
     r.mesh.position.lerp(r.target, Math.min(1, dt * 12));
+    const idt = Math.max(dt, 1 / 120);
+    r.vx = (r.mesh.position.x - prevX) / idt; r.vz = (r.mesh.position.z - prevZ) / idt;
+    if (r.vx * r.vx + r.vz * r.vz > 400) { r.vx = 0; r.vz = 0; }
     let d = r.ry - r.mesh.rotation.y; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
     r.mesh.rotation.y += d * Math.min(1, dt * 12);
     const seated = r.mode === 'pilot' || r.mode === 'copilot';
-    animateCharacter(r.mesh, dt, { moving: r.moving, running: r.moving && r.run, sitting: seated, pilot: seated, carrying: !!r.held, jumping: r.target.y - r.mesh.position.y > 0.25 });
+    const carrying = !!r.held || sim.pax.some((p) => p.carriedBy === cid);
+    animateCharacter(r.mesh, dt, { moving: r.moving, running: r.moving && r.run, sitting: seated, pilot: seated, carrying, jumping: r.target.y - r.mesh.position.y > 0.25, falling: !seated && (r.down || 0) > 0.08 });
   }
 }
 
@@ -601,7 +665,7 @@ net.addEventListener('room', (e) => {
   applyAirport();
   if (!$('#admin').classList.contains('hidden')) renderAdmin();
 });
-net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.pt = s.pt; r.mode = s.mode; r.moving = s.moving; r.run = !!s.run; r.fly = !!s.fly; r.held = s.held; });
+net.addEventListener('st', (e) => { const r = remotes.get(e.detail.cid); if (!r) return; const s = e.detail.s; r.target.set(...s.p); r.ry = s.ry; r.pt = s.pt; r.mode = s.mode; r.moving = s.moving; r.run = !!s.run; r.fly = !!s.fly; r.held = s.held; r.down = s.dn || 0; });
 let freshJoin = true; // a flight that had already ended when we joined is not ours to report
 net.addEventListener('world', (e) => {
   if (sim.host) return;
@@ -741,7 +805,7 @@ function updateCamera() {
   }
   if (shopOpen() && me.mode === 'walk') { // locker preview: look at my crew member from the front, character on the left
     const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
-    const c = me.pos.clone(); c.y += 0.95;
+    const c = me.pos.clone(); c.y += 0.72;
     const right = new THREE.Vector3(fwd.z, 0, -fwd.x); // camera's right when it looks back at the avatar
     camera.position.copy(c).addScaledVector(fwd, 3.1); camera.position.y += 0.2;
     camera.lookAt(ship.plane.localToWorld(c.clone().addScaledVector(right, innerWidth > innerHeight ? 0.95 : 0)));
@@ -755,15 +819,35 @@ function updateCamera() {
   }
   const eye = me.mode === 'pilot' ? new THREE.Vector3(-0.6, 1.25, -14.55) : me.mode === 'copilot' ? new THREE.Vector3(0.6, 1.25, -14.55) : eyePos();
   if (me.third && !seated) {
-    const back = lookDir().multiplyScalar(-1);
+    const back = lookDir();
+    back.y = Math.max(-0.35, Math.min(0.45, back.y));
+    if (back.lengthSq() < 1e-4) back.set(0, 0, 1);
+    back.normalize().multiplyScalar(-1);
+    const focus = me.pos.clone(); focus.y += 0.78; // the bean, not the tall first-person eye
     const cols = solids();
-    let dist = 2.8, p = eye.clone();
-    for (; dist > 0.3; dist -= 0.15) {
-      p = eye.clone().addScaledVector(back, dist); p.y += 0.25;
-      if (!cols.some((c) => p.x > c.min[0] - 0.12 && p.x < c.max[0] + 0.12 && p.y > c.min[1] - 0.12 && p.y < c.max[1] + 0.12 && p.z > c.min[2] - 0.12 && p.z < c.max[2] + 0.12)) break;
+    const rad = 0.2;
+    const blocked = (q) => cols.some((c) => q.x > c.min[0] - rad && q.x < c.max[0] + rad && q.y > c.min[1] - rad && q.y < c.max[1] + rad && q.z > c.min[2] - rad && q.z < c.max[2] + rad);
+    // the whole segment has to stay in open air, so the camera cannot sit inside a wall it crossed
+    const clearPath = (q) => {
+      if (blocked(q)) return false;
+      for (let s = 1; s <= 6; s++) {
+        const t = s / 6;
+        const m = focus.clone().lerp(q, t);
+        m.y = Math.max(m.y, me.pos.y + 0.35);
+        if (blocked(m)) return false;
+      }
+      return true;
+    };
+    let placed = null;
+    for (let dist = 3.2; dist >= 1.08; dist -= 0.12) { // never closer than the outside of the body
+      const q = focus.clone().addScaledVector(back, dist);
+      q.y += 0.32 + (3.2 - dist) * 0.24;
+      q.y = Math.max(me.pos.y + 0.5, Math.min(me.pos.y + 2.05, q.y));
+      if (clearPath(q)) { placed = q; break; }
     }
-    camera.position.copy(p);
-    camera.lookAt(ship.plane.localToWorld(eye.clone().addScaledVector(lookDir(), 2)));
+    if (!placed) { placed = focus.clone(); placed.y += 1.15; placed.addScaledVector(back, 0.9); if (blocked(placed)) placed.y = Math.min(me.pos.y + 2.1, focus.y + 1.35); }
+    camera.position.copy(placed);
+    camera.lookAt(ship.plane.localToWorld(focus));
   } else {
     camera.position.copy(eye);
     camera.rotation.set(me.pitch, me.yaw, 0, 'YXZ');
@@ -851,8 +935,10 @@ function placeCarriedPax() {
     // held across the arms, lying sideways, in front of the carrier
     const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const seenFirstPerson = p.carriedBy === myId() && !me.third;
-    p.mesh.position.copy(base).addScaledVector(fwd, seenFirstPerson ? 0.9 : 0.55).addScaledVector(right, -0.8); p.mesh.position.y = base.y + (seenFirstPerson ? 0.75 : 1.05);
-    p.mesh.rotation.set(0, yaw + Math.PI / 2, Math.PI / 2 - 0.15, 'YXZ');
+    // draped over the short arms, across the belly — a bit ridiculous, which is the point
+    p.mesh.position.copy(base).addScaledVector(fwd, seenFirstPerson ? 0.85 : 0.42).addScaledVector(right, seenFirstPerson ? 0.15 : 0.02);
+    p.mesh.position.y = base.y + (seenFirstPerson ? 0.55 : 0.58);
+    p.mesh.rotation.set(0.85, yaw + Math.PI / 2, 0.35, 'YXZ');
     p.mesh.rotation.order = 'YXZ';
   }
 }
@@ -864,13 +950,14 @@ function placeHeld() {
     const k = stackN.get(it.heldBy) || 0; stackN.set(it.heldBy, k + 1);
     let pos, yaw;
     if (it.heldBy === myId()) {
-      if (me.third) { pos = new THREE.Vector3(me.pos.x, me.pos.y + 1.15, me.pos.z).addScaledVector(new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw)), 0.5); }
-      else pos = eyePos().addScaledVector(lookDir(), 0.8).add(new THREE.Vector3(Math.cos(me.yaw) * 0.32, -0.45, -Math.sin(me.yaw) * 0.32));
+      const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
+      if (me.third) pos = new THREE.Vector3(me.pos.x, me.pos.y + 0.72, me.pos.z).addScaledVector(fwd, 0.46);
+      else pos = eyePos().addScaledVector(lookDir(), 0.78).add(new THREE.Vector3(Math.cos(me.yaw) * 0.28, -0.42, -Math.sin(me.yaw) * 0.28));
       yaw = me.yaw;
     } else {
       const r = remotes.get(it.heldBy);
       if (!r) continue;
-      pos = r.mesh.position.clone().add(new THREE.Vector3(-Math.sin(r.mesh.rotation.y) * 0.5, 1.15, -Math.cos(r.mesh.rotation.y) * 0.5));
+      pos = r.mesh.position.clone().add(new THREE.Vector3(-Math.sin(r.mesh.rotation.y) * 0.46, 0.72, -Math.cos(r.mesh.rotation.y) * 0.46));
       yaw = r.mesh.rotation.y;
     }
     it.mesh.position.copy(pos); it.mesh.position.y += k * 0.4; it.mesh.rotation.set(0, yaw, 0);
@@ -1119,7 +1206,7 @@ function markReported(at) {
 
 function sendState() {
   const held = heldItem();
-  net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint, fly: !!me.flying } });
+  net.send({ t: 'st', s: { p: [me.pos.x, me.pos.y, me.pos.z], ry: me.yaw, pt: me.pitch, held: held ? held.id : null, mode: me.mode, moving: me.moving, run: !!me.sprint, fly: !!me.flying, dn: me.downT > 0.02 ? Math.round(me.downT * 100) / 100 : 0 } });
 }
 // ---------------- pre-flight airport terminal ----------------
 // Solo: steps are local. Co-op: the GAME SERVER owns each player's step (in order, at the desk, at human speed);
@@ -1336,7 +1423,8 @@ function frame() {
   if (sim.seed !== seenSeed) { seenSeed = sim.seed; if (playing) respawn(); }
   if (playing && !paused) updatePlayer(dt);
   updateFlight(dt);
-  if (sim.host) sim.update(dt, { onDepart() {} });
+  if (sim.host) sim.update(dt, { onDepart() {}, crew: crewBodies() });
+  if (playing && !paused) senseBumps(dt);
   else sim.follow(dt);
   ship.update(dt); // eased door animation (both directions) + cabin details
   if (Q.shadow && quality !== 'high' && (keyShadowT += dt) > 0.083) { keyShadowT = 0; ship.cabin.key.shadow.needsUpdate = true; }
@@ -1350,7 +1438,7 @@ function frame() {
   // my own body (visible in third person)
   myAvatar.visible = (me.third || shopOpen()) && me.mode === 'walk';
   myAvatar.position.copy(me.pos); myAvatar.rotation.y = me.yaw;
-  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk' });
+  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk', falling: me.downT > 0.08 });
   updateCamera();
   if (playing) { updateHud(); netTick(dt); updateAudio(); }
   // ?fps=N caps how often the 3D view is DRAWN (the game itself keeps running every frame): used by multi-client
@@ -1426,6 +1514,9 @@ window.skyCrew = {
     emerg: () => ({ engineFail: !!sim.flight.engineFail, masks: !!ship.masks.visible, landing: sim.emergencyLanding ? Math.round(sim.emergencyLanding.limit - sim.emergencyLanding.t) : null, hud: [...document.querySelectorAll('#hud *')].some((n) => /EMERGENCY LANDING/.test(n.textContent || '')) }),
     cam: (pos, at) => { camOverride = pos ? { pos, at } : null; },
     watchEject: (on = true) => { camOverride = on ? { eject: true } : null; },
+    bump: (power = 1.4) => knockMe(power || 1.4),
+    rag: () => ({ down: +me.downT.toFixed(2), phase: myAvatar.userData.rag?.phase || '', k: +((myAvatar.userData.rag?.k || 0).toFixed(2)) }),
+    camDist: () => +camera.position.distanceTo(me.pos).toFixed(2),
     colsAt: (x, y, z) => solids().filter((c) => overlaps({ x, y, z }, c, H)).map((c) => ({ min: c.min, max: c.max, tag: c.tag })),
     interactPoint: (id) => { const p = ship.interact.find((i) => i.id === id).pos; return { x: p.x, y: p.y, z: p.z }; },
   },

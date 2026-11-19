@@ -2,8 +2,8 @@
 :root { --ink: #111316; --panel: #1a1f25; --paper: #f3f4f5; --paper-ink: #15191e; --navy: var(--ink); --navy2: var(--panel); --blue: #d5dde4; --teal: #d5dde4; --text: #eef0f2; --muted: #aeb7be; --gold: #e4c36a; --admin: #8eb0e8; --trusted: #7dcea0; --line: rgba(214, 220, 225, 0.24); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font: 16px/1.4 "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; }
-#view { position: fixed; inset: 0; }
-#view canvas { display: block; width: 100%; height: 100%; }
+#view { position: fixed; inset: 0; touch-action: none; }
+#view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .hidden { display: none !important; }
 button { font: inherit; color: var(--text); background: rgba(17,19,22,.55); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
 button:hover { background: rgba(238,240,242,.1); }
@@ -19,7 +19,9 @@ input { font: inherit; color: var(--text); background: #12161b; border: 1px soli
 .overlay.side .card { pointer-events: auto; max-height: calc(100vh - 32px); overflow: auto; width: 360px; }
 .card { background: #1a1f25; border: 1px solid rgba(214,220,225,.16); border-radius: 14px; padding: 22px; width: min(520px, 100%); box-shadow: 0 24px 60px rgba(0,0,0,.45); }
 .card.small { width: min(380px, 100%); }
-.brand { display: flex; gap: 12px; align-items: center; padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid rgba(214,220,225,.14); }
+.menu-cover, .load-cover { width: 100%; height: 168px; object-fit: cover; object-position: center 38%; border-radius: 12px; display: block; background: #101317; }
+.load-cover { width: min(320px, 78vw); height: 180px; margin: 0 auto; }
+.brand { display: flex; gap: 12px; align-items: center; padding-bottom: 12px; margin: 12px 0 4px; border-bottom: 1px solid rgba(214,220,225,.14); }
 .brand img { border-radius: 8px; height: 48px; width: auto; }
 .studio { letter-spacing: .28em; font-size: 11px; color: var(--muted); font-weight: 600; }
 h1 { margin: 0; font-size: clamp(40px, 6vw, 60px); line-height: .92; letter-spacing: -.03em; text-transform: uppercase; font-weight: 600; }
