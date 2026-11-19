@@ -9,13 +9,13 @@ Researched from the public Steam page for Dear Passengers (FLEXUS, app 4534960),
 - In flight: serve food and drinks, keep passengers under control, protect cargo. Physics so loose people and objects move when the plane does.
 - Turbulence and air pockets are the named weather hazards. You can crash. Runs are described as about 1–90 minutes. Progression between flights is promised and not specified. Scoring, failure rules and how solo covers every job are not published.
 
-Sky Crew keeps the genre (a short co-op flight where the cabin falls apart) and none of the content. Batlas Air, the Tidewing, Harbor Field, Dune Bay, Coral Point and Pine Ridge, the jelly crew and the call names are original.
+Sky Crew keeps the genre (a short co-op flight where the cabin falls apart) and none of the content. Batlas Air, the Tidewing, Harbor Field, Dune Bay, Coral Point and Pine Ridge, the wobbly crew and the call names are original.
 
 The playable round is now a shift, not a sandbox:
 
 1. **Pre-flight.** Bags into the forward hold, passengers to their seats, doors, seatbelt, welcome call.
 2. **Takeoff.** Whoever is in the captain's seat flies. One player can do this and then get up.
-3. **The shift.** The server (solo: the same rules locally) deals cabin calls: drink, meal, blanket, lavatory, airsick, crying child, unruly passenger, lost keepsake. It also starts incidents: chop that shoves the jelly bodies, a galley flare, a cargo spill, a medical.
+3. **The shift.** The server (solo: the same rules locally) deals cabin calls: drink, meal, blanket, lavatory, airsick, crying child, unruly passenger, lost keepsake. It also starts incidents: chop that shoves the crew around, a galley flare, a cargo spill, a medical.
 4. **Landing and the card.** Stars and a service score from those rules, plus the existing payout. Two stars at Dune Bay opens Coral Point. Three at Coral Point opens Pine Ridge. Saved flights on the account already count, so older profiles stay open.
 
 Jobs change the score, not the buttons. The matching role earns more; anyone can still answer a call, which is what makes 1–8 and a solo training hop work. A training hop to Dune Bay is one drink, one chop, then the landing.

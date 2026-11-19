@@ -7,9 +7,9 @@ The shapes, proportions, faces, outfits and names are original.
 
 | Area | What it is | How it is made | Source |
 |---|---|---|---|
-| Crew characters (`js/characters.js`, `makeCrew`) | Round "bean" crew with dot eyes, a mouth, small arms and feet, and a name tag with a rank badge | Procedural Three.js geometry (lathe bodies, spheres, capsules), vertex colours, code-driven animation (walk, run, sit, wave, cheer, wobble) | Original, written in code for this repo |
+| Crew characters (`js/characters.js`, `makeCrew`) | Cartoon people: round head on a short neck, shouldered torso, arms, hands, legs and shoes, with a name tag and a rank badge. Pilot, cabin and cargo uniforms are original | Procedural Three.js geometry (lathe torso, spheres, capsules), vertex colours, code-driven animation (walk, run, sit, wave, cheer) plus a spring wobble | Original, written in code for this repo |
 | Outfits, hats, colours (`server/src/game-server/shop.ts` catalog, `js/characters.js`) | Uniforms (pilot, cabin, mechanic, …), caps and hats, body colours | Procedural meshes and colour palettes chosen for this game | Original |
-| Passengers (`js/characters.js`, `js/sim.js`) | Comedic passenger NPCs with personalities, requests, reactions | Procedural low-poly meshes, seeded looks, original personality names and lines | Original |
+| Passengers (`js/characters.js`, `js/sim.js`) | Comedic passenger NPCs with personalities, requests, reactions, and varied hair, clothes and body sizes | Procedural low-poly meshes, seeded looks, original personality names and lines | Original |
 | Airliner, cabin, rear door, stairs (`js/world.js`) | The plane outside and inside | Procedural geometry merged into vertex-coloured batches | Original |
 | Airport terminal (`js/terminal.js`) | Check-in, X-ray belt, scanner arch, gate desk, lounge, signs, departures board | Procedural geometry; signs and the board are drawn on a `<canvas>` at runtime | Original |
 | World (`js/world.js`) | Sky, sea, islands, airports, clouds | Procedural geometry and shaders | Original |

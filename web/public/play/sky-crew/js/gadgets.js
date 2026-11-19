@@ -86,11 +86,13 @@ export class Gadgets {
     const out = {};
     const t = [...set].find((g) => TOOLS.has(g));
     if (t) { out.tool = toolModel(t); out.tool.position.set(0, -0.2, -0.08); out.tool.rotation.x = -Math.PI / 2; bone('hand.R').add(out.tool); }
-    if (set.has('jetpack')) { out.jet = jetpackModel(); out.jet.position.set(0, 0.05, 0.22); bone('chest').add(out.jet); }
-    if (set.has('shield_bubble')) { out.shield = new THREE.Mesh(sphere, SHIELD); out.shield.scale.setScalar(1.05); out.shield.position.y = 0.85; av.add(out.shield); }
+    const bodyTop = av.userData.dims?.top || 1.55;
+    const chestZ = (av.userData.dims?.chest || 0.2) * 0.9 + 0.08;
+    if (set.has('jetpack')) { out.jet = jetpackModel(); out.jet.position.set(0, 0.02, chestZ); bone('chest').add(out.jet); }
+    if (set.has('shield_bubble')) { out.shield = new THREE.Mesh(sphere, SHIELD); out.shield.scale.set(0.48, bodyTop * 0.55, 0.48); out.shield.position.y = bodyTop * 0.48; av.add(out.shield); }
     if (set.has('golden_aura')) {
-      out.aura = new THREE.Group(); out.aura.position.y = 0.9;
-      for (let i = 0; i < 14; i++) { const s = new THREE.Mesh(sphere, M.gold); s.scale.setScalar(0.03 + Math.random() * 0.03); s.userData.a = (i / 14) * Math.PI * 2; s.userData.h = (Math.random() - 0.5) * 1.4; out.aura.add(s); }
+      out.aura = new THREE.Group(); out.aura.position.y = bodyTop * 0.5;
+      for (let i = 0; i < 14; i++) { const s = new THREE.Mesh(sphere, M.gold); s.scale.setScalar(0.03 + Math.random() * 0.03); s.userData.a = (i / 14) * Math.PI * 2; s.userData.h = (Math.random() - 0.5) * bodyTop * 0.7; out.aura.add(s); }
       const light = new THREE.PointLight(0xffd34d, 2.2, 3.5); out.aura.add(light); av.add(out.aura);
     }
     if (set.has('super_jump')) { out.springs = new THREE.Group(); for (const n of ['foot.L', 'foot.R']) { const s = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.015, 6, 12), new THREE.MeshLambertMaterial({ color: 0x2ed573 })); s.rotation.x = Math.PI / 2; s.position.y = -0.05; bone(n).add(s); out[`spring${n}`] = s; } }
@@ -222,7 +224,7 @@ export class Gadgets {
   }
   iceOn(cid, on) {
     const av = this.avatarOf(cid); if (!av) return;
-    if (on && !av.userData.ice) { const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), ICE); m.scale.set(0.85, 1.25, 0.85); m.position.y = 0.85; av.add(m); av.userData.ice = m; }
+    if (on && !av.userData.ice) { const top = av.userData.dims?.top || 1.55; const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), ICE); m.scale.set(0.55, top / 1.5, 0.55); m.position.y = top * 0.48; av.add(m); av.userData.ice = m; }
     if (!on && av.userData.ice) { av.remove(av.userData.ice); av.userData.ice.geometry.dispose(); av.userData.ice = null; }
   }
 }

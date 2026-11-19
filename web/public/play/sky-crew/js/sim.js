@@ -783,15 +783,20 @@ export class Sim {
       animateCharacter(p.mesh, frozen ? 0 : dt, { moving: (p.state === 'walk' && !p.waiting) || p.state === 'return' || p._moving, running: p.state === 'return', sitting: seated && p.reqKind !== 'unruly', panic: p.panicT > 0 || airborne || p.reqKind === 'cry', flail: airborne || (this.turb > 0.9 && !seated), parachute: chute, dance: p.dance > 0, cheer: p.cheerT > 0, sleep: p.sleep && seated, angry: p.reqKind === 'unruly' || (seated && p.mood < 30), happy: p.mood > 75, grumpy: !!p.request && p.reqT > 12, falling: !seated && (p.downT || 0) > 0.08 });
       if (p.cheerT > 0 && this.host) p.cheerT -= dt;
       if (p.birthdayT > 0 && this.host) p.birthdayT -= dt;
-      if (p.birthdayT > 0 && !p.partyHat) { p.partyHat = makePartyHat(); (p.mesh.userData.bones?.find((b) => b.name === 'head') || p.mesh).add(p.partyHat); } else if (!(p.birthdayT > 0) && p.partyHat) { p.partyHat.parent?.remove(p.partyHat); p.partyHat = null; }
-      if (p.frozenT > 0) { p.frozenT -= dt; if (!p.ice) { p.ice = makeIce(); p.mesh.add(p.ice); } } else if (p.ice) { p.mesh.remove(p.ice); p.ice = null; }
+      if (p.birthdayT > 0 && !p.partyHat) { p.partyHat = makePartyHat(p.mesh); (p.mesh.userData.bones?.find((b) => b.name === 'head') || p.mesh).add(p.partyHat); } else if (!(p.birthdayT > 0) && p.partyHat) { p.partyHat.parent?.remove(p.partyHat); p.partyHat = null; }
+      if (p.frozenT > 0) { p.frozenT -= dt; if (!p.ice) { p.ice = makeIce(p.mesh); p.mesh.add(p.ice); } } else if (p.ice) { p.mesh.remove(p.ice); p.ice = null; }
       const sc = p.sizeK || 1; if (Math.abs(p.mesh.scale.x - sc) > 0.001) p.mesh.scale.setScalar(p.mesh.scale.x + (sc - p.mesh.scale.x) * Math.min(1, dt * 6));
       if (p.dance > 0 && this.host) p.dance -= dt;
       const kind = p.flashT > 0 ? p.bubbleKind : p.request ? p.request : p.sleep && seated ? 'sleep' : p.panicT > 0 ? 'panic' : null;
       if (kind !== p.shownBubble) {
         if (p.bubble) p.mesh.remove(p.bubble);
         p.bubble = kind ? bubble(kind) : null;
-        if (p.bubble) { p.bubble.position.y = seated ? 1.15 : 1.48; p.mesh.add(p.bubble); }
+        if (p.bubble) {
+          const top = p.mesh.userData.dims?.top || 1.55;
+          const drop = seated ? Math.max(0, (p.mesh.userData.dims?.hipY || 0.7) - 0.55) : 0;
+          p.bubble.position.y = top - drop + 0.18;
+          p.mesh.add(p.bubble);
+        }
         p.shownBubble = kind;
       }
     }
@@ -934,11 +939,27 @@ export class Sim {
 
 /** Striped party hat for the birthday event (on the head bone). */
 const HAT_MAT = new THREE.MeshLambertMaterial({ color: 0xff4fa3, emissive: 0x401028 });
-function makePartyHat() { const g = new THREE.Group(); const c = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.32, 10), HAT_MAT); c.position.y = (0.29 * 1.85) + 0.12; g.add(c); const b = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshLambertMaterial({ color: 0xfff35c })); b.position.y = 0.6; g.add(b); return g; }
+function makePartyHat(ch) {
+  const hr = ch?.userData?.dims?.headR || 0.2;
+  const baseY = hr * 1.9;
+  const g = new THREE.Group();
+  const c = new THREE.Mesh(new THREE.ConeGeometry(hr * 0.55, hr * 1.3, 10), HAT_MAT);
+  c.position.y = baseY + hr * 0.45; g.add(c);
+  const b = new THREE.Mesh(new THREE.SphereGeometry(hr * 0.22, 8, 6), new THREE.MeshLambertMaterial({ color: 0xfff35c }));
+  b.position.y = baseY + hr * 1.15; g.add(b);
+  return g;
+}
 
 /** Translucent cartoon ice block around a frozen passenger (Freeze Ray). */
 const ICE_MAT = new THREE.MeshLambertMaterial({ color: 0xbff3ff, transparent: true, opacity: 0.45, emissive: 0x3aa0c0, depthWrite: false });
-function makeIce() { const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), ICE_MAT); m.scale.set(0.85, 1.25, 0.85); m.position.y = 0.85; m.renderOrder = 2; return m; }
+function makeIce(ch) {
+  const top = ch?.userData?.dims?.top || 1.55;
+  const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), ICE_MAT);
+  m.scale.set(0.55, top / 1.5, 0.55);
+  m.position.y = top * 0.48;
+  m.renderOrder = 2;
+  return m;
+}
 
 /** Striped cartoon parachute canopy with four lines, attached above a passenger's head. */
 function makeParachute() {
