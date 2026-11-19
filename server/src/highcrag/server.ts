@@ -14,9 +14,12 @@ import type { SiteBridge } from '../game-server/bridge.js';
 
 export const HC_WS_PATH = '/ws/highcrag';
 export const HC_MAX_PLAYERS = 4;
-const ITEM_TYPES = new Set(['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic']);
+const ITEM_TYPES = new Set(['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit']);
+const EMOTES = new Set(['wave', 'cheer', 'point']);
 const MAX_ITEMS = 400;
 const MAX_PITONS = 300;
+const MAX_ROPES = 120;
+const MAX_FLARES = 60;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 interface Client {
@@ -25,6 +28,7 @@ interface Client {
   user: { userId: number; username: string; displayName: string; role: string } | null;
   room: Room | null;
   slot: number;
+  look: { c: number; h: number; s: number };
   lastState: unknown;
   msgCount: number;
   alive: boolean;
@@ -38,6 +42,9 @@ interface Room {
   camps: [number, number, number][] | null;
   lit: Set<number>;
   pitons: [number, number, number][];
+  ropes: [number, number, number][][];
+  flares: [number, number, number][];
+  boarded: boolean;
   beacon: { by: string } | null;
   dropSeq: number;
   createdAt: number;
@@ -46,6 +53,8 @@ interface Room {
 const num = (v: unknown, lim = 1e5) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= lim;
 const vec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((x) => num(x, 2000));
 const round = (v: number) => Math.round(v * 100) / 100;
+const smallInt = (v: unknown, max: number) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : 0);
+const validLook = (l: any) => ({ c: smallInt(l?.c, 9), h: smallInt(l?.h, 5), s: smallInt(l?.s, 5) });
 
 export function attachHighcragServer(
   httpServer: http.Server,
@@ -59,7 +68,7 @@ export function attachHighcragServer(
 
   const send = (c: Client, m: unknown) => { if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(m)); };
   const broadcast = (room: Room, m: unknown, except?: Client) => { for (const c of room.clients.values()) if (c !== except) send(c, m); };
-  const playerOut = (c: Client) => ({ cid: c.cid, name: c.user!.displayName || c.user!.username, username: c.user!.username, role: c.user!.role, slot: c.slot });
+  const playerOut = (c: Client) => ({ cid: c.cid, name: c.user!.displayName || c.user!.username, username: c.user!.username, role: c.user!.role, slot: c.slot, look: c.look });
 
   function roomOut(room: Room, you: Client) {
     return {
@@ -71,6 +80,9 @@ export function attachHighcragServer(
       layout: room.items ? { items: [...room.items.values()].map((i) => [i.id, i.type, ...i.p, i.taken ? 1 : 0]), camps: room.camps } : null,
       lit: [...room.lit],
       pitons: room.pitons,
+      ropes: room.ropes,
+      flares: room.flares,
+      boarded: room.boarded,
       beacon: room.beacon,
       states: Object.fromEntries([...room.clients.values()].filter((c) => c !== you && c.lastState).map((c) => [c.cid, c.lastState])),
     };
@@ -112,7 +124,7 @@ export function attachHighcragServer(
         if (room) leave(c);
         if (rooms.size >= (opts.maxRooms ?? 500)) return send(c, { t: 'error', code: 'full', message: 'Too many rooms are open right now.' });
         const seed = num(m.seed, 4294967295) && m.seed > 0 ? Math.floor(m.seed) : Math.floor(Math.random() * 1e9) + 1;
-        const r: Room = { code: newCode(), seed, clients: new Map(), items: null, camps: null, lit: new Set(), pitons: [], beacon: null, dropSeq: 0, createdAt: Date.now() };
+        const r: Room = { code: newCode(), seed, clients: new Map(), items: null, camps: null, lit: new Set(), pitons: [], ropes: [], flares: [], boarded: false, beacon: null, dropSeq: 0, createdAt: Date.now() };
         rooms.set(r.code, r);
         c.slot = 0;
         r.clients.set(c.cid, c);
@@ -155,8 +167,8 @@ export function attachHighcragServer(
         return broadcast(room, { t: 'layout', items: [...items.values()].map((i) => [i.id, i.type, ...i.p, 0]), camps: room.camps });
       }
       case 'st': {
-        if (!vec3(m.p) || !num(m.f, 100) || !['ground', 'air', 'climb', 'down'].includes(m.m)) return;
-        const st = { p: m.p.map(round), f: round(m.f), m: m.m, a: num(m.a, 1e6) ? round(m.a) : 0, alt: num(m.alt, 2000) ? Math.round(m.alt) : 0 };
+        if (!vec3(m.p) || !num(m.f, 100) || !['ground', 'air', 'climb', 'rope', 'down'].includes(m.m)) return;
+        const st = { p: m.p.map(round), f: round(m.f), m: m.m, a: num(m.a, 1e6) ? round(m.a) : 0, alt: num(m.alt, 2000) ? Math.round(m.alt) : 0, l: m.l === 1 ? 1 : 0 };
         c.lastState = st;
         return broadcast(room, { t: 'st', cid: c.cid, ...st }, c);
       }
@@ -185,6 +197,33 @@ export function attachHighcragServer(
         room.pitons.push(p);
         return broadcast(room, { t: 'piton', p, by: c.cid }, c);
       }
+      case 'board': {
+        // Anyone at the gate starts the flight for the whole room, once.
+        if (room.boarded) return;
+        room.boarded = true;
+        return broadcast(room, { t: 'board', by: c.cid });
+      }
+      case 'look': {
+        c.look = validLook(m.look);
+        return broadcast(room, { t: 'look', cid: c.cid, look: c.look }, c);
+      }
+      case 'emote': {
+        if (!EMOTES.has(m.e)) return;
+        return broadcast(room, { t: 'emote', cid: c.cid, e: m.e }, c);
+      }
+      case 'rope': {
+        if (!vec3(m.top) || !vec3(m.bottom) || !vec3(m.a) || room.ropes.length >= MAX_ROPES) return;
+        if (m.top[1] < m.bottom[1] || m.top[1] - m.bottom[1] > 40) return;
+        const r = [m.top.map(round), m.bottom.map(round), m.a.map(round)] as [number, number, number][];
+        room.ropes.push(r);
+        return broadcast(room, { t: 'rope', top: r[0], bottom: r[1], a: r[2], by: c.cid }, c);
+      }
+      case 'flare': {
+        if (!vec3(m.p) || room.flares.length >= MAX_FLARES) return;
+        const p = m.p.map(round) as [number, number, number];
+        room.flares.push(p);
+        return broadcast(room, { t: 'flare', p, by: c.cid }, c);
+      }
       case 'beacon': {
         if (room.beacon) return;
         room.beacon = { by: c.user.displayName || c.user.username };
@@ -204,7 +243,7 @@ export function attachHighcragServer(
   }
 
   wss.on('connection', (ws: WebSocket) => {
-    const c: Client = { cid: nextCid++, ws, user: null, room: null, slot: 0, lastState: null, msgCount: 0, alive: true };
+    const c: Client = { cid: nextCid++, ws, user: null, room: null, slot: 0, look: { c: 0, h: 0, s: 1 }, lastState: null, msgCount: 0, alive: true };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4001, 'Sign in first.'); }, 10000);
     ws.on('pong', () => { c.alive = true; });

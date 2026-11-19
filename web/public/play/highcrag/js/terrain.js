@@ -12,10 +12,10 @@ export const HMAX = 300;
 export const SEA = 0;
 
 export const BANDS = [
-  { id: 'shore', name: 'Saltwind Shore', y0: -40, y1: 36, T: 0, ground: 0xe3cf98, rock: 0x9c8a6a, fog: 0xbfe3f2 },
-  { id: 'moss', name: 'Mossgrove', y0: 36, y1: 126, T: 15, ground: 0x5f9a3c, rock: 0x6c6a5a, fog: 0xa9d6c4 },
-  { id: 'frost', name: 'Frostline', y0: 126, y1: 216, T: 18, ground: 0xeef4fb, rock: 0x7b8797, fog: 0xd7e3ef },
-  { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x4b3b3a, rock: 0x3a3030, fog: 0xd9a58a },
+  { id: 'shore', name: 'Saltwind Shore', y0: -40, y1: 36, T: 0, ground: 0xf0d9a0, rock: 0xa58b68, fog: 0xbfe6f5, sky: 0x4fa8e8 },
+  { id: 'moss', name: 'Tanglewood Jungle', y0: 36, y1: 126, T: 15, ground: 0x4f9a35, rock: 0x6f6553, fog: 0xa6dcc0, sky: 0x3f9fd6 },
+  { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xf2f7ff, rock: 0x7e8ea6, fog: 0xdbe6f2, sky: 0x6d9fd4 },
+  { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x3f3433, rock: 0x2c2626, fog: 0xe4a585, sky: 0x8a5a9c },
 ];
 export const bandAt = (y) => (y < BANDS[1].y0 ? BANDS[0] : y < BANDS[2].y0 ? BANDS[1] : y < BANDS[3].y0 ? BANDS[2] : BANDS[3]);
 
@@ -135,6 +135,7 @@ export class Terrain {
   buildMesh() {
     const pos = new Float32Array(N * N * 3);
     const col = new Float32Array(N * N * 3);
+    const glow = new Float32Array(N * N);
     const tmpN = new THREE.Vector3();
     const cg = new THREE.Color(), cr = new THREE.Color(), cc = new THREE.Color();
     for (let j = 0; j < N; j++) {
@@ -150,12 +151,23 @@ export class Terrain {
         const n = fbm(x * 0.09, z * 0.09, this.seed + 3, 2);
         cg.setHex(band.ground);
         cr.setHex(band.rock);
-        if (y < 1.2) cg.setHex(0xd8c48d);
-        if (y < -1.5) cg.setHex(0x6aa7b0);
+        // Rock strata: light/dark layers on cliff faces.
+        cr.offsetHSL(0, 0, Math.sin(y * 1.7 + n * 3) * 0.035);
+        if (band.id === 'moss') cg.offsetHSL(n * 0.03, 0, n * 0.06); // patchy jungle floor
+        if (band.id === 'frost') cg.offsetHSL(0, 0, -Math.max(0, -n) * 0.06);
+        if (y < 2.2) cg.setHex(0xf3dfa6);
+        if (y < 0.35) cg.setHex(0xfffbf0); // surf foam along the waterline
+        if (y < -0.6) cg.setHex(0x9fd8d0);
+        if (y < -3) cg.setHex(0x4fa3b6);
         const rockiness = smooth(0.82, 0.62, tmpN.y);
         cc.copy(cg).lerp(cr, rockiness);
-        // Band transitions blend over a few metres.
         cc.offsetHSL(0, 0, n * 0.05);
+        // Lava cracks on the Ember Crown: thin glowing lines along noise zero-crossings.
+        if (band.id === 'crown' && tmpN.y > 0.75) {
+          const f = Math.abs(fbm(x * 0.045, z * 0.045, this.seed + 91, 3));
+          glow[k] = Math.max(0, 1 - f / 0.045);
+          if (glow[k] > 0) cc.lerp(new THREE.Color(0xff5a1a), glow[k] * 0.7);
+        }
         col[k * 3] = cc.r; col[k * 3 + 1] = cc.g; col[k * 3 + 2] = cc.b;
       }
     }
@@ -171,11 +183,10 @@ export class Terrain {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('glow', new THREE.BufferAttribute(glow, 1));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
-    m.matrixAutoUpdate = false;
-    return m;
+    return g;
   }
 
   // Random flat spot whose height lies in [y0, y1]. Returns null if none found.

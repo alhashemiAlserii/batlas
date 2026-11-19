@@ -23,6 +23,11 @@ export class Sfx {
     this.noise = buf;
     this.wind = this.loop(400, 0.7);
     this.fire = this.loop(1800, 0.5, 'highpass');
+    this.surf = this.loop(600, 0.4, 'lowpass');
+    this.rumble = this.loop(70, 0.8, 'lowpass');
+    this.engine = this.loop(140, 2.5);
+    this.hum = this.loop(220, 0.6, 'lowpass');
+    this.birdT = 0;
   }
   loop(freq, q, type = 'bandpass') {
     const src = this.ctx.createBufferSource();
@@ -41,6 +46,24 @@ export class Sfx {
   setVolume(v) {
     this.vol = v;
     if (this.master) this.master.gain.value = v;
+  }
+  // Zone beds: surf (beach), birds (jungle), wind (high), rumble (volcano), engine (flight), hum (terminal).
+  zone({ surf = 0, birds = 0, rumble = 0, engine = 0, hum = 0 } = {}, dt = 0) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const swell = 0.6 + 0.4 * Math.sin(t * 0.7);
+    this.surf.g.gain.setTargetAtTime(surf * 0.22 * swell, t, 0.5);
+    this.rumble.g.gain.setTargetAtTime(rumble * 0.45, t, 0.8);
+    this.engine.g.gain.setTargetAtTime(engine * 0.5, t, 0.3);
+    this.engine.f.frequency.setTargetAtTime(110 + engine * 90, t, 0.4);
+    this.hum.g.gain.setTargetAtTime(hum * 0.05, t, 0.6);
+    this.birdT -= dt;
+    if (birds > 0.05 && this.birdT <= 0) {
+      this.birdT = 0.8 + Math.random() * 2.5;
+      const f = 1800 + Math.random() * 1800;
+      const n = 2 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) setTimeout(() => this.tone(f + Math.random() * 300, 0.09, 'sine', 0.05 * birds, 500), i * 110);
+    }
   }
   ambience(wind, fire) {
     if (!this.ctx) return;
@@ -91,5 +114,10 @@ export class Sfx {
   win() {
     [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, 0.5, 'triangle', 0.16), i * 160));
   }
+  crash() { this.burst(2.5, 400, 0.9); this.burst(1.2, 2500, 0.4); this.tone(90, 2, 'sawtooth', 0.25, -60); }
+  rope() { this.burst(0.25, 1200, 0.15); this.tone(320, 0.2, 'triangle', 0.06, -120); }
+  flare() { this.burst(1.2, 3500, 0.25); this.tone(900, 0.6, 'sawtooth', 0.04, 600); }
+  ding() { this.tone(988, 0.35, 'sine', 0.12); setTimeout(() => this.tone(784, 0.5, 'sine', 0.12), 260); }
+  whoosh() { this.burst(0.5, 900, 0.25); }
   blackout() { this.tone(300, 1.2, 'sine', 0.2, -240); }
 }
