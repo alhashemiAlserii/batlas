@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1b1206">
   <title>Highcrag (early build) · Batlas</title>
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/play/highcrag/game.css">
@@ -11,17 +13,27 @@
 </head>
 <body>
   <div id="view" aria-label="Highcrag game view"></div>
+  <div id="loading"><div class="logo small-logo">HIGH<span>CRAG</span></div><p>Building the island…</p></div>
 
   <div id="hud" class="hidden">
-    <div id="topleft" class="panel">
+    <div id="topleft" class="chip">
       <div id="zone">Saltwind Shore</div>
       <div id="alt">0 m</div>
       <div id="timer">0:00</div>
     </div>
-    <div id="roominfo" class="panel hidden"></div>
-    <div id="goal" class="panel"><span id="goalArrow">↑</span> <span id="goalTxt"></span></div>
+    <div id="roominfo" class="chip hidden"></div>
+    <div id="goal" class="chip"><span id="goalArrow">↑</span> <span id="goalTxt"></span></div>
+    <div id="compass" class="hidden" aria-label="Compass">
+      <div id="compassTape">
+        <span class="dir big" data-b="0">N</span><span class="dir" data-b="45">NE</span><span class="dir big" data-b="90">E</span><span class="dir" data-b="135">SE</span>
+        <span class="dir big" data-b="180">S</span><span class="dir" data-b="225">SW</span><span class="dir big" data-b="270">W</span><span class="dir" data-b="315">NW</span>
+        <span id="cmpGoal" class="mark">⛺</span>
+      </div>
+      <i class="needle"></i>
+    </div>
     <div id="status"></div>
     <div id="toasts"></div>
+    <div id="zonecard"><b></b><span></span></div>
     <div id="prompt" class="hidden"></div>
     <div id="cross"></div>
 
@@ -32,105 +44,160 @@
       <div id="bar">
         <i id="bSt"></i>
         <i id="bAff"><b id="bHun"></b><b id="bCold"></b><b id="bInj"></b></i>
+        <span class="ticks"></span>
       </div>
     </div>
 
     <div id="inv">
-      <div class="slot" data-i="0"><span class="ico"></span><small>1</small></div>
-      <div class="slot" data-i="1"><span class="ico"></span><small>2</small></div>
-      <div class="slot" data-i="2"><span class="ico"></span><small>3</small></div>
+      <div class="slots">
+        <div class="slot" data-i="0"><span class="ico"></span><small>1</small></div>
+        <div class="slot" data-i="1"><span class="ico"></span><small>2</small></div>
+        <div class="slot" data-i="2"><span class="ico"></span><small>3</small></div>
+      </div>
       <div id="invName"></div>
     </div>
 
-    <div id="downbox" class="panel hidden">
+    <div id="downbox" class="card hidden">
       <b>You're down!</b>
       <span id="downTxt"></span>
-      <button id="btnGiveUp" class="btn" type="button">Respawn at campfire <small>&nbsp;Enter</small></button>
+      <button id="btnGiveUp" class="btn" type="button">Respawn at the campfire <small>&nbsp;Enter</small></button>
     </div>
 
     <div class="topbtns">
-      <button id="btnPause" class="hbtn" type="button" title="Pause (Esc)">❚❚</button>
+      <button id="btnPause" class="hbtn" type="button" title="Pause (Esc)" aria-label="Pause">❚❚</button>
     </div>
   </div>
 
   <div id="touch" class="hidden">
-    <div id="joy"><div id="joyKnob"></div></div>
+    <div id="tLeft"></div>
+    <div id="tRight"></div>
+    <div id="joyBase"><div id="joyKnob"></div></div>
     <div id="tbtns">
-      <button id="tGrab" type="button">✋<small>Grab</small></button>
-      <button id="tJump" type="button">⤒<small>Jump</small></button>
-      <button id="tE" type="button">E<small>Take</small></button>
-      <button id="tUse" type="button">●<small>Use</small></button>
-      <button id="tSlot" type="button">⇆<small>Slot</small></button>
-      <button id="tRun" type="button">»<small>Run</small></button>
+      <button id="bEmote" class="tb sm" type="button" aria-label="Emote">👋</button>
+      <button id="bDrop" class="tb sm" type="button" aria-label="Drop item">⤓<small>Drop</small></button>
+      <button id="bUse" class="tb sm" type="button" aria-label="Use item">●<small>Use</small></button>
+      <button id="bAct" class="tb md" type="button" aria-label="Interact">E<small>Interact</small></button>
+      <button id="bGrab" class="tb lg" type="button" aria-label="Grab toggle">✋<small>Grab</small></button>
+      <button id="bJump" class="tb lg" type="button" aria-label="Jump">⤒<small>Jump</small></button>
     </div>
   </div>
 
+  <div id="flightui" class="hidden">
+    <div class="letterbox top"></div><div class="letterbox bottom"></div>
+    <div id="caption"></div>
+    <button id="btnSkip" class="btn ghost" type="button">Skip ▶</button>
+  </div>
+  <div id="flash" class="hidden"></div>
   <div id="fade" class="hidden"><div id="fadeTxt"></div></div>
 
-  <div id="menu" class="overlay">
-    <div class="card">
+  <div id="title" class="overlay">
+    <div class="titlewrap">
       <div class="kicker">BATLAS · EARLY BUILD</div>
-      <h1>Highcrag</h1>
-      <p class="lead">Climb a lone island mountain from the beach to the smouldering crown. Manage your grip, keep fed, keep warm and don't look down.</p>
-      <div id="seedRow" class="muted"></div>
-      <div id="bestRow" class="muted"></div>
-      <div class="row">
-        <button id="btnStart" class="btn primary" type="button">Start climb</button>
-        <button id="btnNew" class="btn" type="button">New mountain</button>
-      </div>
-      <div id="coop" class="coop">
-        <div class="coop-title">Climb together <small>up to 4 climbers</small></div>
-        <div id="coopSignedOut" class="muted small">Co-op needs a Batlas account. <a href="/login?next=/play/highcrag">Sign in</a></div>
-        <div id="coopSignedIn" class="row hidden">
-          <button id="btnCreate" class="btn" type="button">Create co-op room</button>
-          <input id="roomCode" maxlength="5" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code">
-          <button id="btnJoin" class="btn" type="button">Join</button>
+      <div class="logo">HIGH<span>CRAG</span></div>
+      <p class="lead">Your plane went down on a lonely island. The only way out is up.</p>
+      <div class="titlegrid">
+        <div class="card">
+          <button id="btnPlay" class="btn primary big" type="button">▶ Play</button>
+          <div class="row">
+            <button id="btnWardrobeTitle" class="btn" type="button">👕 Wardrobe</button>
+            <button id="btnSettings" class="btn" type="button">⚙ Settings</button>
+          </div>
+          <div class="meta"><span id="seedRow"></span><button id="btnNew" class="link" type="button">New mountain</button></div>
+          <div id="bestRow" class="meta"></div>
         </div>
-        <div id="coopMsg" class="small"></div>
+        <div class="card coop">
+          <div class="coop-title">Climb with friends <small>up to 4</small></div>
+          <div id="coopSignedOut" class="small">Co-op needs a Batlas account. <a href="/login?next=/play/highcrag">Sign in</a></div>
+          <div id="coopSignedIn" class="hidden">
+            <button id="btnCreate" class="btn primary" type="button">Create a room</button>
+            <div class="row join">
+              <input id="roomCode" maxlength="5" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code">
+              <button id="btnJoin" class="btn" type="button">Join</button>
+            </div>
+          </div>
+          <div id="coopMsg" class="small"></div>
+        </div>
       </div>
-      <details>
+      <details class="howto">
         <summary>How to play</summary>
-        <ul class="help">
-          <li><b>WASD</b> move · <b>mouse</b> look (click to lock) · <b>Shift</b> run · <b>Space</b> jump</li>
-          <li>Hold <b>left mouse</b> (or <b>R</b>) facing a rock wall to <b>grab</b> and climb. W/S up and down, A/D sideways. <b>Space</b> while climbing lunges upward.</li>
-          <li>Climbing drains <b>stamina</b> (yellow). Run out and you let go. Rest on flat ledges to recover.</li>
-          <li><b>Hunger</b>, <b>cold</b> and <b>injury</b> eat into the bar from the right and shrink your maximum stamina. If they fill it, you black out and wake at your last campfire without your gear.</li>
-          <li><b>E</b> picks up items and lights campfires (they become your checkpoint and warm you up). <b>F</b> uses the selected item, <b>1–3</b> or the mouse wheel select, <b>Q</b> drops.</li>
-          <li><b>Pitons</b> can only be placed while climbing: hang next to one to get your breath back.</li>
-          <li>Mossgrove has thornbrush. Frostline has blizzards. The Ember Crown has fierce gusts and thin air. Light the beacon at the summit to finish.</li>
-          <li><b>Co-op:</b> share the room code with friends. Items and campfires are shared. If someone blacks out they're <b>down</b> for 25 s: press <b>E</b> next to them to help them up. Standing on a ledge above a climbing friend? Press <b>E</b> to pull them up.</li>
-          <li>Touch: left stick moves, drag on the right looks, hold <b>✋</b> to climb.</li>
+        <ul>
+          <li>Start at the airport, board at <b>Gate 7</b>, and survive the crash on the island's beach. Grab a <b>compass</b>, <b>rope</b> and <b>flares</b> from the wreck.</li>
+          <li><b>Climb</b>: hold left mouse (or R) facing a rock wall; W/S up and down, A/D sideways, Space to lunge. On touch, turn on <b>✋ Grab</b>.</li>
+          <li><b>Stamina</b> (yellow) drains while you climb. <b>Hunger</b>, <b>cold</b> and <b>injury</b> fill the bar from the right and shrink it. Fill it completely and you black out.</li>
+          <li><b>E</b> picks up items and lights campfires (team checkpoints). <b>F</b> uses the selected item, <b>1–3</b> select, <b>Q</b> drops. <b>T / G / Y</b> wave, cheer, point.</li>
+          <li><b>Ropes</b>: stand at a ledge edge facing the drop and use one. Anyone can climb it cheaply. <b>Pitons</b>: place them on a wall to rest.</li>
+          <li><b>Co-op</b>: if a friend goes down, press E next to them to help them up. Standing above a climbing friend? Press E to pull them up.</li>
+          <li>Light the <b>beacon</b> on the summit to be rescued.</li>
         </ul>
       </details>
-      <p class="small"><a href="/games">← Back to Batlas games</a></p>
+      <p class="small back"><a href="/games">← Batlas games</a></p>
+    </div>
+  </div>
+
+  <div id="wardrobe" class="hidden" role="dialog" aria-label="Wardrobe">
+    <div class="card">
+      <h2>Wardrobe</h2>
+      <div class="wlabel">Outfit</div><div id="wOutfit" class="swatches"></div>
+      <div class="wlabel">Hat</div><div id="wHat" class="swatches"></div>
+      <div class="wlabel">Skin</div><div id="wSkin" class="swatches"></div>
+      <button id="wDone" class="btn primary" type="button">Looking good!</button>
     </div>
   </div>
 
   <div id="pause" class="overlay hidden">
-    <div class="card">
+    <div class="card narrow">
       <h2>Paused</h2>
-      <div class="row">
+      <div class="stack">
         <button id="btnResume" class="btn primary" type="button">Resume</button>
-        <button id="btnRestart" class="btn" type="button">Restart climb</button>
-        <button id="btnLeave" class="btn hidden" type="button">Leave room</button>
+        <button id="btnRestart" class="btn" type="button">Restart (back to the airport)</button>
+        <button id="btnLeave" class="btn hidden" type="button">Leave the room</button>
+        <button id="btnSettings2" class="btn" type="button">Settings</button>
         <button id="btnQuit" class="btn" type="button">Main menu</button>
       </div>
       <label class="set">Volume <input id="setVol" type="range" min="0" max="1" step="0.05"></label>
-      <label class="set">Look sensitivity <input id="setSens" type="range" min="0.3" max="2.5" step="0.1"></label>
+      <label class="set">Look speed <input id="setSens" type="range" min="0.3" max="2.5" step="0.1"></label>
+    </div>
+  </div>
+
+  <div id="settings" class="overlay hidden">
+    <div class="card narrow">
+      <h2>Settings</h2>
+      <label class="set">Volume <input id="setVol2" type="range" min="0" max="1" step="0.05"></label>
+      <label class="set">Look speed <input id="setSens2" type="range" min="0.3" max="2.5" step="0.1"></label>
+      <label class="set">Invert look up/down <input id="setInvert" type="checkbox"></label>
+      <label class="set">Graphics
+        <select id="setQuality">
+          <option value="auto">Auto</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option>
+        </select>
+      </label>
+      <div class="small muted" id="qualityNow"></div>
+      <div class="row">
+        <button id="btnReload" class="btn" type="button">Reload to apply</button>
+        <button id="btnSetClose" class="btn primary" type="button">Done</button>
+      </div>
     </div>
   </div>
 
   <div id="results" class="overlay hidden">
-    <div class="card">
-      <div class="kicker">SUMMIT REACHED</div>
-      <h2>The beacon is lit! 🔥</h2>
+    <div class="card narrow">
+      <div class="kicker">RESCUED!</div>
+      <h2>The beacon is lit 🔥</h2>
       <p id="resTeam" class="muted"></p>
       <dl id="resList"></dl>
       <div class="row">
-        <button id="btnAgain" class="btn primary" type="button">Climb again</button>
+        <button id="btnAgain" class="btn primary" type="button">Fly again</button>
         <button id="btnNew2" class="btn" type="button">New mountain</button>
         <a class="btn" href="/games">Batlas games</a>
       </div>
+    </div>
+  </div>
+
+  <div id="rotate" class="overlay hidden">
+    <div class="card narrow center">
+      <div class="phone-icon">📱↻</div>
+      <h2>Turn your phone sideways</h2>
+      <p class="muted">Highcrag plays best in landscape.</p>
+      <button id="btnRotateOk" class="btn" type="button">Play anyway</button>
     </div>
   </div>
 </body>

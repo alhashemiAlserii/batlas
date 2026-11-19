@@ -204,6 +204,47 @@ describe('Highcrag co-op server', () => {
     for (const x of [a, b, c]) x.c.close();
   });
 
+  it('boards the whole room once, and shares looks, emotes, ropes and flares', async () => {
+    const a = await signedIn();
+    const b = await signedIn();
+    a.c.send({ t: 'create' });
+    const room = await a.c.wait((m) => m.t === 'room');
+    expect(room.boarded).toBe(false);
+    b.c.send({ t: 'join', code: room.code });
+    await b.c.wait((m) => m.t === 'room');
+
+    a.c.send({ t: 'look', look: { c: 3, h: 2, s: 4 } });
+    expect((await b.c.wait((m) => m.t === 'look')).look).toEqual({ c: 3, h: 2, s: 4 });
+    a.c.send({ t: 'look', look: { c: 99, h: -1, s: 'x' } });
+    expect((await b.c.wait((m) => m.t === 'look')).look).toEqual({ c: 0, h: 0, s: 0 });
+
+    b.c.send({ t: 'emote', e: 'wave' });
+    expect((await a.c.wait((m) => m.t === 'emote')).e).toBe('wave');
+    b.c.send({ t: 'emote', e: 'rude' }); // unknown: ignored
+
+    b.c.send({ t: 'board' });
+    b.c.send({ t: 'board' });
+    expect((await a.c.wait((m) => m.t === 'board')).by).toBe(b.you.cid);
+    expect((await b.c.wait((m) => m.t === 'board')).by).toBe(b.you.cid);
+
+    a.c.send({ t: 'rope', top: [1, 50, 1], bottom: [1, 30, 1], a: [0.5, 49.7, 0.5] });
+    expect((await b.c.wait((m) => m.t === 'rope')).bottom).toEqual([1, 30, 1]);
+    a.c.send({ t: 'rope', top: [1, 10, 1], bottom: [1, 30, 1], a: [0, 0, 0] }); // upside down: ignored
+    a.c.send({ t: 'flare', p: [2, 60, 2] });
+    expect((await b.c.wait((m) => m.t === 'flare')).p).toEqual([2, 60, 2]);
+    a.c.send({ t: 'st', p: [1, 40, 1], f: 0, m: 'rope', alt: 40 });
+    expect((await b.c.wait((m) => m.t === 'st')).m).toBe('rope');
+
+    const c = await signedIn();
+    c.c.send({ t: 'join', code: room.code });
+    const rc = await c.c.wait((m) => m.t === 'room');
+    expect(rc.boarded).toBe(true);
+    expect(rc.ropes).toHaveLength(1);
+    expect(rc.flares).toEqual([[2, 60, 2]]);
+    expect(rc.players.find((p: any) => p.cid === a.you.cid).look).toEqual({ c: 0, h: 0, s: 0 });
+    for (const x of [a, b, c]) x.c.close();
+  });
+
   it('closes clients that flood messages', async () => {
     const a = await signedIn();
     for (let i = 0; i < 200; i++) a.c.send({ t: 'st', p: [0, 0, 0], f: 0, m: 'ground' });
