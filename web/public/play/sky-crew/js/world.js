@@ -16,6 +16,11 @@ export const Z_CARGO = Z_HOLD0; // legacy name: start of the cargo hold
 export const CARGO_DOOR = { x: HALF_W, z0: -11.9, z1: -9.9 };
 /** Main entrance / exit: a plug door in the rear wall, opening outward and swinging to the right. */
 export const REAR_DOOR = { z: Z_TAIL, x0: -0.6, x1: 0.6, h: 2.1 };
+/** Tail cargo ramp: a folding ramp in the rear-right wall. It counts as a cargo door. */
+export const RAMP = { x0: 1.28, x1: 2.18, h: 2.16, z: Z_TAIL };
+/** How far a seated pilot is lifted onto the raised seat, and where their eyes sit (over the glareshield). */
+export const PILOT_LIFT = 0.4;
+export const PILOT_EYE_Y = 1.68;
 export const ROW_Z0 = -6.9, ROW_PITCH = 1.25, ROWS = 12;
 export const SEAT_X = [-1.62, -1.0, 1.0, 1.62];
 export const ORIGIN = { code: 'HBF', name: 'Harbor Field', x: 0, z: 0, len: 2600, w: 46, style: 'harbor' };
@@ -31,7 +36,7 @@ export function setRoute(code) { if (ROUTES[code]) Object.assign(DEST, ROUTES[co
 /** Terrain obstacles (cones) the aircraft can crash into: {x, z, r, h}. Filled by buildWorld. */
 export const OBSTACLES = [];
 
-const mat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.08, envMapIntensity: 0.45, ...extra });
 const M = {
   dark: mat(0x1b2333), metal: mat(0x9aa4b5), cloud: mat(0xffffff),
   screen: new THREE.MeshBasicMaterial({ color: 0x19d3e6 }), warn: new THREE.MeshBasicMaterial({ color: 0xff3b4a }),
@@ -126,6 +131,7 @@ export function buildPlane() {
   {
     const sh = new THREE.Shape(); sh.absarc(0, CY, R * 1.002, 0, Math.PI * 2, false);
     const hole = new THREE.Path(); rrect(hole, 0, REAR_DOOR.h / 2 + 0.02, REAR_DOOR.x1 - REAR_DOOR.x0 + 0.04, REAR_DOOR.h + 0.04, 0.14); sh.holes.push(hole);
+    const rampHole = new THREE.Path(); rrect(rampHole, (RAMP.x0 + RAMP.x1) / 2, RAMP.h / 2, RAMP.x1 - RAMP.x0 + 0.04, RAMP.h + 0.04, 0.08); sh.holes.push(rampHole);
     const g = new THREE.ShapeGeometry(sh, 40);
     ext.add(g, C.hull, [0, 0, Z_TAIL + 0.002]);
     // navy lower band + teal stripe continue round the back
@@ -136,7 +142,7 @@ export function buildPlane() {
     const fh = new THREE.Path(); rrect(fh, 0, REAR_DOOR.h / 2 + 0.02, REAR_DOOR.x1 - REAR_DOOR.x0 + 0.04, REAR_DOOR.h + 0.04, 0.14); frame.holes.push(fh);
     const fg = new THREE.ShapeGeometry(frame, 12);
     const stripes = canvasTexture(128, 128, (g2, w, h) => { g2.fillStyle = '#ffc61a'; g2.fillRect(0, 0, w, h); g2.fillStyle = '#1b1b1b'; for (let i = -4; i < 8; i++) { g2.beginPath(); g2.moveTo(i * 32, 0); g2.lineTo(i * 32 + 16, 0); g2.lineTo(i * 32 + 16 + h, h); g2.lineTo(i * 32 + h, h); g2.fill(); } }, { repeat: [3, 3] });
-    const fm = new THREE.Mesh(fg, new THREE.MeshLambertMaterial({ map: stripes })); fm.position.z = Z_TAIL + 0.012; plane.add(fm);
+    const fm = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: stripes })); fm.position.z = Z_TAIL + 0.012; plane.add(fm);
     const fmIn = fm.clone(); fmIn.rotation.y = Math.PI; fmIn.position.z = Z_TAIL - T - 0.012; plane.add(fmIn);
     glow.box(0.25, 0.12, 0.04, 0xffffff, 0, TOP - 0.25, Z_TAIL + 7.4); // tail light
   }
@@ -151,7 +157,7 @@ export function buildPlane() {
   // cargo door seams
   { const span = thetaSpan(-0.1, 2.08, 1); for (const zz of [CARGO_DOOR.z0 - 0.04, CARGO_DOOR.z1 + 0.04]) ext.add(loft([ring(zz - 0.03, 1.005), ring(zz + 0.03, 1.005)], 6, span[0], span[1] - span[0]), C.grey); }
   for (const side of [-1, 1]) {
-    const name = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.0), new THREE.MeshLambertMaterial({ map: textTexture('BATLAS AIR'), transparent: true }));
+    const name = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.0), new THREE.MeshStandardMaterial({ map: textTexture('BATLAS AIR'), transparent: true }));
     const y = 2.45, x = Math.sqrt(R * R - (y - CY) ** 2) + 0.02;
     name.position.set(side * x, y, -1); name.rotation.y = side * Math.PI / 2; plane.add(name);
   }
@@ -181,7 +187,7 @@ export function buildPlane() {
   logo.onload = () => { const g = finTex.image.getContext('2d'); g.save(); g.globalAlpha = 0.95; g.drawImage(logo, 300, 150, 150, 150); g.restore(); finTex.needsUpdate = true; };
   finTex.wrapS = finTex.wrapT = THREE.ClampToEdgeWrapping;
   finTex.repeat.set(1 / 6.5, 1 / 6.2); finTex.offset.set(-(Z_TAIL + 1.3) / 6.5, -3.3 / 6.2);
-  const finMesh = new THREE.Mesh(finGeo, new THREE.MeshLambertMaterial({ map: finTex }));
+  const finMesh = new THREE.Mesh(finGeo, new THREE.MeshStandardMaterial({ map: finTex }));
   finMesh.castShadow = true; plane.add(finMesh);
   // landing gear
   const gb = new Batch();
@@ -195,22 +201,22 @@ export function buildPlane() {
     }
     if (main) gb.box(0.06, 1.1, 1.2, C.hull, gx + Math.sign(gx) * 0.6, -1.3, gz);
   }
-  const gear = gb.mesh(); plane.add(gear);
+  const gear = gb.mesh({ roughness: 0.38, metalness: 0.62 }); plane.add(gear);
 
   // =================== INTERIOR ===================
   const Z_CAB0 = Z_HOLD1, Z_CAB1 = Z_TAIL;
   // ---- floors: patterned blue aisle carpet, seat-area carpet, cockpit & hold decks
   const aisleTex = canvasTexture(256, 512, drawAisle, { repeat: [1, 10] });
-  const aisle = new THREE.Mesh(new THREE.PlaneGeometry(1.36, Z_CAB1 - Z_CAB0), new THREE.MeshLambertMaterial({ map: aisleTex }));
+  const aisle = new THREE.Mesh(new THREE.PlaneGeometry(1.36, Z_CAB1 - Z_CAB0), new THREE.MeshStandardMaterial({ map: aisleTex }));
   aisle.rotation.x = -Math.PI / 2; aisle.position.set(0, 0.004, (Z_CAB0 + Z_CAB1) / 2); aisle.receiveShadow = true; plane.add(aisle);
   const seatFloorTex = canvasTexture(256, 256, drawCarpet, { repeat: [2, 14] });
-  const sfl = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, T, Z_CAB1 - Z_CAB0), new THREE.MeshLambertMaterial({ map: seatFloorTex }));
+  const sfl = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, T, Z_CAB1 - Z_CAB0), new THREE.MeshStandardMaterial({ map: seatFloorTex }));
   sfl.position.set(0, -T / 2, (Z_CAB0 + Z_CAB1) / 2); sfl.receiveShadow = true; plane.add(sfl);
   for (const s of [-1, 1]) B(int, 0.06, 0.012, Z_CAB1 - Z_CAB0, 0xffc93c, s * 0.7, 0.006, (Z_CAB0 + Z_CAB1) / 2); // aisle edge trims (also emergency floor lighting)
   for (const s of [-1, 1]) for (let z = Z_CAB0 + 0.5; z < Z_CAB1 - 2.5; z += 0.9) glow.box(0.04, 0.012, 0.12, 0xfff0b0, s * 0.74, 0.012, z);
   B(int, HALF_W * 2, T, Z_COCKPIT - Z_NOSE, C.dark, 0, -T / 2, (Z_NOSE + Z_COCKPIT) / 2);
   const deck = canvasTexture(256, 256, drawDeck, { repeat: [3, 4] });
-  const cfloor = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, T, Z_HOLD1 - Z_HOLD0), new THREE.MeshLambertMaterial({ map: deck }));
+  const cfloor = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, T, Z_HOLD1 - Z_HOLD0), new THREE.MeshStandardMaterial({ map: deck }));
   cfloor.position.set(0, -T / 2, (Z_HOLD0 + Z_HOLD1) / 2); cfloor.receiveShadow = true; plane.add(cfloor);
   colliders.push(aabb(-HALF_W, -T, Z_NOSE, HALF_W, 0, Z_TAIL));
   colliders.push(aabb(-HALF_W, CEIL, Z_NOSE, HALF_W, CEIL + T, Z_TAIL));
@@ -297,6 +303,8 @@ export function buildPlane() {
     const cz = (d.z0 + d.z1) / 2;
     makeDoor('cargo', g, col, (k) => { g.position.x = Math.min(1, k / 0.3) * 0.45; g.position.z = cz - Math.max(0, (k - 0.3) / 0.7) * 2.2; }, 1.3);
   }
+  // tail cargo ramp: the door leaf folds down into a two-section ramp on the rear-right
+  const rampSteps = buildTailRamp(plane, makeDoor, colliders);
 
   // ---- end walls / bulkheads / partitions
   B(int, HALF_W * 2, 1.05, T, C.dark, 0, 0.525, Z_NOSE - T / 2);
@@ -309,8 +317,15 @@ export function buildPlane() {
   {
     const sh = new THREE.Shape(); sh.moveTo(-HALF_W, 0); sh.lineTo(HALF_W, 0); sh.lineTo(HALF_W, CEIL); sh.lineTo(-HALF_W, CEIL); sh.closePath();
     const hole = new THREE.Path(); rrect(hole, 0, REAR_DOOR.h / 2 + 0.02, REAR_DOOR.x1 - REAR_DOOR.x0 + 0.04, REAR_DOOR.h + 0.04, 0.14); sh.holes.push(hole);
+    const rampHole = new THREE.Path(); rrect(rampHole, (RAMP.x0 + RAMP.x1) / 2, RAMP.h / 2, RAMP.x1 - RAMP.x0 + 0.04, RAMP.h + 0.04, 0.08); sh.holes.push(rampHole);
     int.add(new THREE.ExtrudeGeometry(sh, { depth: T, bevelEnabled: false, curveSegments: 8 }), C.panel2, [0, 0, Z_TAIL - T]);
-    colliders.push(aabb(-HALF_W, 0, Z_TAIL - T, REAR_DOOR.x0, CEIL, Z_TAIL), aabb(REAR_DOOR.x1, 0, Z_TAIL - T, HALF_W, CEIL, Z_TAIL), aabb(REAR_DOOR.x0, REAR_DOOR.h, Z_TAIL - T, REAR_DOOR.x1, CEIL, Z_TAIL));
+    colliders.push(
+      aabb(-HALF_W, 0, Z_TAIL - T, REAR_DOOR.x0, CEIL, Z_TAIL),
+      aabb(REAR_DOOR.x0, REAR_DOOR.h, Z_TAIL - T, REAR_DOOR.x1, CEIL, Z_TAIL),
+      aabb(REAR_DOOR.x1, 0, Z_TAIL - T, RAMP.x0, CEIL, Z_TAIL),
+      aabb(RAMP.x1, 0, Z_TAIL - T, HALF_W, CEIL, Z_TAIL),
+      aabb(RAMP.x0, RAMP.h, Z_TAIL - T, RAMP.x1, CEIL, Z_TAIL),
+    );
     B(int, REAR_DOOR.x1 - REAR_DOOR.x0 + 0.1, 0.05, 0.3, C.steel, 0, 0.0, Z_TAIL - 0.05); // threshold plate
     glow.box(0.5, 0.14, 0.03, 0x22e06b, 0, REAR_DOOR.h + 0.25, Z_TAIL - T - 0.02); // EXIT sign
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.12), new THREE.MeshBasicMaterial({ map: textTexture('EXIT ⇩', { w: 256, h: 64, font: 'bold 46px -apple-system, Segoe UI, sans-serif', color: '#ffffff', bg: '#12a84f' }) }));
@@ -326,7 +341,7 @@ export function buildPlane() {
   partition(Z_COCKPIT, 0.5, C.galley, C.steel);
   partition(Z_HOLD1, 0.7, C.panel2, 0x9aa6bb);
   // cabin bulkhead decoration (front of the cabin): Batlas wave mural
-  { const tex = canvasTexture(512, 256, (g, w, h) => drawWaveLivery(g, w, h)); for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.2), new THREE.MeshLambertMaterial({ map: tex })); m.position.set(s * 1.45, 1.35, Z_HOLD1 + 0.055); plane.add(m); } }
+  { const tex = canvasTexture(512, 256, (g, w, h) => drawWaveLivery(g, w, h)); for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.2), new THREE.MeshStandardMaterial({ map: tex })); m.position.set(s * 1.45, 1.35, Z_HOLD1 + 0.055); plane.add(m); } }
 
   // ---- cockpit
   B(int, HALF_W * 2, 1.0, 0.45, C.dark, 0, 0.5, Z_NOSE + 0.22);
@@ -334,20 +349,19 @@ export function buildPlane() {
   colliders.push(aabb(-HALF_W, 0, Z_NOSE, HALF_W, 1.0, Z_NOSE + 0.45));
   for (const sx of [-0.6, 0.6]) {
     pilotSeat(int, sx, -14.6);
-    colliders.push(aabb(sx - 0.3, 0, -14.9, sx + 0.3, 0.48, -14.3));
+    colliders.push(aabb(sx - 0.3, 0, -14.9, sx + 0.3, 0.96, -14.3));
     glow.box(0.46, 0.3, 0.03, 0x0b3a66, sx - 0.1, 1.02, Z_NOSE + 0.47); glow.box(0.42, 0.26, 0.031, 0x19b4e6, sx - 0.1, 1.02, Z_NOSE + 0.475);
     glow.box(0.3, 0.26, 0.031, 0x1fd58a, sx + 0.28, 1.02, Z_NOSE + 0.475);
-    CYL(int, 0.035, 0.035, 0.5, C.metal, [sx, 0.62, -15.3], [0.35, 0, 0]);
-    B(int, 0.36, 0.06, 0.05, C.dark, sx, 0.88, -15.4); B(int, 0.06, 0.16, 0.05, C.dark, sx - 0.16, 0.83, -15.4); B(int, 0.06, 0.16, 0.05, C.dark, sx + 0.16, 0.83, -15.4);
   }
-  RB(int, 0.42, 0.75, 0.8, 0.05, C.dark, 0, 0.38, -14.9);
-  glow.box(0.25, 0.18, 0.02, 0x19d3e6, 0, 0.76, -15.31);
-  const throttleLever = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.07), new THREE.MeshLambertMaterial({ color: 0xcfd6e2 }));
-  throttleLever.position.set(0, 0.86, -15.0); plane.add(throttleLever);
+  RB(int, 0.42, 0.92, 0.8, 0.05, C.dark, 0, 0.5, -14.9);
+  glow.box(0.25, 0.18, 0.02, 0x19d3e6, 0, 0.96, -15.31);
+  const throttleLever = makeThrottle(plane);
+  const yokes = [makeYoke(plane, -0.6), makeYoke(plane, 0.6)];
+  addGauges(plane);
   B(int, 1.4, 0.08, 0.9, C.dark, 0, CEIL - 0.04, -15.2);
   for (let i = 0; i < 18; i++) glow.box(0.06, 0.02, 0.06, [0xffffff, 0x3ddc84, 0xf5c542][i % 3], -0.55 + (i % 9) * 0.14, CEIL - 0.09, -15.45 + Math.floor(i / 9) * 0.3);
-  interact.push({ id: 'seat_captain', kind: 'pilot', label: 'Take the captain\'s seat (Pilot)', pos: new THREE.Vector3(-0.6, 0.9, -14.6) });
-  interact.push({ id: 'seat_copilot', kind: 'copilot', label: 'Take the first officer\'s seat (Co-pilot)', pos: new THREE.Vector3(0.6, 0.9, -14.6) });
+  interact.push({ id: 'seat_captain', kind: 'pilot', label: 'Take the captain\'s seat (Pilot)', pos: new THREE.Vector3(-0.6, 1.15, -14.6) });
+  interact.push({ id: 'seat_copilot', kind: 'copilot', label: 'Take the first officer\'s seat (Co-pilot)', pos: new THREE.Vector3(0.6, 1.15, -14.6) });
 
   // ---- forward cargo hold: nets, tie-down rails, crates, maintenance panel
   for (const z of [Z_HOLD0 + 0.6, Z_HOLD1 - 0.6]) for (const s of [-1, 1]) B(int, 0.07, CEIL, 0.07, C.metal, s * 1.5, CEIL / 2, z);
@@ -453,19 +467,24 @@ export function buildPlane() {
   // lavatory pods: rounded walls, folding doors with OCCUPIED/VACANT indicators, lights above
   for (const s of [-1, 1]) {
     const xi = s * 0.72, xo = s * HALF_W, cx = (xi + xo) / 2, wpod = Math.abs(xo - xi);
+    // the right lav stops short of the tail ramp so cargo can walk out the rear wall
+    const zBack = s > 0 ? Z_TAIL - 1.45 : Z_TAIL;
+    const depth = Math.max(0.4, zBack - LZ0);
     RB(int, wpod, CEIL - 0.02, 0.08, 0.03, C.panel2, cx, (CEIL - 0.02) / 2, LZ0); // front wall
-    RB(int, 0.08, CEIL - 0.02, Z_TAIL - LZ0, 0.03, C.panel2, xi, (CEIL - 0.02) / 2, (LZ0 + Z_TAIL) / 2); // aisle-side wall
-    RB(int, 0.04, 2.0, 0.75, 0.03, 0xdfe5ef, xi - s * 0.05, 1.02, LZ0 + 0.9); // door
-    for (let k = 0; k < 3; k++) B(int, 0.045, 1.9, 0.01, 0xc5cddc, xi - s * 0.07, 1.0, LZ0 + 0.6 + k * 0.25);
-    RB(int, 0.03, 0.06, 0.16, 0.01, 0x2b2f3a, xi - s * 0.08, 1.05, LZ0 + 1.15);
-    glow.box(0.02, 0.06, 0.14, s < 0 ? 0xff3b4a : 0x3ddc84, xi - s * 0.07, 2.2, LZ0 + 0.9);
-    glow.box(0.02, 0.1, 0.1, 0x7fd3ff, xi - s * 0.07, 2.38, LZ0 + 0.9); // lavatory symbol light
-    colliders.push(aabb(Math.min(xi, xo), 0, LZ0 - 0.05, Math.max(xi, xo), CEIL, Z_TAIL));
+    RB(int, 0.08, CEIL - 0.02, depth, 0.03, C.panel2, xi, (CEIL - 0.02) / 2, LZ0 + depth / 2); // aisle-side wall
+    RB(int, 0.04, 2.0, Math.min(0.75, depth - 0.2), 0.03, 0xdfe5ef, xi - s * 0.05, 1.02, LZ0 + 0.55); // door
+    for (let k = 0; k < 3; k++) B(int, 0.045, 1.9, 0.01, 0xc5cddc, xi - s * 0.07, 1.0, LZ0 + 0.35 + k * 0.18);
+    RB(int, 0.03, 0.06, 0.16, 0.01, 0x2b2f3a, xi - s * 0.08, 1.05, LZ0 + 0.7);
+    glow.box(0.02, 0.06, 0.14, s < 0 ? 0xff3b4a : 0x3ddc84, xi - s * 0.07, 2.2, LZ0 + 0.55);
+    glow.box(0.02, 0.1, 0.1, 0x7fd3ff, xi - s * 0.07, 2.38, LZ0 + 0.55); // lavatory symbol light
+    colliders.push(aabb(Math.min(xi, xo), 0, LZ0 - 0.05, Math.max(xi, xo), CEIL, zBack));
   }
   // ---- door controls: rear door panel on the lavatory wall by the door (inside) + outside handle; cargo door switch in the hold
   interact.push({ id: 'door_rear', kind: 'door', door: 'rear', label: 'rear door', pos: new THREE.Vector3(-0.66, 1.2, Z_TAIL - 0.45) });
   interact.push({ id: 'door_rear_out', kind: 'door', door: 'rear', label: 'rear door', pos: new THREE.Vector3(-0.3, 1.05, Z_TAIL + 0.25) });
   interact.push({ id: 'door_cargo', kind: 'door', door: 'cargo', label: 'cargo door', pos: new THREE.Vector3(HALF_W - 0.15, 1.2, CARGO_DOOR.z0 - 0.35) });
+  interact.push({ id: 'door_ramp', kind: 'door', door: 'ramp', label: 'tail ramp', pos: new THREE.Vector3((RAMP.x0 + RAMP.x1) / 2, 1.15, Z_TAIL - 0.55) });
+  interact.push({ id: 'door_ramp_out', kind: 'door', door: 'ramp', label: 'tail ramp', pos: new THREE.Vector3((RAMP.x0 + RAMP.x1) / 2, -1.15, Z_TAIL + 1.35) });
   RB(int, 0.04, 0.34, 0.24, 0.02, 0x2b2f3a, -0.69, 1.2, Z_TAIL - 0.45); glow.box(0.02, 0.1, 0.1, 0xff3b4a, -0.665, 1.25, Z_TAIL - 0.45); glow.box(0.02, 0.05, 0.1, 0x3ddc84, -0.665, 1.1, Z_TAIL - 0.45);
   RB(int, 0.06, 0.3, 0.2, 0.02, 0x2b2f3a, HALF_W - 0.03, 1.2, CARGO_DOOR.z0 - 0.35); glow.box(0.02, 0.1, 0.1, 0xff3b4a, HALF_W - 0.07, 1.25, CARGO_DOOR.z0 - 0.35);
   // ---- air-stairs (ground-only colliders): the main stair truck behind the REAR DOOR, a belt-loader ramp at the cargo door
@@ -529,25 +548,182 @@ export function buildPlane() {
   key.shadow.camera.near = 0.02; key.shadow.camera.far = 4; key.shadow.bias = -0.0015; key.shadow.normalBias = 0.02; key.shadow.radius = 3;
   key.shadow.camera.up.set(1, 0, 0);
 
-  const extMesh = ext.mesh(); plane.add(extMesh);
-  const intMesh = int.mesh({ side: THREE.DoubleSide }); intMesh.castShadow = true; intMesh.receiveShadow = true; plane.add(intMesh);
+  const extMesh = ext.mesh({ roughness: 0.42, metalness: 0.2 }); plane.add(extMesh);
+  const intMesh = int.mesh({ side: THREE.DoubleSide, roughness: 0.8, metalness: 0.03 }); intMesh.castShadow = true; intMesh.receiveShadow = true; plane.add(intMesh);
   const glowMesh = glow.mesh({ basic: true, shadows: false }); plane.add(glowMesh);
   const cabin = {
     lights: [cabinLight, cabinLight2], strip: stripMat, sign: signMat, key,
     setLights(on) { cabinLight.intensity = on ? 10 : 2; cabinLight2.intensity = on ? 8 : 1.5; key.intensity = on ? 1.1 : 0.25; stripMat.color.setHex(on ? 0xfff4e0 : 0x5a6aa8); coveMat.color.setHex(on ? 0x9fd8ff : 0x4a3cff); },
     setSeatbelt(on) { signMat.color.setHex(on ? 0xffb020 : 0x333a48); },
   };
-  const update = (dt) => { for (const d of Object.values(doors)) d.update(dt); };
-  return { plane, colliders, interact, seats, doors, stairFront, stairRear: stairFront, stairCargo, gear, masks, panelLight, throttleLever, warnLight, cabin, exterior: extMesh, interior: intMesh, bins, update, key };
+  const yokeVis = { p: 0, r: 0 };
+  const update = (dt) => {
+    for (const d of Object.values(doors)) d.update(dt);
+    const k = 1 - Math.exp(-Math.max(0.001, dt) * 14);
+    yokeVis.p += ((yokeTarget.p || 0) - yokeVis.p) * k;
+    yokeVis.r += ((yokeTarget.r || 0) - yokeVis.r) * k;
+    for (const y of yokes) {
+      y.userData.wheel.rotation.x = yokeVis.p * 0.5;
+      y.userData.wheel.rotation.z = -yokeVis.r * 0.9;
+    }
+    const lever = throttleLever;
+    lever.rotation.x += (((lever.userData.target ?? -0.45) - lever.rotation.x) * Math.min(1, dt * 8));
+    if (rampSteps) rampSteps.visible = (doors.ramp?.t || 0) > 0.35;
+  };
+  const yokeTarget = { p: 0, r: 0 };
+  return { plane, colliders, interact, seats, doors, stairFront, stairRear: stairFront, stairCargo, gear, masks, panelLight, throttleLever, warnLight, cabin, exterior: extMesh, interior: intMesh, bins, update, key, yokes, yokeHits: yokes.map((y) => y.userData.hit), yokeTarget, rampSteps };
 }
 const glassMat = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
 
 function pilotSeat(b, x, z) {
-  b.add(rbox(0.56, 0.16, 0.55, 0.06), 0x3a4256, [x, 0.42, z]);
-  b.add(rbox(0.56, 0.85, 0.16, 0.07), 0x3a4256, [x, 0.88, z + 0.3], [-0.12, 0, 0]);
-  b.add(rbox(0.4, 0.22, 0.14, 0.05), 0x2c3344, [x, 1.42, z + 0.36]);
-  for (const s of [-1, 1]) b.add(rbox(0.07, 0.07, 0.4, 0.03), 0x2c3344, [x + s * 0.3, 0.66, z + 0.02]);
-  b.add(new THREE.CylinderGeometry(0.06, 0.12, 0.36, 10), 0x2c3344, [x, 0.18, z]);
+  const lift = PILOT_LIFT;
+  b.add(rbox(0.58, 0.16, 0.56, 0.06), 0x3a4256, [x, 0.46 + lift, z]);
+  b.add(rbox(0.56, 0.82, 0.16, 0.07), 0x3a4256, [x, 0.92 + lift, z + 0.28], [-0.1, 0, 0]);
+  b.add(rbox(0.4, 0.2, 0.14, 0.05), 0x2c3344, [x, 1.4 + lift, z + 0.34]);
+  for (const s of [-1, 1]) b.add(rbox(0.07, 0.07, 0.42, 0.03), 0x2c3344, [x + s * 0.3, 0.7 + lift, z + 0.02]);
+  b.add(new THREE.CylinderGeometry(0.07, 0.11, 0.42 + lift, 10), 0x2c3344, [x, (0.42 + lift) / 2, z]);
+}
+const metalMat = () => new THREE.MeshStandardMaterial({ color: 0xc5ceda, roughness: 0.32, metalness: 0.78 });
+const gripMat = () => new THREE.MeshStandardMaterial({ color: 0x1a2030, roughness: 0.62, metalness: 0.12 });
+/** Control wheel in front of a pilot seat. The wheel group is what pitches and rolls. */
+function makeYoke(parent, x) {
+  const root = new THREE.Group();
+  root.position.set(x, 1.34, -15.28);
+  const metal = metalMat();
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.05, 0.72, 12), metal);
+  column.position.y = -0.4; column.castShadow = true; root.add(column);
+  const wheel = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.026, 10, 24), gripMat());
+  ring.castShadow = true; wheel.add(ring);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+    const sp = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.028, 0.026), metal);
+    sp.position.set(Math.cos(a) * 0.08, Math.sin(a) * 0.08, 0);
+    sp.rotation.z = a;
+    wheel.add(sp);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.06, 12), metal);
+  hub.rotation.x = Math.PI / 2; wheel.add(hub);
+  const hit = new THREE.Mesh(new THREE.CircleGeometry(0.34, 16), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  hit.name = 'yokeHit'; wheel.add(hit);
+  root.add(wheel);
+  root.userData.wheel = wheel;
+  root.userData.hit = hit;
+  parent.add(root);
+  return root;
+}
+/** Throttle lever on the centre pedestal. Pivot is at the base so it visibly sweeps. */
+function makeThrottle(parent) {
+  const pivot = new THREE.Group();
+  pivot.position.set(0, 1.02, -15.02);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.28), new THREE.MeshStandardMaterial({ color: 0x2a3142, roughness: 0.5, metalness: 0.4 }));
+  base.position.y = -0.02; pivot.add(base);
+  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.2), new THREE.MeshStandardMaterial({ color: 0x11151c, roughness: 0.8, metalness: 0.2 }));
+  slot.position.y = 0.02; pivot.add(slot);
+  const stick = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.26, 0.04), metalMat());
+  stick.position.y = 0.14; stick.castShadow = true; pivot.add(stick);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshStandardMaterial({ color: 0xe4c36a, roughness: 0.35, metalness: 0.45 }));
+  knob.position.y = 0.28; pivot.add(knob);
+  pivot.userData.target = -0.45;
+  pivot.rotation.x = -0.45;
+  parent.add(pivot);
+  return pivot;
+}
+/** Glowing round gauges on the glareshield, drawn on a canvas (no external art). */
+function addGauges(parent) {
+  const kinds = [['ASI', '#9fd8ff'], ['ALT', '#8ff0c0'], ['HDG', '#ffd27a']];
+  const tex = kinds.map(([label, col]) => canvasTexture(128, 128, (g, w, h) => {
+    g.fillStyle = '#070b14'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = col; g.lineWidth = 4; g.beginPath(); g.arc(64, 64, 46, 0.6, Math.PI * 2 - 0.15); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.75)'; g.lineWidth = 2;
+    for (let i = 0; i < 8; i++) { const a = 0.7 + i * 0.32; g.beginPath(); g.moveTo(64 + Math.cos(a) * 34, 64 + Math.sin(a) * 34); g.lineTo(64 + Math.cos(a) * 44, 64 + Math.sin(a) * 44); g.stroke(); }
+    g.strokeStyle = '#ff5a6a'; g.lineWidth = 3; g.beginPath(); g.moveTo(64, 64); g.lineTo(64 + 28, 64 - 18); g.stroke();
+    g.fillStyle = col; g.font = 'bold 18px sans-serif'; g.textAlign = 'center'; g.fillText(label, 64, 112);
+  }));
+  for (const sx of [-0.6, 0.6]) kinds.forEach((_, i) => {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), new THREE.MeshStandardMaterial({ map: tex[i], emissive: 0x123048, emissiveMap: tex[i], emissiveIntensity: 0.85, roughness: 0.35, metalness: 0.1 }));
+    m.position.set(sx - 0.16 + i * 0.16, 1.04, Z_NOSE + 0.5);
+    parent.add(m);
+    const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.01, 6, 16), metalMat());
+    bezel.position.copy(m.position); parent.add(bezel);
+  });
+  const screen = canvasTexture(256, 128, (g, w, h) => {
+    g.fillStyle = '#041018'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#19d3c5'; g.lineWidth = 2; g.strokeRect(8, 8, w - 16, h - 16);
+    g.beginPath(); g.moveTo(20, h - 24); g.lineTo(w / 2, 28); g.lineTo(w - 20, h - 36); g.stroke();
+    g.fillStyle = '#7fe9ff'; g.font = 'bold 20px sans-serif'; g.fillText('BATLAS', 18, 36);
+    g.font = '16px sans-serif'; g.fillStyle = '#d5dde4'; g.fillText('PFD', 18, 58);
+  });
+  for (const sx of [-0.62, 0.62]) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.18), new THREE.MeshStandardMaterial({ map: screen, emissive: 0x063040, emissiveMap: screen, emissiveIntensity: 0.7, roughness: 0.25, metalness: 0.05 }));
+    m.position.set(sx, 0.78, Z_NOSE + 0.48);
+    parent.add(m);
+  }
+}
+/**
+ * Folding tail ramp. Closed, the two leaves stack in the rear-right doorway.
+ * Open, they form one slope from the cabin floor down to the ground.
+ * Returns the step group (shown once the ramp is mostly open).
+ */
+function buildTailRamp(plane, makeDoor, colliders) {
+  const cx = (RAMP.x0 + RAMP.x1) / 2;
+  const width = (RAMP.x1 - RAMP.x0) - 0.08;
+  const lenA = 2.02, lenB = 2.48;
+  const openA = Math.PI / 2 + 0.58;
+  const hinge = new THREE.Group();
+  hinge.position.set(cx, 0, Z_TAIL);
+  plane.add(hinge);
+  const leafA = new THREE.Group();
+  hinge.add(leafA);
+  const face = new THREE.MeshStandardMaterial({ color: 0xd5dbe6, roughness: 0.45, metalness: 0.35 });
+  const rib = new THREE.MeshStandardMaterial({ color: 0x8e97a6, roughness: 0.5, metalness: 0.4 });
+  const warn = canvasTexture(64, 64, (g, w, h) => {
+    g.fillStyle = '#ffc61a'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#1b1b1b';
+    for (let i = -2; i < 6; i++) { g.beginPath(); g.moveTo(i * 16, 0); g.lineTo(i * 16 + 8, 0); g.lineTo(i * 16 + 8 + h, h); g.lineTo(i * 16 + h, h); g.fill(); }
+  }, { repeat: [2, 1] });
+  function leaf(len) {
+    const g = new THREE.Group();
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(width, len, 0.05), face);
+    panel.position.y = len / 2; panel.castShadow = true; panel.receiveShadow = true; g.add(panel);
+    for (const dx of [-width / 2 + 0.04, width / 2 - 0.04]) {
+      const s = new THREE.Mesh(new THREE.BoxGeometry(0.04, len, 0.07), rib);
+      s.position.set(dx, len / 2, 0.02); g.add(s);
+    }
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(width, 0.08, 0.06), new THREE.MeshStandardMaterial({ map: warn, roughness: 0.6, metalness: 0.1 }));
+    edge.position.set(0, len - 0.04, 0.02); g.add(edge);
+    return g;
+  }
+  leafA.add(leaf(lenA));
+  const hingeB = new THREE.Group();
+  hingeB.position.y = lenA;
+  leafA.add(hingeB);
+  const leafB = leaf(lenB);
+  hingeB.add(leafB);
+  const steps = new THREE.Group();
+  const tread = new THREE.MeshStandardMaterial({ color: 0xb7c0ce, roughness: 0.55, metalness: 0.25 });
+  const N = 8, drop = GEAR_H, run = 3.7;
+  const sb = [];
+  for (let i = 0; i < N; i++) {
+    const y0 = -drop * ((i + 1) / N);
+    const z0 = 0.15 + run * (i / N), z1 = 0.15 + run * ((i + 1) / N);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(width - 0.06, 0.05, Math.max(0.12, z1 - z0)), tread);
+    box.position.set(cx, y0 + 0.03, Z_TAIL + (z0 + z1) / 2);
+    box.castShadow = true; box.receiveShadow = true;
+    steps.add(box);
+    // solid up from the ground so a walker lands on the tread and a bag cannot fall through the slope
+    // the apron is already the walking surface where the ramp is still at ground level; a flush box reads as a wall
+    if (y0 > -GEAR_H + 0.12) sb.push(aabb(cx - width / 2, -GEAR_H - 0.05, Z_TAIL + z0 + 0.05, cx + width / 2, y0 + 0.01, Z_TAIL + z1 - 0.02, 'rampstep'));
+  }
+  steps.visible = false;
+  plane.add(steps);
+  for (const c of sb) colliders.push(c);
+  const col = aabb(RAMP.x0, 0, Z_TAIL - 0.12, RAMP.x1, RAMP.h, Z_TAIL + 0.06, 'door:ramp');
+  makeDoor('ramp', hinge, col, (k) => {
+    leafA.rotation.x = k * openA;
+    hingeB.rotation.x = (1 - k) * Math.PI;
+  }, 1.35);
+  return steps;
 }
 /** A proper economy seat: padded cushion, contoured backrest, white headrest cover, armrests, legs, tray table. */
 function cabinSeat(b, x, z, cushion, back, kind) {
@@ -617,20 +793,25 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
     uniforms: { top: { value: new THREE.Color(0x1556d8) }, mid: { value: new THREE.Color(0x6fb2ff) }, bottom: { value: new THREE.Color(0xd8efff) }, sunDir: { value: new THREE.Vector3(0.35, 0.55, 0.25).normalize() }, dim: { value: 1.0 } },
     vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bottom; uniform vec3 sunDir; uniform float dim; varying vec3 vP;
-      void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(mid, top, smoothstep(0.0, 0.55, h)) : bottom; c = mix(bottom, c, smoothstep(-0.02, 0.12, h));
-        float s = max(dot(normalize(vP), sunDir), 0.0); c += vec3(1.0,0.92,0.75) * (pow(s, 600.0) * 2.5 + pow(s, 12.0) * 0.25);
+      void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(mid, top, smoothstep(0.0, 0.62, h)) : mix(bottom, mid, smoothstep(-0.35, 0.0, h));
+        float haze = exp(-abs(h) * 6.0); c = mix(c, bottom, haze * 0.55);
+        float s = max(dot(normalize(vP), sunDir), 0.0);
+        c += vec3(1.0, 0.95, 0.82) * (pow(s, 1400.0) * 2.8 + pow(s, 18.0) * 0.45 + pow(s, 4.0) * 0.08);
         gl_FragColor = vec4(c * dim, 1.0); }`,
   }));
   sky.renderOrder = -1;
   scene.add(sky);
-  scene.fog = new THREE.Fog(0xcfe8ff, 900, 16000);
-  const hemi = new THREE.HemisphereLight(0xdff2ff, 0x9aa3b0, 1.25); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff3dd, 2.0);
+  scene.fog = new THREE.Fog(0xcfe8ff, 700, 14000);
+  sky.material.toneMapped = false;
+  const hemi = new THREE.HemisphereLight(0xd7ecff, 0x6d7a55, 1.55); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff3dd, 2.6);
   sun.position.set(350, 550, 250); scene.add(sun); scene.add(sun.target);
+  const fill = new THREE.DirectionalLight(0xc5d4ee, 0.45);
+  fill.position.set(-280, 160, -120); scene.add(fill);
   sun.shadow.camera.left = -38; sun.shadow.camera.right = 38; sun.shadow.camera.top = 38; sun.shadow.camera.bottom = -38;
   sun.shadow.camera.near = 50; sun.shadow.camera.far = 1500; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.04;
 
-  const seaMat = new THREE.MeshLambertMaterial({ color: 0x1769b0, polygonOffset: true, polygonOffsetFactor: 6, polygonOffsetUnits: 6 }); // keeps islands from z-fighting the sea at altitude
+  const seaMat = new THREE.MeshStandardMaterial({ color: 0x1769b0, roughness: 0.18, metalness: 0.62, envMapIntensity: 0.8, polygonOffset: true, polygonOffsetFactor: 6, polygonOffsetUnits: 6 }); // keeps islands from z-fighting the sea at altitude
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(90000, 90000), seaMat); sea.rotation.x = -Math.PI / 2; sea.position.y = -0.6; scene.add(sea);
   const land = new Batch(), deco = new Batch(), lights = new Batch();
   function disc(cx, cz, rx, rz, color, y, seg = 28) { const g = new THREE.CircleGeometry(1, seg); g.rotateX(-Math.PI / 2); land.add(g, color, [cx, y, cz], [0, 0, 0], [rx, 1, rz]); }
@@ -673,6 +854,7 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
     const tx = ap.x + side * 125, tz = ap.z - 20;
     deco.add(new THREE.BoxGeometry(40, 14, 130), 0xe3e8f0, [tx, 7, tz]);
     deco.add(new THREE.BoxGeometry(0.6, 9, 124), 0x2b5d8f, [tx - side * 20.1, 7, tz]);
+    for (let row = 0; row < 3; row++) for (let i = -5; i <= 5; i++) lights.box(0.2, 1.15, 2.4, row === 1 ? 0xffe2a8 : 0xd5ecff, tx - side * 20.55, 4.2 + row * 3.1, tz + i * 10);
     for (let i = -6; i <= 6; i++) deco.add(new THREE.BoxGeometry(0.8, 9.5, 0.6), 0xcfd6e2, [tx - side * 20.4, 7, tz + i * 10]);
     deco.add(new THREE.BoxGeometry(52, 1.2, 140), 0xf7f9fc, [tx - side * 4, 14.6, tz]);
     deco.add(new THREE.CylinderGeometry(36, 36, 140, 16, 1, false, 0, Math.PI), 0xdfe6ef, [tx, 15, tz], [Math.PI / 2, 0, 0], [0.55, 1, 0.12]);
@@ -681,6 +863,9 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
     deco.add(new THREE.CylinderGeometry(7, 5.5, 5, 10), 0x2b5d8f, [ap.x + side * 160, 44, ap.z + 70]);
     deco.add(new THREE.CylinderGeometry(7.8, 7.8, 1, 10), 0xf7f9fc, [ap.x + side * 160, 47, ap.z + 70]);
     deco.add(new THREE.CylinderGeometry(24, 24, 60, 14, 1, false, 0, Math.PI), 0xb8c1cf, [ap.x + side * 140, 0, ap.z - 420], [Math.PI / 2, 0, Math.PI / 2], [1, 1, 0.9]); // hangar
+    for (let i = -2; i <= 2; i++) lights.box(0.25, 1.4, 3.2, 0xfff1c4, ap.x + side * 152, 6.5, ap.z - 420 + i * 10);
+    deco.add(new THREE.BoxGeometry(28, 10, 40), 0xd5dbe4, [ap.x + side * 210, 5, ap.z - 180]); // second shed
+    for (let i = -1; i <= 1; i++) lights.box(0.2, 1.6, 2.2, 0xc9e4ff, ap.x + side * 224, 6, ap.z - 180 + i * 8);
     // ground vehicles
     deco.add(new THREE.BoxGeometry(3, 2.2, 7), 0xe74c3c, [ap.x + side * 60, 1.4, ap.z - 90]); deco.add(new THREE.CylinderGeometry(1.2, 1.2, 6, 10), 0xdfe5ee, [ap.x + side * 60, 2.2, ap.z - 96], [Math.PI / 2, 0, 0]);
     for (let i = 0; i < 3; i++) deco.add(new THREE.BoxGeometry(2, 1.2, 3), 0xf5a623, [ap.x + side * (45 + i * 4), 0.8, ap.z + 40]);
@@ -722,23 +907,67 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
     land.add(new THREE.ConeGeometry(r, h, 6), 0x3e7a3e, [cx, h / 2, cz], [0, R0() * 3, 0]);
     OBSTACLES.push({ x: cx, z: cz, r, h });
   }
-  const landMesh = land.mesh({ shadows: false }); landMesh.receiveShadow = true; scene.add(landMesh);
-  const decoMesh = deco.mesh(); decoMesh.castShadow = false; decoMesh.receiveShadow = true; scene.add(decoMesh);
+  const landMesh = land.mesh({ shadows: false, roughness: 0.94, metalness: 0.02 }); landMesh.receiveShadow = true; scene.add(landMesh);
+  const decoMesh = deco.mesh({ roughness: 0.62, metalness: 0.08 }); decoMesh.castShadow = false; decoMesh.receiveShadow = true; scene.add(decoMesh);
+  paveAirports(scene, quality);
   const lightMesh = lights.mesh({ basic: true, shadows: false }); scene.add(lightMesh);
   // clouds: one merged mesh, flat shaded puffs with greyish undersides
   const cb = new Batch();
-  const nClouds = quality === 'low' ? 45 : 110;
+  const nClouds = quality === 'low' ? 28 : quality === 'high' ? 130 : 72;
   for (let i = 0; i < nClouds; i++) {
-    const cx = (R0() - 0.6) * 26000, cy = 500 + R0() * 1000, cz = 3000 - R0() * 32000;
+    const low = i % 5 < 3;
+    const cx = (R0() - 0.6) * 26000, cy = low ? 140 + R0() * 220 : 850 + R0() * 800, cz = 3000 - R0() * 32000;
     const n = 4 + Math.floor(R0() * 4);
     for (let k = 0; k < n; k++) { const s = 35 + R0() * 55; cb.add(new THREE.IcosahedronGeometry(1, 1), 0xffffff, [cx + (k - n / 2) * 55 + R0() * 20, cy + R0() * 25, cz + (R0() - 0.5) * 60], [R0(), R0(), 0], [s * 1.5, s * 0.75, s * 1.1]); }
   }
   const cg = cb.geometry();
   const N = cg.attributes.normal, Cc = cg.attributes.color;
   for (let i = 0; i < N.count; i++) { const shade = 0.78 + 0.22 * Math.max(0, N.getY(i)); Cc.setXYZ(i, shade, shade, Math.min(1, shade + 0.03)); }
-  const clouds = new THREE.Mesh(cg, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, emissive: 0x555a66 }));
+  const clouds = new THREE.Mesh(cg, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0, emissive: 0x6a7380, emissiveIntensity: 0.35 }));
   scene.add(clouds);
-  return { sky, hemi, sun, clouds, sea };
+  return { sky, hemi, sun, fill, clouds, sea };
+}
+
+/** Textured runway, apron and grass strips. Drawn here, not copied from anywhere. */
+function paveAirports(scene, quality) {
+  const hi = quality !== 'low';
+  const asphalt = canvasTexture(hi ? 512 : 256, hi ? 2048 : 512, (g, w, h) => {
+    g.fillStyle = '#3c414a'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < (hi ? 4000 : 800); i++) { g.fillStyle = `rgba(255,255,255,${0.015 + Math.random() * 0.04})`; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+    g.strokeStyle = '#f4f4f4'; g.lineWidth = Math.max(2, w * 0.012);
+    g.beginPath(); g.moveTo(w * 0.5, 0); g.lineTo(w * 0.5, h); g.stroke();
+    g.strokeStyle = '#f2f2f2'; g.lineWidth = Math.max(3, w * 0.02);
+    g.beginPath(); g.moveTo(w * 0.06, 0); g.lineTo(w * 0.06, h); g.moveTo(w * 0.94, 0); g.lineTo(w * 0.94, h); g.stroke();
+    g.fillStyle = '#f7f7f7';
+    for (let y = h * 0.08; y < h * 0.92; y += h * 0.045) g.fillRect(w * 0.47, y, w * 0.06, h * 0.018);
+    g.fillStyle = '#ffffff';
+    for (let i = 1; i <= 4; i++) { g.fillRect(w * (0.18 + i * 0.02), h * 0.04, w * 0.012, h * 0.035); g.fillRect(w * (0.18 + i * 0.02), h * 0.93, w * 0.012, h * 0.035); }
+  });
+  const apron = canvasTexture(256, 256, (g, w, h) => {
+    g.fillStyle = '#8d949e'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(40,44,50,0.35)'; g.lineWidth = 3;
+    for (let x = 0; x <= w; x += 64) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    for (let y = 0; y <= h; y += 64) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+    g.fillStyle = '#f5c542'; g.fillRect(w * 0.46, 0, w * 0.03, h);
+  }, { repeat: [2, 2] });
+  const grass = canvasTexture(256, 256, (g, w, h) => {
+    g.fillStyle = '#4f8d3e'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1800; i++) { const shade = 40 + Math.random() * 50; g.fillStyle = `rgba(${20 + shade * 0.3},${80 + shade},${30},0.45)`; g.fillRect(Math.random() * w, Math.random() * h, 2, 3); }
+  }, { repeat: [10, 10] });
+  const runMat = new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.92, metalness: 0.04 });
+  const aprMat = new THREE.MeshStandardMaterial({ map: apron, roughness: 0.88, metalness: 0.05 });
+  const grMat = new THREE.MeshStandardMaterial({ map: grass, roughness: 1, metalness: 0 });
+  const lay = (mat, w, d, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.receiveShadow = true; scene.add(m);
+  };
+  const fields = [ORIGIN, ...Object.values(ROUTES)];
+  fields.forEach((ap, i) => {
+    const side = i === 0 ? -1 : 1;
+    lay(runMat, ap.w * 0.98, ap.len - 30, ap.x, 0.06, ap.z - ap.len / 2 + 60);
+    lay(aprMat, 120, 160, ap.x + side * 90, 0.045, ap.z - 10);
+    lay(grMat, 520, ap.len * 0.85, ap.x - side * (ap.w / 2 + 340), 0.02, ap.z - ap.len / 2 + 80);
+  });
 }
 
 export { box, aabb, textTexture };

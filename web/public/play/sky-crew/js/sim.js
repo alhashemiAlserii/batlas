@@ -3,7 +3,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import * as CANNON from '../../vendor/cannon-es.js';
 import { makeCharacter, animateCharacter, pokeRagdoll, randomPassengerLook, bubble } from './characters.js';
-import { HALF_W, Z_TAIL, Z_NOSE, CEIL, GEAR_H, DEST, ORIGIN, ROUTES, MATERIALS, setRoute, REAR_DOOR, CARGO_DOOR, Z_HOLD0, Z_HOLD1 } from './world.js';
+import { HALF_W, Z_TAIL, Z_NOSE, CEIL, GEAR_H, DEST, ORIGIN, ROUTES, MATERIALS, setRoute, REAR_DOOR, CARGO_DOOR, RAMP, Z_HOLD0, Z_HOLD1 } from './world.js';
 import { newFlight, distTo } from './flight.js';
 import { paxTerminalPath, paxTerminalStart } from './terminal.js';
 import { landingGrade, fixDeadline, securityCatches, crewHas, PERK, CLASS_INFO } from './perks.js';
@@ -80,7 +80,7 @@ export class Sim {
     this.score = { paxLost: 0, paxGrabbed: 0, bagsDamaged: 0, checklist: false, belly: false, wrongAirport: false, bagsLoaded: 0, bagsLeft: 0, paxBoarded: 0, paxLeft: 0, served: 0, failed: 0, calmed: 0, fixed: 0, fixFailed: 0, looseBags: 0, landing: null, landedAt: null, crashed: false, doorsOpen: 0 };
     this.results = null;
     this.shiftLanded = false; this.shiftDeparted = false; this.shiftTurb = 0; this.fireOn = false; this.spillOn = false; this.shiftCard = null;
-    this.setDoor('rear', true, true); this.setDoor('cargo', true, true);
+    this.setDoor('rear', true, true); this.setDoor('cargo', true, true); this.setDoor('ramp', true, true);
     this.setGround(true);
     this.ship.masks.visible = false;
     // manifest luggage on the baggage cart by the cargo stairs
@@ -199,14 +199,20 @@ export class Sim {
   setDoor(name, open, instant = false) {
     const d = this.ship.doors[name]; if (!d) return;
     const statics = this.statics.filter((b) => b.userData.collider === d.collider);
-    d.onPassable = (p) => { for (const b of statics) b.collisionResponse = !p; };
+    d.onPassable = (p) => { for (const b of statics) b.collisionResponse = !p; if (name === 'ramp') this.syncRamp(); };
     d.apply(open, instant);
     if (instant) d.onPassable(d.passable);
+  }
+  /** Ramp treads are solid only while the tail ramp is open and the aircraft is on the ground. */
+  syncRamp() {
+    const live = !!this.groundOn && !!this.ship.doors.ramp?.passable;
+    for (const b of this.statics) if (b.userData.tag === 'rampstep') b.collisionResponse = live;
   }
   setGround(on) {
     this.groundOn = on;
     for (const b of this.statics) if (b.userData.tag === 'ground') b.collisionResponse = on;
     this.ship.stairFront.visible = on; this.ship.stairCargo.visible = on;
+    this.syncRamp();
   }
   inCargo(p) { return p.z > Z_HOLD0 + 0.05 && p.z < Z_HOLD1 - 0.05 && Math.abs(p.x) < HALF_W && p.y > -0.2 && p.y < CEIL; }
   inCabin(p) { return p.z > Z_NOSE && p.z < Z_TAIL && Math.abs(p.x) < HALF_W + 0.05 && p.y > -0.4 && p.y < CEIL + 0.2; }
@@ -237,6 +243,7 @@ export class Sim {
   openDoorAt(pos) {
     const dd = this.ship.doors;
     if (dd.rear.passable && pos.z > Z_TAIL - 0.6 && pos.x > REAR_DOOR.x0 + 0.05 && pos.x < REAR_DOOR.x1 - 0.05 && pos.y < REAR_DOOR.h - 0.25) return 'rear';
+    if (dd.ramp?.passable && pos.z > Z_TAIL - 0.75 && pos.x > RAMP.x0 + 0.02 && pos.x < RAMP.x1 - 0.02 && pos.y < RAMP.h - 0.15 && pos.y > -0.5) return 'ramp';
     if (dd.cargo.passable && pos.x > 0 && pos.z > CARGO_DOOR.z0 - 0.1 && pos.z < CARGO_DOOR.z1 + 0.1 && pos.y < 2.0) return 'cargo';
     return null;
   }
@@ -252,7 +259,7 @@ export class Sim {
     if (inside) {
       const lim = HALF_W - 0.3, door = this.openDoorAt(pos);
       if (Math.abs(pos.x) > lim && door !== 'cargo') { pos.x = Math.sign(pos.x) * lim; v.x *= -0.3; }
-      pos.z = Math.max(Z_NOSE + 0.6, door === 'rear' ? pos.z : Math.min(Z_TAIL - 0.5, pos.z));
+      pos.z = Math.max(Z_NOSE + 0.6, door === 'rear' || door === 'ramp' ? pos.z : Math.min(Z_TAIL - 0.5, pos.z));
       if (pos.y > CEIL - 1.0) { pos.y = CEIL - 1.0; v.y = Math.min(0, v.y); }
       if (pos.y <= 0) { pos.y = 0; this.landPax(p, true); }
       return;
@@ -388,7 +395,7 @@ export class Sim {
     return [
       { id: 'bags', text: `Bags in the hold (${c.loaded}/${c.bags})`, done: c.bags > 0 && c.loaded >= c.bags },
       { id: 'pax', text: `Passengers seated (${c.boarded}/${c.pax})`, done: c.pax > 0 && c.boarded >= c.pax },
-      { id: 'doors', text: 'Rear door + cargo door closed', done: !this.ship.doors.rear.open && !this.ship.doors.cargo.open },
+      { id: 'doors', text: 'Rear door + cargo door closed', done: !this.ship.doors.rear.open && !this.ship.doors.cargo.open && !this.ship.doors.ramp.open },
       { id: 'seatbelt', text: 'Seatbelt sign ON', done: this.cabin.seatbelt },
       { id: 'announce', text: 'Welcome announcement', done: this.cabin.announced > 0 },
       { id: 'gear', text: 'Gear down, lights on', done: this.cabin.gearDown && this.cabin.lights },
@@ -515,7 +522,7 @@ export class Sim {
       }
     }
     // an open door in the air is terrifying
-    if (!this.flight.onGround && (this.ship.doors.rear.open || this.ship.doors.cargo.open)) for (const p of this.pax) if (p.state === 'seated') { p.panicT = Math.max(p.panicT, 0.5); p.mood -= dt * 2; }
+    if (!this.flight.onGround && (this.ship.doors.rear.open || this.ship.doors.cargo.open || this.ship.doors.ramp.open)) for (const p of this.pax) if (p.state === 'seated') { p.panicT = Math.max(p.panicT, 0.5); p.mood -= dt * 2; }
     this.applyBumps(dt);
     // passengers
     for (const p of this.pax) this.updatePax(p, dt, flying, turb);
@@ -611,7 +618,7 @@ export class Sim {
     this.updateCounts();
     this.score.checklist = this.checklist().every((c) => c.done);
     this.phase = 'taxi';
-    for (const name of ['rear', 'cargo']) if (this.ship.doors[name].open) { this.setDoor(name, false); this.score.doorsOpen++; }
+    for (const name of ['rear', 'cargo', 'ramp']) if (this.ship.doors[name].open) { this.setDoor(name, false); this.score.doorsOpen++; }
     if (this.score.doorsOpen) this.toast('Departed with a door open, it slammed shut. (-50 each)', 'warn');
     this.setGround(false);
     let left = 0;
@@ -699,7 +706,7 @@ export class Sim {
     const it = [...this.items.values()].map((i) => [i.id, i.type, r(i.mesh.position.x), r(i.mesh.position.y), r(i.mesh.position.z), r(i.mesh.quaternion.x), r(i.mesh.quaternion.y), r(i.mesh.quaternion.z), r(i.mesh.quaternion.w), i.heldBy || '', i.manifest ? 1 : 0]);
     const px = this.pax.map((p) => [p.id, r(p.mesh.position.x), r(p.mesh.position.y), r(p.mesh.position.z), r(p.mesh.rotation.y), p.state, p.request || '', Math.round(p.mood), (p.panicT > 0 ? 1 : 0) | (p.sleep ? 2 : 0) | (p.dance > 0 ? 4 : 0) | (p.frozenT > 0 ? 8 : 0) | (p.cheerT > 0 ? 16 : 0) | (p.birthdayT > 0 ? 32 : 0) | (p.downT > 0.08 ? 64 : 0), p.flashT > 0 ? p.bubbleKind : '', p.carriedBy || '', p.sizeK || 1]);
     return {
-      seed: this.seed, ph: this.phase, doors: { rear: this.ship.doors.rear.open, cargo: this.ship.doors.cargo.open }, ground: this.groundOn,
+      seed: this.seed, ph: this.phase, doors: { rear: this.ship.doors.rear.open, cargo: this.ship.doors.cargo.open, ramp: this.ship.doors.ramp.open }, ground: this.groundOn,
       it, px, ev: this.events.filter((e) => !e.done).map((e) => [e.id, Math.round(e.t), e.deadline || 0]), turb: r(this.turb), weather: this.weather, hour: this.hour, cfg: this.config || null,
       masks: this.ship.masks.visible, ef: this.flight.engineFail, el: this.emergencyLanding, counts: this.counts, res: this.results,
       plane: includePlane ? this.planeState() : null,
@@ -712,8 +719,8 @@ export class Sim {
       },
     };
   }
-  planeState() { const f = this.flight; return { x: f.x, y: f.y, z: f.z, yaw: f.yaw, pitch: f.pitch, bank: f.bank, speed: f.speed, throttle: f.throttle, onGround: f.onGround, vs: f.vs, td: f.touchdown, ao: f.airborneOnce, cr: f.crashed }; }
-  applyPlane(s) { if (!s) return; const f = this.flight; Object.assign(f, { x: s.x, y: s.y, z: s.z, yaw: s.yaw, pitch: s.pitch, bank: s.bank, speed: s.speed, throttle: s.throttle, onGround: s.onGround, vs: s.vs, airborneOnce: s.ao, crashed: s.cr }); if (s.td && (!f.touchdown || f.touchdown.at !== s.td.at)) f.touchdown = s.td; }
+  planeState() { const f = this.flight; return { x: f.x, y: f.y, z: f.z, yaw: f.yaw, pitch: f.pitch, bank: f.bank, speed: f.speed, throttle: f.throttle, onGround: f.onGround, vs: f.vs, td: f.touchdown, ao: f.airborneOnce, cr: f.crashed, sp: f.stickP || 0, sr: f.stickR || 0 }; }
+  applyPlane(s) { if (!s) return; const f = this.flight; Object.assign(f, { x: s.x, y: s.y, z: s.z, yaw: s.yaw, pitch: s.pitch, bank: s.bank, speed: s.speed, throttle: s.throttle, onGround: s.onGround, vs: s.vs, airborneOnce: s.ao, crashed: s.cr, stickP: s.sp || 0, stickR: s.sr || 0 }); if (s.td && (!f.touchdown || f.touchdown.at !== s.td.at)) f.touchdown = s.td; }
 
   /** Non-host: mirror the host's world. */
   applySnapshot(w) {
@@ -729,7 +736,7 @@ export class Sim {
     this.phase = w.ph; this.weather = w.weather; if (w.hour != null) this.hour = w.hour; if (w.cfg) this.config = w.cfg; this.turb = w.turb; this.counts = w.counts; this.results = w.res; this.emergencyLanding = w.el;
     this.flight.engineFail = w.ef;
     this.ship.masks.visible = w.masks;
-    for (const n of ['rear', 'cargo']) if (w.doors[n] != null && this.ship.doors[n].open !== w.doors[n]) this.setDoor(n, w.doors[n]);
+    for (const n of ['rear', 'cargo', 'ramp']) if (w.doors?.[n] != null && this.ship.doors[n] && this.ship.doors[n].open !== w.doors[n]) this.setDoor(n, w.doors[n]);
     if (this.groundOn !== w.ground) this.setGround(w.ground);
     this.activeEvents = w.ev;
     const seen = new Set();
