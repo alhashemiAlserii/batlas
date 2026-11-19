@@ -22,7 +22,10 @@ export function stepFlight(f, inp, dt, turb = 0) {
   if (f.crashed) { f.speed = Math.max(0, f.speed - 20 * dt); return; }
   f.throttle = Math.min(1, Math.max(0, f.throttle + (inp.throttleDelta || 0) * 0.45 * dt));
   const thrust = f.throttle * (f.engineFail ? 4.5 : 9.0);
-  const drag = (0.000625 + (f.gearDown ? 0.00012 : 0)) * f.speed * f.speed + (f.onGround ? 0.25 : 0);
+  // Flaps 0 keeps the original drag term. 1 is takeoff, 2 is landing: more lift, more drag.
+  const flaps = f.flaps === 1 || f.flaps === 2 ? f.flaps : 0;
+  const dragK = 0.000625 + (f.gearDown ? 0.00012 : 0) + (flaps ? flaps * 0.00008 : 0);
+  const drag = dragK * f.speed * f.speed + (f.onGround ? 0.25 : 0);
   const brake = f.onGround && f.throttle < 0.2 && f.speed > 0 ? (f.airborneOnce ? 5 : 3.2) : 0;
   f.speed = Math.max(0, f.speed + (thrust - drag - brake - (f.onGround ? 0 : Math.sin(f.pitch) * 9.8 * 0.6)) * dt);
 
@@ -45,6 +48,7 @@ export function stepFlight(f, inp, dt, turb = 0) {
     f.yaw -= Math.sin(f.bank) * 0.42 * Math.min(1.2, f.speed / 80) * dt;
     f.stall = f.speed < STALL;
     let climb = f.speed * Math.sin(f.pitch) * Math.cos(f.bank);
+    if (flaps) climb += (flaps === 2 ? 5.2 : 3.1) * Math.min(1, f.speed / 58) * Math.max(0, Math.cos(f.pitch));
     if (f.speed < 62) climb -= (62 - f.speed) * 0.3; // not enough lift
     if (f.stall) f.pitch = Math.max(-0.45, f.pitch - 0.25 * dt);
     climb += turb;

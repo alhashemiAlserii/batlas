@@ -16,18 +16,119 @@ export function toast(msg, kind = 'info', ms = 4200) {
   setTimeout(() => t.remove(), ms);
 }
 
-let lastObj = '';
-export function objectives(title, rows) {
-  const key = title + JSON.stringify(rows);
-  if (key === lastObj) return; lastObj = key;
-  $('#obj').replaceChildren(el('h3', {}, title), ...rows.map((r) => el('div', { class: `o ${r.state || ''}` }, r.state === 'done' ? '✔' : r.state === 'warn' ? '⚠' : '•', ' ', r.text)));
+const NS = 'http://www.w3.org/2000/svg';
+function svg(tag, attrs, ...kids) {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  for (const k of kids) if (k) n.append(k);
+  return n;
+}
+function dutyMark(state) {
+  const s = svg('svg', { viewBox: '0 0 16 16', class: 'mark', 'aria-hidden': 'true' });
+  if (state === 'done') {
+    s.append(svg('circle', { cx: '8', cy: '8', r: '7', fill: 'currentColor' }));
+    s.append(svg('path', { d: 'M4.2 8.2 6.7 10.7 11.8 5.4', fill: 'none', stroke: '#15191e', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  } else if (state === 'warn') {
+    s.append(svg('path', { d: 'M8 2.2 14.2 13.4H1.8L8 2.2z', fill: 'currentColor' }));
+    s.append(svg('path', { d: 'M8 6.2v3.4', stroke: '#15191e', 'stroke-width': '1.4', 'stroke-linecap': 'round' }));
+  } else if (state === 'now') {
+    s.append(svg('circle', { cx: '8', cy: '8', r: '6.2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' }));
+    s.append(svg('circle', { cx: '8', cy: '8', r: '2.5', fill: 'currentColor' }));
+  } else {
+    s.append(svg('circle', { cx: '8', cy: '8', r: '6.2', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' }));
+  }
+  return s;
+}
+function dutyBell() {
+  return svg('svg', { viewBox: '0 0 16 16', class: 'mark bell', 'aria-hidden': 'true' },
+    svg('path', { d: 'M8 1.8a.7.7 0 0 1 .7.7v.45a3.9 3.9 0 0 1 3.1 3.8v2.1l.9 1.6H3.3l.9-1.6V6.75A3.9 3.9 0 0 1 7.3 2.95V2.5A.7.7 0 0 1 8 1.8zM6.3 12.2a1.7 1.7 0 0 0 3.4 0', fill: 'currentColor' }));
+}
+let dutyShape = '';
+const dutyPrev = new Map();
+let dutyPrimed = false;
+function dutyKey(m) {
+  const task = (m.tasks || []).map((t) => [t.id, t.label, t.state, t.progress?.cur ?? '', t.progress?.max ?? '']).join(';');
+  const call = (m.calls || []).map((c) => [c.id, c.label, c.hot ? 1 : 0]).join(';');
+  return `${m.phase}|${m.route}|${m.compact ? 1 : 0}|${task}|${call}`;
+}
+function dutyRow(t, fresh) {
+  const hasProgress = t.progress && t.progress.max > 0;
+  const hasTimer = t.timer != null && t.limit;
+  const bar = hasProgress || hasTimer ? el('span', { class: `duty-bar${hasTimer ? ' urg' : ''}` }, el('i', { 'data-bar': t.id })) : null;
+  const count = t.meter || (hasProgress ? `${t.progress.cur}/${t.progress.max}` : '');
+  const row = el('div', { class: `o${t.state ? ` ${t.state}` : ''}${fresh ? ' fresh' : ''}`, 'data-id': t.id },
+    el('span', { class: 'duty-ico' }, dutyMark(t.state === 'note' ? '' : t.state)),
+    el('span', { class: 'duty-main' }, el('span', { class: 'duty-label' }, t.label), bar),
+    el('span', { class: 'duty-num', 'data-meter': t.id }, count));
+  if (bar) {
+    const i = row.querySelector('i');
+    const pct = hasProgress ? (t.progress.cur / t.progress.max) * 100 : (1 - t.timer / t.limit) * 100;
+    i.style.width = `${Math.max(hasTimer ? 4 : 0, Math.min(100, pct))}%`;
+  }
+  return row;
+}
+function dutyCall(c) {
+  const row = el('div', { class: `o call${c.now ? ' now' : ''}${c.hot ? ' hot' : ''}`, 'data-id': c.id },
+    el('span', { class: 'duty-ico' }, dutyBell()),
+    el('span', { class: 'duty-main' }, el('span', { class: 'duty-label' }, c.label), el('span', { class: 'duty-bar urg' }, el('i', { 'data-bar': c.id }))),
+    el('span', { class: 'duty-num', 'data-meter': c.id }, ''));
+  return row;
+}
+/** Polished objectives panel. model: { phase, route, compact, tasks, calls }. */
+export function objectives(model) {
+  const box = $('#obj');
+  if (!box || !model) return;
+  const key = dutyKey(model);
+  if (key !== dutyShape) {
+    dutyShape = key;
+    const tasks = model.tasks || [];
+    const tracked = tasks.filter((t) => t.track);
+    const doneN = tracked.filter((t) => t.state === 'done').length;
+    const fresh = new Set();
+    if (dutyPrimed) for (const t of tasks) if (t.state === 'done' && dutyPrev.has(t.id) && dutyPrev.get(t.id) !== 'done') fresh.add(t.id);
+    for (const t of tasks) dutyPrev.set(t.id, t.state || '');
+    for (const id of [...dutyPrev.keys()]) if (!tasks.some((t) => t.id === id)) dutyPrev.delete(id);
+    dutyPrimed = true;
+    const head = el('button', { type: 'button', class: 'duty-head', 'aria-expanded': model.compact ? 'false' : 'true', 'aria-controls': 'dutyBody' },
+      el('span', { class: 'duty-phase' }, model.phase || 'Flight'),
+      el('span', { class: 'duty-route' }, model.route || ''),
+      tracked.length ? el('span', { class: 'duty-count' }, `${doneN}/${tracked.length}`) : null,
+      el('span', { class: 'duty-chev', 'aria-hidden': 'true' }, model.compact ? '▸' : '▾'));
+    const body = el('div', { class: 'duty-body', id: 'dutyBody' },
+      ...tasks.map((t) => dutyRow(t, fresh.has(t.id))),
+      ...(model.calls || []).map(dutyCall));
+    box.classList.toggle('is-compact', !!model.compact);
+    box.replaceChildren(head, body);
+  }
+  for (const t of model.tasks || []) {
+    if (t.meter == null && t.timer == null) continue;
+    const n = box.querySelector(`[data-meter="${t.id}"]`);
+    if (!n) continue;
+    const text = t.timer != null ? `${t.timer}s` : t.meter;
+    if (n.textContent !== text) n.textContent = text;
+    if (t.timer != null && t.limit) {
+      const i = box.querySelector(`[data-bar="${t.id}"]`);
+      if (i) i.style.width = `${Math.max(4, Math.min(100, (1 - t.timer / t.limit) * 100))}%`;
+    }
+  }
+  for (const c of model.calls || []) {
+    const n = box.querySelector(`[data-meter="${c.id}"]`);
+    if (n) {
+      const text = `${Math.max(0, Math.round(c.left))}s`;
+      if (n.textContent !== text) n.textContent = text;
+    }
+    const i = box.querySelector(`[data-bar="${c.id}"]`);
+    if (i && c.limit) i.style.width = `${Math.max(4, Math.min(100, ((c.limit - c.left) / c.limit) * 100))}%`;
+    const row = box.querySelector(`[data-id="${c.id}"]`);
+    if (row) row.classList.toggle('hot', !!c.hot);
+  }
 }
 let lastPrompt = null;
 export function prompt(text) {
   if (text === lastPrompt) return; lastPrompt = text;
   const p = $('#prompt');
   if (!text) return p.classList.add('hidden');
-  p.replaceChildren(el('kbd', {}, document.body.classList.contains('touch') ? 'E' : 'E'), text);
+  p.replaceChildren(el('kbd', {}, document.body.classList.contains('touch') ? 'Use' : 'E'), text);
   p.classList.remove('hidden');
 }
 let lastHeld = null;
@@ -45,6 +146,8 @@ export function flightHud(f, { kt, ft, distKm, bearing, warnings, dest, gearDown
   $('#fAlt').textContent = Math.round(Math.max(0, (f.y - 2.4) * ft));
   $('#fVs').textContent = f.vs.toFixed(1);
   $('#fThr').style.height = `${Math.round(f.throttle * 100)}%`;
+  const flaps = f.flaps === 1 || f.flaps === 2 ? f.flaps : 0;
+  const fp = $('#fFlaps'); if (fp) { fp.textContent = ['UP', 'TO', 'LD'][flaps]; fp.className = flaps ? 'flaps-on' : ''; }
   $('#fDist').textContent = distKm.toFixed(1);
   $('#fArrow').style.transform = `rotate(${(-bearing * 180) / Math.PI}deg)`;
   $('#fWarn').textContent = warnings.join(' · ');

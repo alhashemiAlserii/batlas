@@ -91,6 +91,9 @@ const myId = () => (net.inRoom ? net.cid : 'solo');
 // ---------------- input ----------------
 const keys = new Set();
 const touch = { mx: 0, my: 0, thr: 0, run: false };
+const pad = { lx: 0, ly: 0, thr: 0, sprint: false, rt: false, space: false };
+let padBtns = [];
+let dutyWant = null; // 'open' | 'shut' | null (auto: compact on phones)
 /** A text field the player can actually see and type in. A hidden one (the room-code box after the menu closed)
  *  must not swallow game keys: on a Mac or a keyboard iPad it kept focus and E/WASD did nothing. */
 const typingIn = (el) => !!el && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) && !el.disabled && el.offsetParent !== null && !el.closest('.hidden');
@@ -99,18 +102,27 @@ function releaseMenuFocus() { const el = document.activeElement; if (el && el !=
 addEventListener('keydown', (e) => {
   if (typingIn(e.target)) return;
   if (e.code === 'F2') { e.preventDefault(); toggleAdmin(); return; }
+  if (e.code === 'Escape') {
+    if (!$('#howto').classList.contains('hidden')) { closeHow(); return; }
+    if (!playing) return;
+    togglePause(); return;
+  }
   if (!playing) return;
-  if (e.code === 'Escape') { togglePause(); return; }
   if (paused) return;
   keys.add(e.code);
+  if (e.repeat) return;
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyQ') throwHeld();
+  if (e.code === 'KeyZ') gentleDrop();
   if (e.code === 'KeyV') me.third = !me.third;
+  if (e.code === 'KeyJ') { e.preventDefault(); toggleDuty(); }
   if (e.code === 'Enter' && net.inRoom) { e.preventDefault(); openChat(); return; }
   if (me.mode === 'walk' && gadgets.tool() && (e.code === 'KeyF' || e.code === 'KeyT')) gadgets.fire(e.code === 'KeyT');
+  const digit = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5 }[e.code];
+  if (digit) quickSlot(digit);
   if (e.code === 'KeyX' && (me.mode === 'pilot' || me.mode === 'copilot')) leaveSeat();
   if (me.mode === 'pilot' || me.mode === 'copilot') {
-    const sys = { KeyL: 'lights', KeyB: 'seatbelt', KeyN: 'announce', KeyG: 'gear' }[e.code];
+    const sys = { KeyL: 'lights', KeyB: 'seatbelt', KeyN: 'announce', KeyG: 'gear', KeyC: 'flaps' }[e.code];
     if (sys) systemAct(sys);
   }
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
@@ -122,7 +134,9 @@ let dragLook = null;
 canvas.addEventListener('mousedown', (e) => {
   if (!playing || paused || isTouch) return;
   if (document.pointerLockElement !== canvas) { try { const p = canvas.requestPointerLock(); if (p?.catch) p.catch(() => {}); } catch { /* unsupported */ } dragLook = { x: e.clientX, y: e.clientY }; return; }
-  if (e.button === 0 || e.button === 2) fireGadget(e.button === 2);
+  if (me.mode === 'pilot' || me.mode === 'copilot') return;
+  if (e.button === 2) { if (heldItem() || heldPax()) throwHeld(); else fireGadget(true); return; }
+  if (e.button === 0) { if (gadgets.tool() && !heldItem() && !heldPax()) fireGadget(false); else interact(); }
 });
 addEventListener('mouseup', () => { dragLook = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -173,8 +187,20 @@ function setupTouch() {
   tap('#tRun', () => { touch.run = !touch.run; $('#tRun').classList.toggle('on', touch.run); });
   tap('#tLeave', leaveSeat);
   tap('#tGear', () => systemAct('gear'));
+  tap('#tFlaps', () => { if (me.mode === 'pilot' || me.mode === 'copilot') systemAct('flaps'); });
+  tap('#tPri', () => { if (heldItem() || heldPax()) throwHeld(); });
   const hold = (id, v) => { const b = $(id); b.addEventListener('pointerdown', () => { touch.thr = v; }); b.addEventListener('pointerup', () => { touch.thr = 0; }); b.addEventListener('pointercancel', () => { touch.thr = 0; }); };
-  hold('#tThrUp', 1); hold('#tThrDn', -1);
+  hold('#tThrDn', -1);
+  const dial = $('#tDial');
+  let dialOn = false;
+  dial.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (!playing || paused || ctl.editing || me.mode !== 'pilot') return;
+    dialOn = true; touch.thr = 1;
+    try { dial.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  });
+  const dialEnd = () => { if (!dialOn) return; dialOn = false; touch.thr = 0; };
+  dial.addEventListener('pointerup', dialEnd); dial.addEventListener('pointercancel', dialEnd);
   // Developer gadget trigger (+ mode switch for the Shrink/Grow Ray); shown only while a tool is equipped
   const fire = UI.el('button', { id: 'tF', type: 'button', class: 'hidden', 'aria-label': 'Use gadget' }, '🔫');
   const alt = UI.el('button', { id: 'tAlt', type: 'button', class: 'hidden', 'aria-label': 'Switch gadget mode' }, '🔁');
@@ -254,11 +280,11 @@ function updatePlayer(dt) {
   if (keys.has('KeyS') || keys.has('ArrowDown')) fz += 1;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) fx -= 1;
   if (keys.has('KeyD') || keys.has('ArrowRight')) fx += 1;
-  fx += touch.mx; fz += touch.my;
+  fx += touch.mx + pad.lx; fz += touch.my + pad.ly;
   const L = Math.hypot(fx, fz); if (L > 1) { fx /= L; fz /= L; }
   if (me.downT > 0.02) { fx = 0; fz = 0; } // flat on the floor until the knockdown timer ends
   if (me.frozen || gadgets.frozenT > 0) { me.vel.set(0, Math.min(0, me.vel.y), 0); fx = 0; fz = 0; }
-  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4) * gadgets.speedMul();
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run || pad.sprint || pad.rt || Math.hypot(touch.mx, touch.my) > 0.95 ? 5.6 : 3.4) * gadgets.speedMul();
   me.sprint = speed > 5 && L > 0.1;
   const s = Math.sin(me.yaw), c = Math.cos(me.yaw);
   const wx = (fx * c + fz * s) * speed, wz = (-fx * s + fz * c) * speed;
@@ -274,7 +300,7 @@ function updatePlayer(dt) {
   }
   me.flying = false;
   if (gadgets.has('jetpack') && keys.has('Space') && !me.frozen) { me.vel.y = Math.min(5.5, me.vel.y + 16 * dt); me.onGround = false; me.flying = true; }
-  else if (keys.has('Space') && me.onGround) { me.vel.y = 4.3 * gadgets.jumpMul(); me.onGround = false; }
+  else if ((keys.has('Space') || pad.space) && me.onGround) { me.vel.y = 4.3 * gadgets.jumpMul(); me.onGround = false; }
   me.vel.y -= (gadgets.has('super_jump') && me.vel.y < 0 ? 7 : 9.8) * dt; // super jump: floaty fall
   if (sim.turb > 0.3 && me.onGround && Math.random() < sim.turb * dt * 2) { me.vel.x += (Math.random() - 0.5) * sim.turb * 2.5; me.vel.z += (Math.random() - 0.5) * sim.turb * 2.5; }
   // Chop knocks the jelly body around. A spill makes the aisle slick.
@@ -464,6 +490,43 @@ function dropHeld(dist, throwSpeed) {
   act({ k: 'drop', id: held.id, p: [p.x, p.y, p.z], v: [v.x, v.y, v.z] });
 }
 function throwHeld() { if (heldPax()) return dropPax(0.8, 7); if (heldItem()) dropHeld(0.7, 6.5); }
+function gentleDrop() {
+  if (me.mode !== 'walk') return;
+  if (heldPax()) return dropPax(0.9, 0);
+  if (heldItem()) return dropHeld(0.9, 0);
+}
+function nearEye(pos, max) { return eyePos().distanceTo(pos) <= max; }
+/** Galley slots on foot. In a seat the same keys run the overhead panel. */
+function quickSlot(n) {
+  if (!playing || paused || ctl.editing) return;
+  if (me.mode === 'pilot' || me.mode === 'copilot') {
+    const w = { 1: 'seatbelt', 2: 'announce', 3: 'gear', 4: 'flaps', 5: 'lights' }[n];
+    if (w) systemAct(w);
+    return;
+  }
+  if (n === 4) {
+    const spot = new THREE.Vector3(1.55, 1.2, 10.3);
+    if (!sim.fireOn) { UI.toast('The extinguisher stays on the galley wall until a flare.'); return; }
+    if (!nearEye(spot, 2.2)) { UI.toast('The extinguisher is in the galley, at the back of the cabin.'); return; }
+    audio.play('fix');
+    if (sim.shiftRemote) duty({ k: 'extinguish' });
+    else if (sim.shift) {
+      const r = sim.shift.act('solo', { k: 'extinguish' }, { pos: [me.pos.x, me.pos.y, me.pos.z] });
+      if (r.ok) syncShiftView(sim.shift.snapshot());
+      UI.toast(r.ok ? 'Galley flare out.' : r.reason, r.ok ? 'info' : 'warn');
+    }
+    return;
+  }
+  const item = { 1: 'water', 2: 'snack', 3: 'blanket' }[n];
+  if (!item) return;
+  const held = heldItem();
+  if (heldPax() || (held && held.type !== item)) { UI.toast('Put down what you are carrying first.'); return; }
+  if (held?.type === item) { UI.toast(`You already have the ${ITEM_DEFS[item].label}.`); return; }
+  const ip = ship.interact.find((i) => i.kind === 'dispense' && i.item === item);
+  if (!ip || !nearEye(ip.pos, 2.1)) { UI.toast(`The ${ITEM_DEFS[item].label} is on the galley counter, at the back of the cabin.`); return; }
+  audio.play('pickup');
+  act({ k: 'disp', item });
+}
 /** Put down / throw the passenger you are carrying. */
 function dropPax(dist, speed) {
   const p = heldPax(); if (!p) return;
@@ -541,7 +604,7 @@ function applyAct(cid, a) {
     case 'reset': if (sim.phase === 'results') restartFlight(); break;
     case 'sys': {
       // cockpit systems: from the pilot/co-pilot seats; announcements also from the galley PA handset
-      if (!['lights', 'seatbelt', 'gear', 'announce'].includes(a.w)) break;
+      if (!['lights', 'seatbelt', 'gear', 'announce', 'flaps'].includes(a.w)) break;
       // seat comes from the player's own state (gameplay only, not a security boundary)
       const seat = cid === myId() ? me.mode : remotes.get(cid)?.mode === 'walk' && a.seat ? a.seat : remotes.get(cid)?.mode || a.seat;
       if (a.w !== 'announce' && seat !== 'pilot' && seat !== 'copilot') break;
@@ -563,7 +626,7 @@ async function takeSeat() {
     net.send({ t: 'pilot', on: true });
   }
   me.mode = 'pilot'; me.yaw = 0; me.pitch = -0.12;
-  UI.toast(sim.phase === 'boarding' ? 'Captain\'s seat. Press R to add throttle when everyone is aboard. Departing closes the doors.' : 'You have the controls.');
+  UI.toast('Helm · W/S pitch · A/D steer · R/F throttle · G gear · C flaps · B belt · N call · E leave', 'keys', 7000);
 }
 function systemAct(w) { act({ k: 'sys', w, seat: me.mode }); }
 const copilotTaken = () => [...remotes.values()].some((r) => r.mode === 'copilot');
@@ -571,7 +634,7 @@ function takeCopilot() {
   if (heldItem() || heldPax()) return UI.toast('Put down what you are carrying first.');
   if (copilotTaken()) return UI.toast('Someone is already in the co-pilot seat.');
   me.mode = 'copilot'; me.yaw = 0; me.pitch = -0.15;
-  UI.toast('First officer seat: L lights · B seatbelt sign · N announcement · G landing gear.');
+  UI.toast('Right seat · L lights · B belt · N call · G gear · C flaps · E leave', 'keys', 7000);
 }
 function leaveSeat() {
   if (me.mode === 'copilot') { me.mode = 'walk'; me.pos.set(0.3, 0, -13.6); me.yaw = Math.PI; return; }
@@ -820,10 +883,11 @@ function updateFlight(dt) {
   const turbV = sim.turb ? sim.turb * (Math.sin(turbPhase * 6.3) * 2.2 + Math.sin(turbPhase * 2.1) * 1.5) - (sim.activeEvents || sim.events.filter((e) => !e.done).map((e) => [e.id])).some((e) => e[0] === 'air_pocket' || e.id === 'air_pocket') * 6 : 0;
   holdAtGate(f);
   if (amPilot()) {
+    const clamp1 = (n) => Math.max(-1, Math.min(1, n));
     const inp = {
-      pitch: (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - touch.my,
-      roll: (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + touch.mx,
-      throttleDelta: (keys.has('KeyR') || keys.has('PageUp') ? 1 : 0) - (keys.has('KeyF') || keys.has('PageDown') ? 1 : 0) + touch.thr,
+      pitch: clamp1((keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - touch.my - pad.ly),
+      roll: clamp1((keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + touch.mx + pad.lx),
+      throttleDelta: clamp1((keys.has('KeyR') || keys.has('PageUp') ? 1 : 0) - (keys.has('KeyF') || keys.has('PageDown') ? 1 : 0) + touch.thr + pad.thr),
     };
     f.tailwind = tailwind(crewInfo().map((c) => c.cls));
     if (sim.phase !== 'results') stepFlight(f, inp, dt, turbV * turbulenceFactor(sim.pilotClass()));
@@ -1119,56 +1183,98 @@ net.addEventListener('shift', (e) => {
 });
 
 // ---------------- objectives / HUD ----------------
-function updateHud() {
-  const c = sim.counts || { loaded: 0, boarded: 0, pax: 0, bags: 0, loose: 0 };
+function dutyIsCompact() {
+  if (dutyWant === 'open') return false;
+  if (dutyWant === 'shut') return true;
+  return document.body.classList.contains('touch') && (innerHeight < 520 || innerWidth < 700);
+}
+function toggleDuty() { dutyWant = dutyIsCompact() ? 'open' : 'shut'; }
+function buildDuty() {
+  const c = sim.counts || { loaded: 0, boarded: 0, pax: 0, bags: 0, loose: 0, lost: 0 };
   const f = sim.flight;
-  const evs = sim.host ? sim.events.filter((e) => !e.done).map((e) => [e.id]) : sim.activeEvents || [];
-  const rows = [];
-  let title = 'BOARDING';
-  for (const t of roleTasks()) rows.push(t);
+  const phase = { boarding: 'Pre-flight', taxi: 'Takeoff', climb: 'Climb', cruise: 'Cruise', approach: 'Approach', landed: 'Landed', results: 'Complete' }[sim.phase] || sim.phase;
+  const tasks = [];
+  const calls = [];
+  const job = roleTasks()[0];
+  if (job) tasks.push({ id: 'job', label: job.text, state: 'note', icon: 'note' });
   if (sim.phase === 'boarding') {
-    title = `PRE-FLIGHT · ${DEST.name.toUpperCase()}`;
-    for (const r of terminalRows()) rows.push(r);
-    const list = sim.checklist(), done = list.filter((x) => x.done).length;
-    for (const x of list) rows.push({ text: x.text, state: x.done ? 'done' : '' });
-    rows.push({ text: done === list.length ? 'Checklist complete (+200)! Pilot: throttle up (R)' : `Checklist ${done}/${list.length} (all done = +200 bonus)`, state: done === list.length ? 'done' : '' });
-  } else if (sim.phase === 'results') { title = 'FLIGHT COMPLETE'; }
-  else {
-    title = { taxi: 'TAKEOFF ROLL', climb: 'CLIMB', cruise: 'CRUISE', approach: 'APPROACH', landed: 'LANDED' }[sim.phase] || sim.phase.toUpperCase();
-    rows.push({ text: `Fly to ${DEST.name} (${DEST.code}): ${(distTo(f, DEST) / 1000).toFixed(1)} km` });
-    if (!sim.cabin.gearDown) rows.push({ text: 'Landing gear is UP (G to lower before landing)', state: sim.phase === 'approach' ? 'warn' : '' });
-    const reqs = sim.pax.filter((p) => p.request).length;
-    rows.push({ text: reqs ? `${reqs} passenger request${reqs > 1 ? 's' : ''} waiting (galley at the back)` : 'Passengers are content', state: reqs ? '' : 'done' });
-    if (c.lost) rows.push({ text: `🪂 ${c.lost} passenger${c.lost > 1 ? 's' : ''} parachuted out (refund + fine)`, state: 'warn' });
-    if (!f.onGround && (ship.doors.rear.open || ship.doors.cargo.open)) rows.push({ text: 'A DOOR IS OPEN IN FLIGHT', state: 'warn' });
-    if (c.loose) rows.push({ text: `${c.loose} loose bag${c.loose > 1 ? 's' : ''} in the cabin`, state: 'warn' });
-    for (const [id] of evs) {
-      if (id === 'engine_warning') rows.push({ text: 'ENGINE WARNING: fix at the panel (cargo hold)', state: 'warn' });
-      if (id === 'cabin_pressure') rows.push({ text: 'PRESSURE WARNING: fix at the panel (cargo hold)', state: 'warn' });
-      if (id === 'turbulence' || id === 'air_pocket') rows.push({ text: 'Turbulence: hold on!', state: 'warn' });
+    terminalRows().forEach((r, i) => tasks.push({ id: `term-${i}`, label: r.text, state: r.state === 'warn' ? 'now' : (r.state || ''), track: true }));
+    const counts = sim.counts || {};
+    for (const x of sim.checklist()) {
+      let label = x.text, progress = null;
+      if (x.id === 'bags' && counts.bags) { label = 'Bags in the hold'; progress = { cur: counts.loaded || 0, max: counts.bags }; }
+      else if (x.id === 'pax' && counts.pax) { label = 'Passengers seated'; progress = { cur: counts.boarded || 0, max: counts.pax }; }
+      tasks.push({ id: x.id, label, state: x.done ? 'done' : '', progress, track: true });
     }
-    if (sim.emergencyLanding) rows.push({ text: `EMERGENCY LANDING: ${Math.max(0, Math.round(sim.emergencyLanding.limit - sim.emergencyLanding.t))} s left`, state: 'warn' });
-    if (sim.weather === 'storm') rows.push({ text: 'Storm conditions', state: 'warn' });
+    const list = sim.checklist();
+    const done = list.filter((x) => x.done).length;
+    tasks.push({ id: 'bonus', label: done === list.length ? 'Checklist complete. Throttle up when you are ready' : 'Finish the checklist, then throttle up', state: done === list.length ? 'done' : '', track: true });
+  } else if (sim.phase !== 'results') {
+    tasks.push({ id: 'fly', label: `Fly to ${DEST.name}`, state: '', meter: `${(distTo(f, DEST) / 1000).toFixed(1)} km`, track: true });
+    if (!sim.cabin.gearDown) tasks.push({ id: 'gear-up', label: 'Lower the landing gear', state: sim.phase === 'approach' ? 'warn' : '' });
+    const reqs = sim.pax.filter((p) => p.request).length;
+    if (!reqs) tasks.push({ id: 'calm', label: 'Passengers are content', state: 'done', track: true });
+    if (c.lost) tasks.push({ id: 'lost', label: `${c.lost} passenger${c.lost > 1 ? 's' : ''} left by parachute`, state: 'warn' });
+    if (!f.onGround && (ship.doors.rear.open || ship.doors.cargo.open)) tasks.push({ id: 'door-open', label: 'A door is open in flight', state: 'warn' });
+    if (c.loose) tasks.push({ id: 'loose', label: `${c.loose} loose bag${c.loose > 1 ? 's' : ''} in the cabin`, state: 'warn' });
+    const evs = sim.host ? sim.events.filter((e) => !e.done).map((e) => [e.id]) : sim.activeEvents || [];
+    for (const [id] of evs) {
+      if (id === 'engine_warning') tasks.push({ id: 'ev-engine', label: 'Engine warning: fix it at the hold panel', state: 'warn' });
+      if (id === 'cabin_pressure') tasks.push({ id: 'ev-pressure', label: 'Pressure warning: fix it at the hold panel', state: 'warn' });
+      if (id === 'turbulence' || id === 'air_pocket') tasks.push({ id: `ev-${id}`, label: 'Turbulence: hold on', state: 'warn' });
+    }
+    if (sim.emergencyLanding) {
+      const left = Math.max(0, Math.round(sim.emergencyLanding.limit - sim.emergencyLanding.t));
+      tasks.push({ id: 'emerg', label: 'EMERGENCY LANDING', state: 'warn', timer: left, limit: sim.emergencyLanding.limit || left || 1 });
+    }
+    if (sim.weather === 'storm') tasks.push({ id: 'storm', label: 'Storm conditions', state: 'warn' });
     const view = sim.shiftView;
-    if (view?.calls?.length) rows.push({ text: `${view.calls.length} cabin call${view.calls.length > 1 ? 's' : ''}: ${view.calls.slice(0, 3).map((c) => CALLS[c.kind]?.label || c.kind).join(', ')}`, state: 'warn' });
+    const limit = view ? (view.tutorial ? 40 : 34 - (Number(view.tier) || 1) * 4) : 30;
+    for (const call of view?.calls || []) {
+      const age = call.age || 0;
+      const left = Math.max(0, limit - age);
+      calls.push({ id: `call-${call.id}`, label: CALLS[call.kind]?.label || call.kind, left, limit, hot: left <= 10 });
+    }
     for (const i of view?.incidents || []) {
       const left = Math.max(0, Math.round((i.timeout || 0) - i.age));
-      const text = i.kind === 'turbulence' ? 'Chop: seatbelt sign on, hold on' : i.kind === 'galley_fire' ? `Galley flare: extinguisher (${left}s)` : i.kind === 'cargo_spill' ? `Cargo spill: secure the hold (${left}s)` : `Medical: bring water (${left}s)`;
-      rows.push({ text, state: 'warn' });
+      const text = i.kind === 'turbulence' ? 'Chop: seatbelt sign on, hold on' : i.kind === 'galley_fire' ? 'Galley flare: extinguisher' : i.kind === 'cargo_spill' ? 'Cargo spill: secure the hold' : 'Medical: bring water';
+      tasks.push({ id: `inc-${i.kind}`, label: text, state: 'warn', timer: left, limit: i.timeout || 1 });
     }
   }
-  UI.objectives(title, rows);
+  if (calls[0]) calls[0].now = true;
+  else if (!tasks.some((t) => t.state === 'now')) {
+    const next = tasks.find((t) => t.track && t.state !== 'done' && t.state !== 'note');
+    if (next && next.state !== 'warn') next.state = 'now';
+  }
+  return { phase, route: DEST.name, compact: dutyIsCompact(), tasks, calls };
+}
+function updateHud() {
+  const f = sim.flight;
+  UI.objectives(buildDuty());
   const t = playing && !paused ? findTarget() : null;
   UI.prompt(t && t.kind !== 'leave' ? t.label : null);
   const h = heldItem();
-  UI.held(heldPax() ? 'Carrying a passenger (furious)  ·  E put down · Q throw' : h ? `Holding: ${ITEM_DEFS[h.type].label}  ·  E place · Q throw` : gadgets.tool() && me.mode === 'walk' ? `${devInv?.items.find((i) => i.id === gadgets.tool())?.icon || '🔮'} ${devInv?.items.find((i) => i.id === gadgets.tool())?.name || gadgets.tool()}  ·  click / F use${gadgets.tool() === 'size_ray' ? ` · right-click / T mode (${gadgets.mode})` : gadgets.tool() === 'gravity_gun' ? (gadgets.holding ? ' again to LAUNCH' : ' to lift') : ''}` : null);
-  if (isTouch) { UI.show('#tF', !!gadgets.tool() && me.mode === 'walk'); UI.show('#tAlt', gadgets.tool() === 'size_ray' && me.mode === 'walk'); UI.show('#tChat', net.inRoom); }
+  UI.held(heldPax() ? 'Carrying a passenger  ·  Z put down · Q throw' : h ? `Holding: ${ITEM_DEFS[h.type].label}  ·  Z put down · Q throw` : gadgets.tool() && me.mode === 'walk' ? `${devInv?.items.find((i) => i.id === gadgets.tool())?.icon || '🔮'} ${devInv?.items.find((i) => i.id === gadgets.tool())?.name || gadgets.tool()}  ·  click / F use${gadgets.tool() === 'size_ray' ? ` · right-click / T mode (${gadgets.mode})` : gadgets.tool() === 'gravity_gun' ? (gadgets.holding ? ' again to LAUNCH' : ' to lift') : ''}` : null);
+  if (isTouch) {
+    const walking = me.mode === 'walk';
+    UI.show('#tE', walking);
+    UI.show('#tJ', walking);
+    UI.show('#tRun', walking);
+    UI.show('#tV', walking);
+    UI.show('#tF', !!gadgets.tool() && walking);
+    UI.show('#tAlt', gadgets.tool() === 'size_ray' && walking);
+    UI.show('#tChat', net.inRoom);
+    UI.show('#tPri', walking && !!(heldItem() || heldPax()));
+    UI.show('#tDial', me.mode === 'pilot');
+  }
+  const ring = document.querySelector('#tDial .dial-fill');
+  if (ring) ring.style.strokeDashoffset = String(163.4 * (1 - (sim.flight.throttle || 0)));
   const pilot = me.mode === 'pilot', cop = me.mode === 'copilot';
   UI.show('#fhud', pilot || cop);
   UI.show('#cross', !pilot && !cop);
   UI.show('#tFlight', pilot && isTouch);
   UI.show('#cpPanel', cop);
-  if (cop) { $('#cpLights').classList.toggle('on', sim.cabin.lights); $('#cpBelt').classList.toggle('on', sim.cabin.seatbelt); $('#cpGear').classList.toggle('on', sim.cabin.gearDown); }
+  if (cop) { $('#cpLights').classList.toggle('on', sim.cabin.lights); $('#cpBelt').classList.toggle('on', sim.cabin.seatbelt); $('#cpGear').classList.toggle('on', sim.cabin.gearDown); $('#cpFlaps')?.classList.toggle('on', (sim.cabin.flaps || 0) > 0); }
   const gp = glidePath(f);
   UI.glide(gp, { name: DEST.name, gearDown: sim.cabin.gearDown, win: glideWindow(sim.pilotClass()), show: (pilot || cop) && !f.onGround && gp.active && gp.along < 10000 && sim.phase !== 'results' });
   if (pilot || cop) {
@@ -1346,6 +1452,13 @@ function openSettings(from) {
 }
 $('#bSettings').addEventListener('click', () => openSettings('menu'));
 $('#bSettingsP').addEventListener('click', () => openSettings('pause'));
+let howFrom = null;
+function openHow(from) { howFrom = from; if (from === 'pause') UI.show('#pause', false); UI.show('#howto', true); }
+function closeHow() { UI.show('#howto', false); if (howFrom === 'pause' && playing) UI.show('#pause', true); howFrom = null; }
+$('#bHow').addEventListener('click', () => openHow('menu'));
+$('#bHowP').addEventListener('click', () => openHow('pause'));
+$('#bHowClose').addEventListener('click', () => closeHow());
+$('#obj').addEventListener('click', (e) => { if (e.target.closest('.duty-head')) toggleDuty(); });
 $('#bSetClose').addEventListener('click', () => UI.show('#settings', false));
 // touch control layout editor (Settings -> Edit controls)
 UI.show('#setCtlRow', isTouch); UI.show('#setCtlNote', isTouch);
@@ -1358,7 +1471,7 @@ $('#setQuality').addEventListener('change', (e) => {
   if (!playing) setTimeout(() => location.reload(), 300);
 });
 for (const [id, k] of [['#volMaster', 'master'], ['#volMusic', 'music'], ['#volSfx', 'sfx']]) $(id).addEventListener('input', (e) => { audio.setVolume(k, Number(e.target.value)); if (k === 'sfx') audio.play('click'); });
-for (const [id, w] of [['#cpLights', 'lights'], ['#cpBelt', 'seatbelt'], ['#cpPA', 'announce'], ['#cpGear', 'gear']]) $(id).addEventListener('click', () => { if (me.mode === 'copilot') systemAct(w); });
+for (const [id, w] of [['#cpLights', 'lights'], ['#cpBelt', 'seatbelt'], ['#cpPA', 'announce'], ['#cpGear', 'gear'], ['#cpFlaps', 'flaps']]) $(id).addEventListener('click', () => { if (me.mode === 'copilot') systemAct(w); });
 $('#cpLeave').addEventListener('click', () => leaveSeat());
 document.addEventListener('click', (e) => { if (e.target.closest?.('button')) audio.play('click'); }, true);
 audio.startMusic();
@@ -1601,6 +1714,66 @@ function updateAudio() {
   if (f.touchdown && f.touchdown.at !== lastTd) { lastTd = f.touchdown.at; audio.play(f.touchdown.crash ? 'crash' : 'thump', { hard: f.touchdown.hard ? 0.6 : 0 }); }
 }
 
+function axisClean(v) {
+  const d = 0.18;
+  if (!Number.isFinite(v) || Math.abs(v) < d) return 0;
+  return Math.sign(v) * Math.min(1, (Math.abs(v) - d) / (1 - d));
+}
+let padAnnounced = false;
+function pollPad(dt) {
+  const list = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = [...(list || [])].find((g) => g && g.connected);
+  if (!gp || !playing || ctl.editing || typingIn(document.activeElement)) {
+    pad.lx = pad.ly = pad.thr = 0; pad.rt = false;
+    if (pad.space) { pad.space = false; keys.delete('Space'); }
+    padBtns = [];
+    return;
+  }
+  if (!padAnnounced) { padAnnounced = true; UI.toast('Gamepad ready · A jump · B use · X throw · Y run · triggers throttle', 'keys', 5200); }
+  const seated = me.mode === 'pilot' || me.mode === 'copilot';
+  const lx = axisClean(gp.axes[0] || 0), ly = axisClean(gp.axes[1] || 0);
+  const rx = axisClean(gp.axes[2] || 0), ry = axisClean(gp.axes[3] || 0);
+  if (paused) {
+    pad.lx = pad.ly = pad.thr = 0; pad.rt = false;
+    if (pad.space) { pad.space = false; keys.delete('Space'); }
+  } else {
+    pad.lx = lx; pad.ly = ly;
+    const rt = gp.buttons[7]?.value || 0, lt = gp.buttons[6]?.value || 0;
+    pad.thr = seated ? (rt > 0.12 ? rt : 0) - (lt > 0.12 ? lt : 0) : 0;
+    pad.rt = !seated && rt > 0.55;
+    const jump = !seated && !!(gp.buttons[0]?.pressed);
+    if (jump && !pad.space) keys.add('Space');
+    if (!jump && pad.space) keys.delete('Space');
+    pad.space = jump;
+    if ($('#admin').classList.contains('hidden') && (Math.abs(rx) > 0 || Math.abs(ry) > 0)) look(rx * dt * 1500, ry * dt * 1100, 0.0022);
+  }
+  const pressed = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
+  for (let i = 0; i < gp.buttons.length; i++) {
+    const now = pressed(i);
+    if (now && !padBtns[i]) padEdge(i, seated);
+    padBtns[i] = now;
+  }
+}
+function padEdge(i, seated) {
+  if (paused && i !== 9) return;
+  if (i === 9) { togglePause(); return; }
+  if (i === 8) { toggleDuty(); return; }
+  if (seated) {
+    const actn = { 0: 'seatbelt', 1: 'leave', 2: 'gear', 3: 'flaps', 4: 'lights', 5: 'announce', 12: 1, 15: 2, 13: 3, 14: 4 }[i];
+    if (actn === 'leave') return leaveSeat();
+    if (typeof actn === 'string') return systemAct(actn);
+    if (typeof actn === 'number') return quickSlot(actn);
+    return;
+  }
+  const walk = { 1: 'use', 2: 'throw', 3: 'run', 4: 'view', 5: 'drop', 10: 'run', 12: 1, 15: 2, 13: 3, 14: 4 }[i];
+  if (walk === 'use') return interact();
+  if (walk === 'throw') return throwHeld();
+  if (walk === 'drop') return gentleDrop();
+  if (walk === 'view') { me.third = !me.third; return; }
+  if (walk === 'run') { pad.sprint = !pad.sprint; return; }
+  if (typeof walk === 'number') quickSlot(walk);
+}
+
 // ---------------- main loop ----------------
 const clock = new THREE.Clock();
 const perfStat = { frames: 0, t0: performance.now(), fps: 0 };
@@ -1613,6 +1786,7 @@ function frame() {
 function frameBody() {
   perfStat.frames++; { const n = performance.now(); if (n - perfStat.t0 > 1000) { perfStat.fps = perfStat.frames * 1000 / (n - perfStat.t0); perfStat.frames = 0; perfStat.t0 = n; } }
   const dt = Math.min(0.05, clock.getDelta());
+  pollPad(dt);
   if (sim.seed !== seenSeed) { seenSeed = sim.seed; if (playing) respawn(); }
   if (playing && !paused) updatePlayer(dt);
   updateFlight(dt);
@@ -1679,6 +1853,11 @@ window.skyCrew = {
   editControls: () => { UI.show('#settings', false); openEditor(); },
   term: () => ({ step: myStep(), local: termLocal.step, lastErr: termLocal.lastErr || null, airport: airportOn(), active: terminalActive(), bag: termLocal.bag, bagDone: terminal.bagDone(), crew: crewStatus(), docs: $('#docs').textContent, solids: solids().filter((c) => c.tag?.startsWith('term:')).map((c) => c.tag), paxInTerminal: sim.pax.filter((p) => p.mesh.position.z > STATIONS.gate.z && p.mesh.position.y < -1).length }),
   useE: () => interact(),
+  quick: (n) => quickSlot(n),
+  flaps: () => sim.cabin.flaps || 0,
+  padEdge: (i) => padEdge(i, me.mode === 'pilot' || me.mode === 'copilot'),
+  dutyCompact: () => dutyIsCompact(),
+  toggleDuty,
   locker: () => ({ outfit: myOutfit, klass: myClass, balance: wallet.balance, owned: [...wallet.owned], ownsAll: wallet.ownsAll, signedIn: wallet.signedIn, remotes: [...remotes].map(([, r]) => ({ username: r.info.username, key: r.key, klass: r.info.klass || null })), crewClasses: sim.classes(), hud: $('#hudWallet').textContent, salary: $('#resSalary').textContent, avatarOutfit: myAvatar.userData.look?.crew || null }),
   openShop: (t) => openShop(t),
   perks: () => ({ pilotClass: sim.pilotClass(), tailwind: sim.flight.tailwind || 1, pending: (sim.pendingEv || []).map((e) => e.id), score: { caught: sim.score.caught || 0, landing: sim.score.landing } }),
