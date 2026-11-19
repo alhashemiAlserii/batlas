@@ -75,7 +75,7 @@ export class Sim {
     this.flight = newFlight();
     this.events = []; this.pendingEv = []; this.cool = {}; this.eventClock = 0;
     this.weather = this.weather || 'clear'; this.hour = this.hour ?? 13; this.turb = 0; this.emergencyLanding = null;
-    this.cabin = { lights: true, seatbelt: false, gearDown: true, announced: 0, lastAnnounce: -99 };
+    this.cabin = { lights: true, seatbelt: false, gearDown: true, flaps: 0, announced: 0, lastAnnounce: -99 };
     this.applyCabin();
     this.score = { paxLost: 0, paxGrabbed: 0, bagsDamaged: 0, checklist: false, belly: false, wrongAirport: false, bagsLoaded: 0, bagsLeft: 0, paxBoarded: 0, paxLeft: 0, served: 0, failed: 0, calmed: 0, fixed: 0, fixFailed: 0, looseBags: 0, landing: null, landedAt: null, crashed: false, doorsOpen: 0 };
     this.results = null;
@@ -358,6 +358,7 @@ export class Sim {
     this.ship.cabin.setLights(this.cabin.lights);
     this.ship.cabin.setSeatbelt(this.cabin.seatbelt);
     this.flight.gearDown = this.cabin.gearDown;
+    this.flight.flaps = this.cabin.flaps === 1 || this.cabin.flaps === 2 ? this.cabin.flaps : 0;
   }
   /** Cockpit / cabin systems (co-pilot, pilot, cabin crew). Returns a short message for the HUD. */
   system(what, by = '') {
@@ -367,6 +368,11 @@ export class Sim {
     if (what === 'gear') {
       if (f.onGround && c.gearDown) { this.toast('The gear stays down on the ground!', 'warn'); return; }
       c.gearDown = !c.gearDown; this.applyCabin(); this.toast(`Landing gear ${c.gearDown ? 'DOWN' : 'UP'}${by}.`, 'info', 'gear');
+    }
+    if (what === 'flaps') {
+      c.flaps = ((c.flaps === 1 || c.flaps === 2 ? c.flaps : 0) + 1) % 3;
+      this.applyCabin();
+      this.toast(`Flaps ${['up', 'takeoff', 'landing'][c.flaps]}${by}.`, 'info', 'click');
     }
     if (what === 'announce') {
       if (this.t - c.lastAnnounce < 15) { this.toast('Give the passengers a moment between announcements.'); return; }

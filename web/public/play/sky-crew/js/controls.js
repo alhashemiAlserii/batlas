@@ -3,10 +3,12 @@
 const KEY = 'skycrew.controls.v1';
 export const CONTROLS = [
   { id: 'joy', label: 'Move stick' },
-  { id: 'tE', label: 'Interact (E)' },
+  { id: 'tE', label: 'Use' },
   { id: 'tJ', label: 'Jump' },
-  { id: 'tRun', label: 'Sprint' },
-  { id: 'tV', label: 'Camera' },
+  { id: 'tRun', label: 'Run' },
+  { id: 'tPri', label: 'Throw' },
+  { id: 'tV', label: 'View' },
+  { id: 'tDial', label: 'Throttle dial' },
   { id: 'tChat', label: 'Chat' },
   { id: 'tF', label: 'Gadget' },
   { id: 'tAlt', label: 'Gadget mode' },

@@ -15,7 +15,7 @@
 
   <div id="hud" class="hidden">
     <div id="cross"></div>
-    <div id="obj" class="panel"></div>
+    <div id="obj" class="panel duty" aria-label="Flight objectives"></div>
     <div id="roominfo" class="panel hidden"></div>
     <div id="docs" class="panel" aria-live="polite"></div>
     <div id="hudWallet" class="panel hidden" title="Your Sky Crew credits"></div>
@@ -33,8 +33,9 @@
       <div class="fcol"><span class="flabel" id="fDest">CRP</span><b id="fDist">0</b><small>km</small></div>
       <div class="fcol"><span class="flabel">DIR</span><b id="fArrow">↑</b></div>
       <div class="fcol"><span class="flabel">GEAR</span><b id="fGear" class="gear-dn">DN</b></div>
+      <div class="fcol"><span class="flabel">FLP</span><b id="fFlaps">UP</b></div>
       <div id="fWarn"></div>
-      <div id="fHelp">W/S pitch · A/D bank &amp; steer · R/F throttle · G gear · B seatbelt · N announce · X leave seat · V camera</div>
+      <div id="fHelp">W/S pitch · A/D steer · R/F throttle · G gear · C flaps · B belt · N call · E leave</div>
     </div>
     <div id="gpath" class="hidden" aria-label="Landing guide">
       <div class="gp-title">LANDING GUIDE <span id="gpDest"></span></div>
@@ -49,8 +50,9 @@
         <button id="cpLights" type="button">💡 Lights <small>L</small></button>
         <button id="cpBelt" type="button">🔔 Seatbelt <small>B</small></button>
         <button id="cpPA" type="button">📢 Announce <small>N</small></button>
-        <button id="cpGear" type="button">⚙ Gear <small>G</small></button>
-        <button id="cpLeave" type="button">Leave seat <small>X</small></button>
+        <button id="cpGear" type="button">Gear <small>G</small></button>
+        <button id="cpFlaps" type="button">Flaps <small>C</small></button>
+        <button id="cpLeave" type="button">Leave seat <small>E</small></button>
       </div>
     </div>
     <div class="topbtns">
@@ -61,18 +63,23 @@
 
   <div id="touch" class="hidden">
     <div id="joy"><div id="joyKnob"></div></div>
+    <button id="tDial" type="button" class="hidden" aria-label="Throttle, hold to increase">
+      <svg viewBox="0 0 64 64" class="dial" aria-hidden="true"><circle cx="32" cy="32" r="26" class="dial-track"></circle><circle cx="32" cy="32" r="26" class="dial-fill"></circle></svg>
+      <span>Thr</span>
+    </button>
     <div id="tbtns">
-      <button id="tE" type="button">E</button>
-      <button id="tJ" type="button">⤒</button>
-      <button id="tV" type="button" aria-label="Camera">👁</button>
-      <button id="tRun" type="button" aria-label="Sprint">🏃</button>
-      <button id="tChat" type="button" class="hidden" aria-label="Chat">💬</button>
+      <button id="tE" type="button">Use</button>
+      <button id="tJ" type="button">Jump</button>
+      <button id="tRun" type="button">Run</button>
+      <button id="tPri" type="button" class="hidden">Throw</button>
+      <button id="tV" type="button">View</button>
+      <button id="tChat" type="button" class="hidden">Chat</button>
     </div>
     <div id="tFlight" class="hidden">
-      <button id="tThrUp" type="button">THR+</button>
-      <button id="tThrDn" type="button">THR−</button>
+      <button id="tThrDn" type="button">Thr−</button>
+      <button id="tFlaps" type="button">Flaps</button>
       <button id="tGear" type="button">Gear</button>
-      <button id="tLeave" type="button">Leave seat</button>
+      <button id="tLeave" type="button">Leave</button>
     </div>
   </div>
 
@@ -92,23 +99,13 @@
       <div class="actions">
         <button id="bSolo" class="primary" type="button">Play solo</button>
         <button id="bTrain" type="button">Training hop</button>
+        <button id="bHow" type="button">How to play</button>
         <button id="bCreate" type="button" disabled>Create co-op room</button>
         <button id="bShop" type="button">🛍 Shop &amp; locker</button>
-        <button id="bSettings" type="button">⚙ Settings</button>
+        <button id="bSettings" type="button">Options</button>
         <div class="joinrow"><input id="joinCode" maxlength="5" placeholder="ROOM CODE" autocomplete="off" autocapitalize="characters" aria-label="Room code"><button id="bJoin" type="button" disabled>Join</button></div>
       </div>
       <div id="menuErr" class="err hidden"></div>
-      <details class="controls"><summary>Controls</summary>
-        <ul>
-          <li><b>WASD</b> move · <b>Mouse</b> look · <b>Shift</b> sprint · <b>Space</b> jump</li>
-          <li><b>E</b> interact: bags, doors, galley (water, snacks, blankets), serve a call, extinguisher, pilot seat</li>
-          <li><b>E</b> on a passenger (empty hands) picks them up, <b>Q</b> throws them. Out of an open door in flight = parachute + refund + fine!</li>
-          <li><b>Q</b> throw what you hold · <b>V</b> first / third person · <b>Esc</b> pause · <b>F2</b> staff tools</li>
-          <li>Pilot: <b>R/F</b> throttle · <b>W/S</b> pitch · <b>A/D</b> bank &amp; steer · <b>G</b> gear · <b>X</b> leave the seat</li>
-          <li>Co-pilot seat: <b>L</b> cabin lights · <b>B</b> seatbelt sign · <b>N</b> announcement · <b>G</b> landing gear</li>
-          <li>Touch: left stick to move, drag right side to look, buttons for interact / jump / camera</li>
-        </ul>
-      </details>
       <a class="back" href="/games/sky-crew">← Back to Batlas</a>
     </div>
   </div>
@@ -120,8 +117,9 @@
       <div class="actions">
         <button id="bResume" class="primary" type="button">Resume</button>
         <button id="bCam" type="button">Toggle third person</button>
+        <button id="bHowP" type="button">How to play</button>
         <button id="bShopP" type="button">👕 Change outfit</button>
-        <button id="bSettingsP" type="button">⚙ Settings</button>
+        <button id="bSettingsP" type="button">Options</button>
         <button id="bRestart" type="button">Restart flight</button>
         <button id="bQuit" type="button">Quit to menu</button>
       </div>
@@ -164,9 +162,56 @@
     </div>
   </div>
 
+  <div id="howto" class="overlay hidden">
+    <div class="card howto">
+      <p class="howto-kicker">The hold is open, the cabin is filling, and someone will want a drink before you level off.</p>
+      <h2>How to play</h2>
+      <h3>Your first steps</h3>
+      <p>Stow the bags in the forward hold, board the passengers and see them into their seats, then close the rear door and the cargo door. Run the checklist: seatbelt sign, a short welcome, gear down and lights on. Take the captain's seat and lift off. In the air, answer the calls, deal with a flare or a spill if one starts, then line up, lower the gear and land.</p>
+      <section class="how-group"><h3>Move</h3>
+        <div class="how-row"><span class="how-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk the cabin, the hold and the apron</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Shift</kbd></span><span>Sprint</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Space</kbd></span><span>Jump</span></div>
+      </section>
+      <section class="how-group"><h3>Mouse</h3>
+        <div class="how-row"><span class="how-keys"><kbd>Mouse</kbd></span><span>Look</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Left click</kbd></span><span>Use what you are looking at, on foot</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Right click</kbd></span><span>Throw what you are holding</span></div>
+      </section>
+      <section class="how-group"><h3>Hands</h3>
+        <div class="how-row"><span class="how-keys"><kbd>E</kbd></span><span>Talk, pick up, serve, use a door, take a seat or leave it</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>At the galley: water, meal, blanket</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>4</kbd></span><span>Extinguisher, when the galley flares and you are there</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Z</kbd></span><span>Put down what you are carrying</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Q</kbd></span><span>Throw it. An open door in flight is a parachute, a refund and a fine</span></div>
+      </section>
+      <section class="how-group"><h3>In a seat</h3>
+        <div class="how-row"><span class="how-keys"><kbd>W</kbd><kbd>S</kbd></span><span>Pitch</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Steer and bank</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>R</kbd><kbd>F</kbd></span><span>Throttle up and down</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>G</kbd></span><span>Landing gear</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>C</kbd></span><span>Flaps: up, takeoff, landing</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>B</kbd></span><span>Seatbelt sign</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>N</kbd></span><span>Cabin announcement</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>L</kbd></span><span>Cabin lights</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>1</kbd><span>–</span><kbd>5</kbd></span><span>Belt, announcement, gear, flaps, lights</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>E</kbd><kbd>X</kbd></span><span>Leave the seat</span></div>
+      </section>
+      <section class="how-group"><h3>Duty card</h3>
+        <div class="how-row"><span class="how-keys"><kbd>J</kbd></span><span>Open or close the duty card</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>V</kbd></span><span>First person or third person</span></div>
+        <div class="how-row"><span class="how-keys"><kbd>Esc</kbd></span><span>Pause</span></div>
+      </section>
+      <p class="how-note">Touch: a move stick, plus round buttons labelled Jump, Use, Run and Throw. Throw shows up while you are carrying something. In the captain's seat, hold the throttle dial and it fills as power comes on. Gear, flaps and leave sit beside it. Open Options to drag, resize or reset each control. The layout is saved on this device, separately for landscape and portrait.</p>
+      <p class="how-note">Gamepad, on foot: left stick walks, right stick looks. A jump, B use, X throw, Y run. The D-pad matches the galley slots. Start pauses. Back opens the duty card.</p>
+      <p class="how-note">Gamepad, in a seat: the captain's left stick pitches and steers, and the triggers add and cut throttle. A belt, B leave, X gear, Y flaps. Bumpers are lights and the announcement.</p>
+      <div class="actions"><button id="bHowClose" class="primary" type="button">Back</button></div>
+    </div>
+  </div>
+
   <div id="settings" class="overlay hidden">
     <div class="card small">
-      <h2>Settings</h2>
+      <h2>Options</h2>
       <label class="setrow">Graphics quality
         <select id="setQuality"><option value="auto">Auto</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
       <div id="setQualityNote" class="muted small"></div>
