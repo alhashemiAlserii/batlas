@@ -12,6 +12,7 @@
  *     Stage 1 stubs return ok without touching a live game.
  */
 import { parseStoredOutfit, validOutfit } from '../game-server/outfits.js';
+import { unlocksFromHistory } from '../game-server/shift.js';
 import { CATALOG, SALARY_CAP, MAX_PAID_FLIGHTS_PER_HOUR, outfitAllowed } from '../game-server/shop.js';
 import { applyLedger, balanceOf, buyItem, grant, ownedItems, ownsFn, recentLedger } from '../lib/wallet.js';
 import { Router } from 'express';
@@ -246,7 +247,15 @@ export function gameRoutes(ctx: Ctx) {
     const landings: any = await q().whereIn('landing', ['butter', 'good', 'hard']).count({ n: '*' }).first();
     const butter: any = await q().where({ landing: 'butter' }).count({ n: '*' }).first();
     const crashes: any = await q().where({ crashed: true }).count({ n: '*' }).first();
-    return { flights: Number(agg?.n ?? 0), bestScore: agg?.best == null ? null : Number(agg.best), landings: Number(landings?.n ?? 0), butterLandings: Number(butter?.n ?? 0), crashes: Number(crashes?.n ?? 0) };
+    const rows = await q().select('route', 'stars', 'crashed');
+    return {
+      flights: Number(agg?.n ?? 0),
+      bestScore: agg?.best == null ? null : Number(agg.best),
+      landings: Number(landings?.n ?? 0),
+      butterLandings: Number(butter?.n ?? 0),
+      crashes: Number(crashes?.n ?? 0),
+      ladder: unlocksFromHistory(rows),
+    };
   }
 
   r.get('/games/sky-crew/leaderboard', async (_req, res) => {

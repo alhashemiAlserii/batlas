@@ -552,7 +552,7 @@ export function nameTag(name, role, badge = '') {
   return s;
 }
 
-const ICONS = { water: '💧', snack: '🍪', blanket: '🛏️', complaint: '😤', panic: '😱', happy: '😊', sleep: '💤', party: '🎉', vip: '⭐', frozen: '🧊' };
+const ICONS = { water: '💧', snack: '🍪', blanket: '🛏️', complaint: '😤', panic: '😱', happy: '😊', sleep: '💤', party: '🎉', vip: '⭐', frozen: '🧊', drink: '🥤', meal: '🍱', lav: '🚻', sick: '🤢', cry: '😭', unruly: '😡', charm: '🔑' };
 const iconCache = {};
 export function bubble(kind) {
   if (!iconCache[kind]) {

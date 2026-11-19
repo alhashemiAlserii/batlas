@@ -66,7 +66,20 @@ export function results(res) {
   $('#resStars').textContent = '★'.repeat(res.stars) + '☆'.repeat(5 - res.stars);
   $('#resTable').replaceChildren(...res.lines.map(([l, v]) => el('tr', {}, el('td', {}, l), el('td', { class: v < 0 ? 'neg' : 'pos' }, money(v, true)))));
   $('#resTotal').textContent = money(res.total);
+  const shift = $('#resShift'); if (shift) shift.textContent = '';
   show('#results', true);
+}
+
+/** Service-shift score from the shared rules (server card in co-op, local card solo). */
+export function shiftCard(card) {
+  const eln = $('#resShift');
+  if (!eln) return;
+  if (!card) { eln.textContent = ''; return; }
+  const stars = '★'.repeat(card.stars || 0) + '☆'.repeat(5 - (card.stars || 0));
+  const bits = [`Service ${stars} · ${card.points} pts`, `${card.resolved || 0} calls answered`];
+  if (card.missed) bits.push(`${card.missed} missed`);
+  if (card.incidentsHandled) bits.push(`${card.incidentsHandled} incidents handled`);
+  eln.textContent = bits.join(' · ');
 }
 
 export function rankBadge(role) {

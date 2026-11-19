@@ -19,6 +19,7 @@ describe('Sky Crew flights, stats and leaderboard', () => {
     const ok = await u.agent.post('/api/game/sky-crew/flights').set('x-csrf-token', u.csrf).send(flight);
     expect(ok.status).toBe(201);
     expect(ok.body.stats).toMatchObject({ flights: 1, bestScore: 1234, landings: 1, butterLandings: 1, crashes: 0 });
+    expect(ok.body.stats.ladder.open).toEqual(['DNB', 'CRP', 'PNR']);
     expect((await u.agent.post('/api/game/sky-crew/flights').set('x-csrf-token', u.csrf).send(flight)).status).toBe(429);
   });
 
@@ -33,6 +34,7 @@ describe('Sky Crew flights, stats and leaderboard', () => {
     expect(lb[0]).toMatchObject({ rank: 1, bestScore: 2000, flights: 1 });
     const st = (await request(env.app).get('/api/users/bob/game-stats')).body.skyCrew;
     expect(st).toMatchObject({ flights: 1, bestScore: 500, landings: 0, crashes: 1 });
+    expect(st.ladder.open).toEqual(['DNB']);
     expect((await request(env.app).get('/api/users/cheater/game-stats')).status).toBe(404);
     expect((await request(env.app).get('/api/users/nobody/game-stats')).status).toBe(404);
   });

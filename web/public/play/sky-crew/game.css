@@ -58,6 +58,8 @@ h2 { margin: 0 0 10px; }
 @keyframes tin { from { opacity: 0; transform: translateY(-6px); } }
 #prompt { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); background: rgba(0,0,0,.6); border-radius: 10px; padding: 6px 12px; font-weight: 600; }
 #prompt kbd { background: #fff; color: #000; border-radius: 4px; padding: 0 6px; margin-right: 6px; font-weight: 800; }
+#coach { position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%); width: min(520px, 92vw); background: rgba(17,19,22,.92); border: 1px solid rgba(228,195,106,.8); border-radius: 12px; padding: 10px 14px; text-align: center; font-weight: 650; pointer-events: none; }
+#resShift { margin-top: 8px; }
 #held { position: absolute; right: 14px; bottom: 14px; background: rgba(17,19,22,.88); border: 1px solid rgba(238,240,242,.2); border-radius: 8px; padding: 6px 12px; }
 #fhud { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; justify-content: center; background: rgba(17,19,22,.9); border: 1px solid rgba(238,240,242,.28); border-radius: 10px; padding: 10px 16px; font-variant-numeric: tabular-nums; max-width: 96vw; }
 .fcol { display: grid; justify-items: center; min-width: 52px; }
@@ -80,6 +82,7 @@ h2 { margin: 0 0 10px; }
 body.touch #fhud { bottom: auto; top: 54px; gap: 8px; padding: 6px 10px; }
 body.touch #fHelp { display: none; }
 body.touch #obj { max-width: 220px; font-size: 12px; }
+body.touch #coach { bottom: auto; top: 42%; width: min(420px, 70vw); font-size: 14px; padding: 8px 10px; }
 
 .stars { font-size: 34px; color: var(--gold); letter-spacing: .1em; margin: 6px 0 10px; }
 #resTable { width: 100%; border-collapse: collapse; font-size: 14px; }
