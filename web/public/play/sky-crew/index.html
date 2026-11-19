@@ -23,6 +23,7 @@
     <div id="chatLog" aria-live="polite"></div>
     <div id="chatBox" class="hidden"><input id="chatInput" type="text" maxlength="200" autocomplete="off" placeholder="Say something to the crew… (Enter to send, Esc to cancel)"></div>
     <div id="prompt" class="hidden"></div>
+    <div id="coach" class="hidden"></div>
     <div id="held" class="hidden"></div>
     <div id="fhud" class="hidden">
       <div class="fcol"><span class="flabel">SPD</span><b id="fSpd">0</b><small>kt</small></div>
@@ -79,7 +80,7 @@
     <div class="card">
       <img class="menu-cover" src="/img/sky-crew-cover.jpg" alt="Sky Crew">
       <div class="brand"><img src="/img/batlas-mark.png" alt="" width="56" height="56"><div><div class="studio">BATLAS</div><h1>Sky Crew</h1></div></div>
-      <p class="tag">Early build v0.4 · Load the bags, board the passengers, keep everyone calm and land at your destination.</p>
+      <p class="tag">Batlas Air · Load the bags, board the cabin, work the calls, survive the chop and land in one piece.</p>
       <label class="routepick">Destination
         <select id="routeSel" aria-label="Destination"></select>
       </label>
@@ -90,6 +91,7 @@
       <div id="meLine" class="meline">Checking sign-in…</div>
       <div class="actions">
         <button id="bSolo" class="primary" type="button">Play solo</button>
+        <button id="bTrain" type="button">Training hop</button>
         <button id="bCreate" type="button" disabled>Create co-op room</button>
         <button id="bShop" type="button">🛍 Shop &amp; locker</button>
         <button id="bSettings" type="button">⚙ Settings</button>
@@ -99,7 +101,7 @@
       <details class="controls"><summary>Controls</summary>
         <ul>
           <li><b>WASD</b> move · <b>Mouse</b> look · <b>Shift</b> sprint · <b>Space</b> jump</li>
-          <li><b>E</b> interact: pick up / place bags, use doors, galley, panel, serve passengers, take the pilot seat</li>
+          <li><b>E</b> interact: bags, doors, galley (water, snacks, blankets), serve a call, extinguisher, pilot seat</li>
           <li><b>E</b> on a passenger (empty hands) picks them up, <b>Q</b> throws them. Out of an open door in flight = parachute + refund + fine!</li>
           <li><b>Q</b> throw what you hold · <b>V</b> first / third person · <b>Esc</b> pause · <b>F2</b> staff tools</li>
           <li>Pilot: <b>R/F</b> throttle · <b>W/S</b> pitch · <b>A/D</b> bank &amp; steer · <b>G</b> gear · <b>X</b> leave the seat</li>
@@ -133,6 +135,7 @@
       <div id="resStars" class="stars"></div>
       <table id="resTable"></table>
       <div class="total">Payout <b id="resTotal">₵0</b></div>
+      <div id="resShift" class="muted small"></div>
       <div id="resSalary" class="salary muted small">Waiting for the payslip…</div>
       <div class="actions">
         <button id="bAgain" class="primary" type="button">Fly again</button>
@@ -145,12 +148,12 @@
   <div id="lobby" class="overlay hidden">
     <div class="card">
       <h2>Crew room <span id="lobCode" class="code"></span></h2>
-      <p class="muted small">Share the code with friends (up to 8). Pick a crew job; everyone can still help with everything.</p>
+      <p class="muted small">Share the code (up to 8). Jobs score more when the right person does them. Anyone can still help, and one player can cover every job.</p>
       <div class="crewpick">
-        <button type="button" data-crew="pilot">✈ Pilot<small>Fly the plane</small></button>
-        <button type="button" data-crew="copilot">🧭 Co-pilot<small>Lights, seatbelt, gear, announcements</small></button>
-        <button type="button" data-crew="cabin">☕ Cabin crew<small>Board, serve and calm passengers</small></button>
-        <button type="button" data-crew="cargo">🧳 Cargo<small>Load bags, doors, repairs</small></button>
+        <button type="button" data-crew="pilot">✈ Pilot<small>Fly, brace the cabin, land</small></button>
+        <button type="button" data-crew="copilot">🧭 Co-pilot<small>Seatbelt, gear, calls</small></button>
+        <button type="button" data-crew="cabin">☕ Cabin<small>Meals, lav, kids, airsick</small></button>
+        <button type="button" data-crew="cargo">🧳 Cargo<small>Bags, spills, galley flare</small></button>
       </div>
       <label class="routepick">Destination <select id="lobRoute" aria-label="Destination"></select></label>
       <label class="routepick">Contract <select id="lobContract" aria-label="Contract"><option value="standard">Standard</option><option value="premium">Premium (×1.6 pay, ×2 fines)</option></select></label>

@@ -14,6 +14,7 @@ export const ITEM_DEFS = {
   water: { size: [0.12, 0.28, 0.12], mass: 1, colors: [0x4cc3ff], label: 'water', service: true },
   snack: { size: [0.3, 0.12, 0.22], mass: 1, colors: [0xf5a623], label: 'snack box', service: true },
   blanket: { size: [0.4, 0.15, 0.3], mass: 1.5, colors: [0x7c5cff], label: 'blanket', service: true },
+  charm: { size: [0.16, 0.1, 0.16], mass: 0.4, colors: [0xffd166], label: 'keepsake', service: true },
   beach_ball: { size: [0.6, 0.6, 0.6], mass: 0.6, colors: [0xff7675], label: 'beach ball', ball: true },
   giant_duck: { size: [0.8, 0.8, 0.9], mass: 4, colors: [0xffd32a], label: 'giant rubber duck' },
   traffic_cone: { size: [0.4, 0.7, 0.4], mass: 3, colors: [0xff6b00], label: 'traffic cone' },
@@ -78,6 +79,7 @@ export class Sim {
     this.applyCabin();
     this.score = { paxLost: 0, paxGrabbed: 0, bagsDamaged: 0, checklist: false, belly: false, wrongAirport: false, bagsLoaded: 0, bagsLeft: 0, paxBoarded: 0, paxLeft: 0, served: 0, failed: 0, calmed: 0, fixed: 0, fixFailed: 0, looseBags: 0, landing: null, landedAt: null, crashed: false, doorsOpen: 0 };
     this.results = null;
+    this.shiftLanded = false; this.shiftDeparted = false; this.shiftTurb = 0; this.fireOn = false; this.spillOn = false; this.shiftCard = null;
     this.setDoor('rear', true, true); this.setDoor('cargo', true, true);
     this.setGround(true);
     this.ship.masks.visible = false;
@@ -323,9 +325,22 @@ export class Sim {
   serve(paxId, item, cls = null) {
     const p = this.pax.find((x) => x.id === paxId);
     if (!p || p.state !== 'seated' || !p.request) return false;
-    if (p.request === 'complaint') { if (item) return false; p.request = null; p.mood = Math.min(100, p.mood + 15); this.score.calmed++; this.flash(p, 'happy'); this.toast('You calmed the passenger down.'); return true; }
-    if (p.request !== item) return false;
-    p.request = null; p.mood = Math.min(100, p.mood + 22 + (cls === 'cabin_pro' ? PERK.proServeMood : 0)); this.score.served++;
+    if (this.shift && p.reqId) {
+      const res = this.shift.act('solo', { k: 'resolve', id: p.reqId, item: item || null }, {});
+      if (!res.ok) { this.toast(res.reason || 'Not quite.'); return false; }
+    }
+    const talk = p.reqKind ? !p.reqItem : p.request === 'complaint';
+    if (talk) {
+      if (item) return false;
+      const was = p.reqKind;
+      p.request = null; p.reqKind = null; p.reqId = null; p.reqItem = null;
+      p.mood = Math.min(100, p.mood + 15); this.score.calmed++; this.flash(p, 'happy');
+      this.toast(was === 'cry' ? 'The child settles down.' : was === 'lav' ? 'You pointed them to the lav.' : 'You calmed the passenger down.');
+      return true;
+    }
+    const need = p.reqItem || p.request;
+    if (need !== item) return false;
+    p.request = null; p.reqKind = null; p.reqId = null; p.reqItem = null; p.mood = Math.min(100, p.mood + 22 + (cls === 'cabin_pro' ? PERK.proServeMood : 0)); this.score.served++;
     if (item === 'snack') p.fed = true; if (item === 'water') p.drank = true;
     if (item === 'blanket' && PERSONALITIES[p.kind].sleeps) p.sleep = true;
     this.flash(p, p.sleep ? 'sleep' : 'happy');
@@ -434,6 +449,7 @@ export class Sim {
       const td = f.touchdown;
       this.score.landing = landingGrade(td.vs, td.crash, this.pilotClass ? this.pilotClass() : null); // Ace Pilot: softer grading
       this.score.landedAt = td.rwy; this.score.crashed = td.crash; this.score.vs = td.vs; this.score.belly = !!td.belly; this.score.wrongAirport = !!td.rwy && td.rwy !== DEST.code && td.rwy !== ORIGIN.code;
+      if (this.shift && !this.shiftLanded) { this.shiftLanded = true; this.shift.act('solo', { k: 'land', grade: this.score.landing || 'none', crashed: !!td.crash, arrived: td.rwy === DEST.code && !td.crash }, { role: 'pilot' }); }
       this.phase = 'landed';
       if (td.crash) { this.toast(td.terrain ? 'CRASH! That hill came out of nowhere.' : td.belly ? 'BELLY LANDING! Somebody forgot the gear...' : 'CRASH! The plane is... not fine.', 'warn', 'crash'); this.finish(); }
       else this.toast(td.rwy === DEST.code ? `Touchdown at ${DEST.name}! (${td.vs.toFixed(1)} m/s)` : td.rwy === ORIGIN.code ? 'Back at Harbor Field. Passengers are confused.' : td.rwy ? `Landed at ${ROUTES[td.rwy]?.name}. Wrong airport, but safe!` : 'Landed... somewhere.', 'info');
@@ -448,7 +464,8 @@ export class Sim {
     if (flying && this.eventClock > this.cfg.checkEverySeconds) {
       this.eventClock = 0;
       if (this.rng() < this.cfg.chancePerCheck) {
-        const ok = this.cfg.events.filter((e) => e.phases.includes(this.phase) && !this.cool[e.id] && !this.events.some((x) => x.id === e.id && !x.done));
+        const directed = !!(this.shift || this.shiftRemote);
+        const ok = this.cfg.events.filter((e) => !(directed && (e.id === 'turbulence' || e.id === 'air_pocket')) && e.phases.includes(this.phase) && !this.cool[e.id] && !this.events.some((x) => x.id === e.id && !x.done));
         const total = ok.reduce((a, e) => a + e.weight, 0);
         let pick = this.rng() * total;
         for (const e of ok) { pick -= e.weight; if (pick <= 0) { this.warnOrTrigger(e.id); break; } }
@@ -472,6 +489,7 @@ export class Sim {
       }
     }
     this.events = this.events.filter((e) => !e.done || e.t < 1);
+    if (this.shiftTurb) turb = Math.max(turb, this.shiftTurb);
     this.turb = turb;
     // shake loose items
     if (turb > 0) {
@@ -557,12 +575,14 @@ export class Sim {
       else { pos.addScaledVector(d.normalize(), step); p.mesh.rotation.y = Math.atan2(-d.x, -d.z); }
     }
     if (p.state === 'seated' && flying) {
-      if (!p.request && !p.sleep) { p.nextReq -= dt; if (p.nextReq <= 0) { p.request = k.wants[Math.floor(this.rng() * k.wants.length)]; p.reqT = 0; } }
+      const directed = !!(this.shift || this.shiftRemote);
+      if (!directed && !p.request && !p.sleep) { p.nextReq -= dt; if (p.nextReq <= 0) { p.request = k.wants[Math.floor(this.rng() * k.wants.length)]; p.reqT = 0; } }
       if (p.request) {
         p.reqT += dt;
         if (p.reqT > 12) p.mood -= k.decay * dt * 1.5 * ({ easy: 0.6, normal: 1, hard: 1.5 }[this.config?.difficulty] || 1);
-        if (p.reqT > 45) { p.request = null; p.mood -= 20; this.score.failed++; this.flash(p, 'complaint', 3); p.nextReq = 20 + this.rng() * 30; this.toast('A passenger gave up waiting. That\'s a bad review.', 'info'); }
+        if (!directed && p.reqT > 45) { p.request = null; p.mood -= 20; this.score.failed++; this.flash(p, 'complaint', 3); p.nextReq = 20 + this.rng() * 30; this.toast('A passenger gave up waiting. That\'s a bad review.', 'info'); }
       }
+      if (p.reqKind === 'unruly') p.panicT = Math.max(p.panicT, 0.4);
       if (turb > 0.5) { p.panicT = 1; p.mood -= turb * k.panicMult * dt * (this.cabin.seatbelt ? 0.6 : 1.6); if (p.sleep && turb > 1) p.sleep = false; }
     }
     if (p.panicT > 0) p.panicT -= dt;
@@ -603,12 +623,14 @@ export class Sim {
     for (const p of notBoarded) { this.ship.plane.remove(p.mesh); p.state = 'left'; }
     this.pax = this.pax.filter((p) => p.state !== 'left');
     this.toast(`Departure! ${this.score.bagsLoaded} bags in the hold, ${this.pax.length} passengers aboard.`);
+    if (this.shift && !this.shiftDeparted) { this.shiftDeparted = true; this.shift.act('solo', { k: 'depart', bags: this.score.bagsLoaded, seated: this.pax.length, checklist: this.score.checklist }, {}); }
     ctx?.onDepart?.();
   }
 
   /** End of flight: the airline gets paid. Fares + service tips + cargo fees, minus refunds and fines (credits, ₵). */
   finish() {
     if (this.results) return;
+    if (this.shift && !this.shift.finished) this.shiftCard = this.shift.finish();
     this.updateCounts();
     const s = this.score, c = this.counts;
     const premium = this.contract === 'premium';
@@ -758,7 +780,7 @@ export class Sim {
       const chute = p.state === 'lost' && p.fx?.t > 0.7;
       const airborne = p.state === 'carried' || p.state === 'thrown' || (p.state === 'lost' && !chute);
       const frozen = p.frozenT > 0;
-      animateCharacter(p.mesh, frozen ? 0 : dt, { moving: (p.state === 'walk' && !p.waiting) || p.state === 'return' || p._moving, running: p.state === 'return', sitting: seated, panic: p.panicT > 0 || airborne, flail: airborne, parachute: chute, dance: p.dance > 0, cheer: p.cheerT > 0, sleep: p.sleep && seated, angry: seated && p.mood < 30, happy: p.mood > 75, grumpy: !!p.request && p.reqT > 12, falling: !seated && (p.downT || 0) > 0.08 });
+      animateCharacter(p.mesh, frozen ? 0 : dt, { moving: (p.state === 'walk' && !p.waiting) || p.state === 'return' || p._moving, running: p.state === 'return', sitting: seated && p.reqKind !== 'unruly', panic: p.panicT > 0 || airborne || p.reqKind === 'cry', flail: airborne || (this.turb > 0.9 && !seated), parachute: chute, dance: p.dance > 0, cheer: p.cheerT > 0, sleep: p.sleep && seated, angry: p.reqKind === 'unruly' || (seated && p.mood < 30), happy: p.mood > 75, grumpy: !!p.request && p.reqT > 12, falling: !seated && (p.downT || 0) > 0.08 });
       if (p.cheerT > 0 && this.host) p.cheerT -= dt;
       if (p.birthdayT > 0 && this.host) p.birthdayT -= dt;
       if (p.birthdayT > 0 && !p.partyHat) { p.partyHat = makePartyHat(); (p.mesh.userData.bones?.find((b) => b.name === 'head') || p.mesh).add(p.partyHat); } else if (!(p.birthdayT > 0) && p.partyHat) { p.partyHat.parent?.remove(p.partyHat); p.partyHat = null; }

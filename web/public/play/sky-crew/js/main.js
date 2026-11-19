@@ -15,6 +15,7 @@ import { Gadgets } from './gadgets.js';
 import { buildPanel } from './devpanel.js';
 import { initControls, openEditor, resetLayout, ctl, controlsDebug, applyLayout } from './controls.js';
 import { installRotateHint, shouldShowRotateHint } from './orient.js';
+import { createShift, CALLS, COACH, unlocksFromHistory } from './shift.js';
 
 const $ = (s) => document.querySelector(s);
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 && /iPad|iPhone|Android|Mobile/i.test(navigator.userAgent);
@@ -46,6 +47,15 @@ let keyShadowT = 0; // medium (iPad): the cabin shadow map is refreshed at ~12 H
 const audio = new Audio();
 scene.add(ship.plane);
 ship.plane.add(camera);
+const fireFx = new THREE.Group();
+for (let i = 0; i < 3; i++) {
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1 + i * 0.035, 0.42, 6), new THREE.MeshBasicMaterial({ color: i === 2 ? 0xffe08a : 0xff5a1f }));
+  flame.position.set((i - 1) * 0.16, 0.15, i * 0.06);
+  fireFx.add(flame);
+}
+fireFx.position.set(1.55, 1.05, 10.2);
+fireFx.visible = false;
+ship.plane.add(fireFx);
 function resizeView() {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / Math.max(1, innerHeight);
@@ -223,6 +233,18 @@ function unstick(cols) {
   }
   return false;
 }
+function bumpCrew() {
+  if (me.mode !== 'walk') return;
+  for (const r of remotes.values()) {
+    if (r.mode === 'pilot' || r.mode === 'copilot') continue;
+    const dx = me.pos.x - r.mesh.position.x, dz = me.pos.z - r.mesh.position.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.62 || d < 0.05) continue;
+    me.vel.x += (dx / d) * 2.6; me.vel.z += (dz / d) * 2.6;
+    me.stumbleT = Math.max(me.stumbleT || 0, 0.4);
+    break;
+  }
+}
 function updatePlayer(dt) {
   if (me.mode === 'pilot') { me.pos.set(-0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
   if (me.mode === 'copilot') { me.pos.set(0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
@@ -240,7 +262,8 @@ function updatePlayer(dt) {
   me.sprint = speed > 5 && L > 0.1;
   const s = Math.sin(me.yaw), c = Math.cos(me.yaw);
   const wx = (fx * c + fz * s) * speed, wz = (-fx * s + fz * c) * speed;
-  const a = Math.min(1, dt * (me.onGround ? 14 : 3));
+  const grip = (sim.spillOn && Math.abs(me.pos.x) < 0.85) || me.stumbleT > 0.15 ? 4 : 14;
+  const a = Math.min(1, dt * (me.onGround ? grip : 3));
   me.vel.x += (wx - me.vel.x) * a; me.vel.z += (wz - me.vel.z) * a;
   // Developer abilities (equip state comes from the server): noclip ghost-flight, jetpack, super jump
   if (gadgets.has('noclip') && !me.frozen) {
@@ -254,6 +277,24 @@ function updatePlayer(dt) {
   else if (keys.has('Space') && me.onGround) { me.vel.y = 4.3 * gadgets.jumpMul(); me.onGround = false; }
   me.vel.y -= (gadgets.has('super_jump') && me.vel.y < 0 ? 7 : 9.8) * dt; // super jump: floaty fall
   if (sim.turb > 0.3 && me.onGround && Math.random() < sim.turb * dt * 2) { me.vel.x += (Math.random() - 0.5) * sim.turb * 2.5; me.vel.z += (Math.random() - 0.5) * sim.turb * 2.5; }
+  // Chop knocks the jelly body around. A spill makes the aisle slick.
+  me.stumbleT = Math.max(0, (me.stumbleT || 0) - dt);
+  const slick = sim.spillOn && Math.abs(me.pos.x) < 0.85 && me.pos.z > -7 && me.pos.z < 12;
+  if (slick) me.stumbleT = Math.max(me.stumbleT, 0.05);
+  if (sim.turb > 0.95 && me.onGround && me.mode === 'walk') {
+    me._jolt = (me._jolt || 0) - dt;
+    if (me._jolt <= 0) {
+      me._jolt = 0.42;
+      const j = sim.turb * 4.2;
+      me.vel.x += (Math.random() - 0.5) * j;
+      me.vel.z += (Math.random() - 0.5) * j;
+      me.vel.y = Math.max(me.vel.y, 1.4 + Math.random());
+      me.onGround = false;
+      me.stumbleT = 0.7;
+    }
+  }
+  if (me.stumbleT > 0.2 && slick) { me.vel.x += (Math.random() - 0.5) * dt * 6; me.vel.z += (Math.random() - 0.5) * dt * 6; }
+  bumpCrew();
   me.moving = me.downT < 0.02 && L > 0.1;
   const cols = solids();
   unstick(cols);
@@ -349,9 +390,18 @@ function findTarget() {
   for (const p of sim.pax) {
     if (p.state !== 'seated' || !p.request) continue;
     const head = p.mesh.position.clone(); head.y += 1.1;
-    const ok = p.request === 'complaint' ? !held : held && held.type === p.request;
-    consider(head, serveReach(classOf(myId())), { kind: 'serve', pax: p, ok, prio: 0.7, label: p.request === 'complaint' ? (held ? 'Hands full: put it down to talk' : 'Calm the passenger down') : ok ? `Give the ${ITEM_DEFS[p.request].label}` : `Wants: ${ITEM_DEFS[p.request].label}` });
+    const def = p.reqKind ? CALLS[p.reqKind] : null;
+    const talk = def ? def.talk : p.request === 'complaint';
+    const need = def ? def.item : (ITEM_DEFS[p.request] ? p.request : null);
+    const ok = talk ? !held : !!(held && need && held.type === need);
+    // Only offer the call when it can be completed, and only from arm's length, so an empty-handed
+    // grab (aimed at the torso from a step back) still wins.
+    if (!ok) continue;
+    const label = def ? def.verb : (p.request === 'complaint' ? 'Calm the passenger down' : `Give the ${ITEM_DEFS[need]?.label || need}`);
+    consider(head, Math.min(talk ? 0.95 : 1.85, serveReach(classOf(myId()))), { kind: 'serve', pax: p, ok, prio: 0.7, label: held && talk ? 'Hands full: put it down to talk' : label });
   }
+  if (sim.fireOn) consider(new THREE.Vector3(1.55, 1.2, 10.3), 1.8, { kind: 'extinguish', label: 'Grab the galley extinguisher' });
+  if (sim.spillOn && me.pos.z < -7.2 && me.pos.z > -13.4) consider(eyePos().clone().addScaledVector(lookDir(), 0.6), 2, { kind: 'secure', label: 'Secure the spilled cargo' });
   if (!held) for (const p of sim.pax) {
     if (p.state === 'lost' || p.state === 'carried' || p.state === 'thrown') continue;
     const chest = p.mesh.position.clone(); chest.y += p.state === 'seated' ? 0.7 : 1.0;
@@ -379,7 +429,15 @@ function interact() {
   if (t.kind === 'grab' && ITEM_DEFS[t.item.type].gadget) { audio.play('pickup'); net.admin('equip', { item: t.item.type }).then(() => act({ k: 'grab', id: t.item.id })).catch((e) => UI.toast(e.message, 'warn')); return; }
   if (t.kind === 'grab') { audio.play('pickup'); act({ k: 'grab', id: t.item.id }); return; }
   if (t.kind === 'drop') return dropHeld(0.9, 0);
-  if (t.kind === 'serve') { if (t.ok) { audio.play('serve'); act({ k: 'serve', pax: t.pax.id, item: held?.id || null }); } else UI.toast(t.label); return; }
+  if (t.kind === 'serve') {
+    if (!t.ok) { UI.toast(t.label); return; }
+    audio.play('serve');
+    if (sim.shiftRemote && t.pax.reqId) duty({ k: 'resolve', id: t.pax.reqId, item: held?.type || null });
+    else act({ k: 'serve', pax: t.pax.id, item: held?.id || null });
+    return;
+  }
+  if (t.kind === 'extinguish') { audio.play('fix'); if (sim.shiftRemote) duty({ k: 'extinguish' }); else if (sim.shift) { const r = sim.shift.act('solo', { k: 'extinguish' }, { pos: [me.pos.x, me.pos.y, me.pos.z] }); if (r.ok) syncShiftView(sim.shift.snapshot()); UI.toast(r.ok ? 'Galley flare out.' : r.reason, r.ok ? 'info' : 'warn'); } return; }
+  if (t.kind === 'secure') { audio.play('fix'); if (sim.shiftRemote) duty({ k: 'secure' }); else if (sim.shift) { const r = sim.shift.act('solo', { k: 'secure' }, { pos: [me.pos.x, me.pos.y, me.pos.z] }); if (r.ok) syncShiftView(sim.shift.snapshot()); UI.toast(r.ok ? 'Cargo strapped down.' : r.reason, r.ok ? 'info' : 'warn'); } return; }
   if (t.kind === 'copilot') return takeCopilot();
   if (t.kind === 'grabPax') { audio.play('pickup'); return act({ k: 'grabPax', id: t.pax.id }); }
   if (t.kind === 'dropPax') return dropPax(0.9, 0);
@@ -751,7 +809,7 @@ function netTick(dt) {
     sendState();
     if (amPilot()) net.send({ t: 'plane', s: sim.planeState() });
   }
-  if (net.isHost && worldT > 0.1) { worldT = 0; const w = sim.snapshot(!net.room.pilotCid); w.hs = net.cid; w.sq = ++worldSeq; net.send({ t: 'world', w }); }
+  if (net.isHost && worldT > 0.1) { worldT = 0; const w = sim.snapshot(!net.room.pilotCid); w.hs = net.cid; w.sq = ++worldSeq; w.tut = tutorialOn && DEST.code === 'DNB' ? 1 : 0; net.send({ t: 'world', w }); }
 }
 
 // ---------------- flight ----------------
@@ -964,6 +1022,102 @@ function placeHeld() {
   }
 }
 
+// ---------------- service shift (calls, incidents, training) ----------------
+let tutorialOn = false;
+let progress = unlocksFromHistory([]);
+const PROG_KEY = 'skycrew.progress';
+const spawnedCharms = new Set();
+const seenInc = new Set();
+function loadGuestProgress() {
+  try { progress = unlocksFromHistory(JSON.parse(localStorage.getItem(PROG_KEY) || '[]')); } catch { progress = unlocksFromHistory([]); }
+}
+function saveGuestFlight(res) {
+  if (!res) return;
+  try {
+    const list = JSON.parse(localStorage.getItem(PROG_KEY) || '[]');
+    list.push({ route: res.route, stars: res.stars, crashed: !!res.crashed });
+    localStorage.setItem(PROG_KEY, JSON.stringify(list.slice(-40)));
+    progress = unlocksFromHistory(list);
+  } catch { /* private mode */ }
+}
+function attachLocalShift() {
+  sim.shiftRemote = !!net.inRoom;
+  if (net.inRoom) { sim.shift = null; return; }
+  sim.shift = createShift({ seed: sim.seed, route: DEST.code, tutorial: !!(tutorialOn && DEST.code === 'DNB'), solo: true, paxIds: sim.pax.map((p) => p.id) });
+}
+function duty(a) { sendState(); net.send({ t: 'duty', a }); }
+function syncShiftView(s) {
+  if (!s) return;
+  sim.shiftView = s;
+  const open = new Map((s.calls || []).map((c) => [c.pax, c]));
+  for (const p of sim.pax) {
+    const c = open.get(p.id);
+    if (!c) { if (p.reqId) { p.request = null; p.reqKind = null; p.reqId = null; p.reqItem = null; } continue; }
+    if (p.reqId !== c.id) {
+      p.reqId = c.id; p.reqKind = c.kind; p.reqItem = c.item || null; p.reqT = 0;
+      p.request = c.kind === 'lost' ? 'charm' : c.kind;
+      if (sim.host && c.kind === 'lost' && !spawnedCharms.has(c.id)) {
+        spawnedCharms.add(c.id);
+        const seat = p.mesh.position;
+        sim.spawnItem('charm', [seat.x + 0.4, 0.4, seat.z + 0.15], { id: `charm_${c.id}` });
+      }
+    }
+  }
+  const inc = new Set((s.incidents || []).map((i) => i.kind));
+  sim.shiftTurb = inc.has('turbulence') ? 1.25 : 0;
+  sim.fireOn = inc.has('galley_fire');
+  sim.spillOn = inc.has('cargo_spill');
+  if (sim.host && inc.has('cargo_spill') && !seenInc.has('spill')) {
+    seenInc.add('spill');
+    for (const it of sim.items.values()) if (ITEM_DEFS[it.type]?.bag && it.body) {
+      it.body.wakeUp();
+      it.body.velocity.x += (Math.random() - 0.5) * 4;
+      it.body.velocity.y += 2 + Math.random() * 2;
+      it.body.velocity.z += (Math.random() - 0.5) * 4;
+    }
+  }
+  if (!inc.has('cargo_spill')) seenInc.delete('spill');
+  if (s.card) { sim.shiftCard = s.card; if (!$('#results').classList.contains('hidden')) UI.shiftCard(s.card); }
+  const coach = $('#coach');
+  const line = s.tutorial && s.coach ? COACH[s.coach] : '';
+  if (coach) {
+    if (line && playing && sim.phase !== 'results') { if (coach.textContent !== line) coach.textContent = line; coach.classList.remove('hidden'); }
+    else coach.classList.add('hidden');
+  }
+  fireFx.visible = !!sim.fireOn;
+}
+function tickLocalShift(dt) {
+  if (!sim.shift || sim.shiftRemote || !playing) return;
+  sim.shift.tick(dt, {
+    phase: sim.phase,
+    belt: !!sim.cabin.seatbelt,
+    paxIds: sim.pax.filter((p) => p.state !== 'lost' && p.state !== 'left').map((p) => p.id),
+    seats: sim.pax.map((p) => ({ id: p.id, x: p.mesh.position.x, z: p.mesh.position.z })),
+  });
+  syncShiftView(sim.shift.snapshot());
+}
+net.addEventListener('shift', (e) => {
+  sim.shiftRemote = true;
+  const d = e.detail || {};
+  syncShiftView(d.s);
+  const ack = d.ack;
+  if (!ack?.ok) return;
+  if (sim.host && ack.item) {
+    const it = [...sim.items.values()].find((i) => i.heldBy === ack.cid && i.type === ack.item);
+    if (it) sim.removeItem(it.id);
+  }
+  if (sim.host && ack.pax) {
+    const p = sim.pax.find((q) => q.id === ack.pax);
+    if (p) { p.mood = Math.min(100, p.mood + 18); sim.flash(p, ack.kind === 'cry' ? 'happy' : 'happy'); sim.score.served = (sim.score.served || 0) + 1; }
+  }
+  if (ack.cid === myId()) {
+    if (ack.incident === 'galley_fire') UI.toast('Galley flare out.');
+    else if (ack.incident === 'cargo_spill') UI.toast('Cargo strapped down.');
+    else if (ack.kind) UI.toast('Call answered.');
+  }
+  if (d.s?.card && !$('#results').classList.contains('hidden')) UI.shiftCard(d.s.card);
+});
+
 // ---------------- objectives / HUD ----------------
 function updateHud() {
   const c = sim.counts || { loaded: 0, boarded: 0, pax: 0, bags: 0, loose: 0 };
@@ -995,6 +1149,13 @@ function updateHud() {
     }
     if (sim.emergencyLanding) rows.push({ text: `EMERGENCY LANDING: ${Math.max(0, Math.round(sim.emergencyLanding.limit - sim.emergencyLanding.t))} s left`, state: 'warn' });
     if (sim.weather === 'storm') rows.push({ text: 'Storm conditions', state: 'warn' });
+    const view = sim.shiftView;
+    if (view?.calls?.length) rows.push({ text: `${view.calls.length} cabin call${view.calls.length > 1 ? 's' : ''}: ${view.calls.slice(0, 3).map((c) => CALLS[c.kind]?.label || c.kind).join(', ')}`, state: 'warn' });
+    for (const i of view?.incidents || []) {
+      const left = Math.max(0, Math.round((i.timeout || 0) - i.age));
+      const text = i.kind === 'turbulence' ? 'Chop: seatbelt sign on, hold on' : i.kind === 'galley_fire' ? `Galley flare: extinguisher (${left}s)` : i.kind === 'cargo_spill' ? `Cargo spill: secure the hold (${left}s)` : `Medical: bring water (${left}s)`;
+      rows.push({ text, state: 'warn' });
+    }
   }
   UI.objectives(title, rows);
   const t = playing && !paused ? findTarget() : null;
@@ -1019,7 +1180,17 @@ function updateHud() {
     if (!sim.cabin.gearDown && !f.onGround && f.y < 150 && gp.active) warnings.push('GEAR');
     UI.flightHud(f, { kt: KT, ft: FT, distKm: distTo(f, DEST) / 1000, bearing: relBearing(f, DEST), warnings, dest: DEST.code, gearDown: sim.cabin.gearDown });
   }
-  if (sim.results && !resultsShown) { resultsShown = true; if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); UI.results(sim.results); showSalary(); document.exitPointerLock?.(); reportFlight(sim.results); }
+  if (sim.results && !resultsShown) {
+    resultsShown = true;
+    if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat();
+    UI.results(sim.results);
+    showSalary();
+    document.exitPointerLock?.();
+    const coachEl = $('#coach'); if (coachEl) coachEl.classList.add('hidden');
+    if (!net.inRoom || sim.shiftCard) reportFlight(sim.results);
+    else setTimeout(() => reportFlight(sim.results), 1200);
+  }
+  if (sim.results && resultsShown) UI.shiftCard(sim.shiftCard || (sim.shift && sim.shift.card()));
 }
 
 /** Job-specific to-do rows (co-op crew role, or everything in solo). */
@@ -1029,10 +1200,10 @@ function roleTasks() {
   const label = UI.CREW_LABEL[job];
   const c = sim.counts || { loaded: 0, bags: 0, boarded: 0, pax: 0 };
   const T = {
-    pilot: ph === 'boarding' ? 'Take the captain\'s seat; throttle up when the checklist is done' : ph === 'approach' ? `Follow the landing guide to ${DEST.code}, gear down` : `Fly to ${DEST.name}`,
-    copilot: ph === 'boarding' ? (sim.cabin.announced ? 'Seatbelt sign ON, then sit in the right seat' : 'Make the welcome announcement (galley PA or right seat)') : ph === 'approach' ? (sim.cabin.gearDown ? 'Gear is down. Call out the landing guide!' : 'Lower the landing gear (G)') : 'Watch systems: lights, seatbelt sign, gear',
-    cabin: ph === 'boarding' ? `Get everyone seated (${c.boarded}/${c.pax}) and close the rear door` : 'Serve requests and calm passengers',
-    cargo: ph === 'boarding' ? `Load the bags (${c.loaded}/${c.bags}) and close the cargo door` : 'Catch loose bags, fix warnings at the cargo panel',
+    pilot: ph === 'boarding' ? 'Take the captain\'s seat; throttle up when the checklist is done' : ph === 'approach' ? `Follow the landing guide to ${DEST.code}, gear down` : `Fly to ${DEST.name}. Call brace (seatbelt) before chop.`,
+    copilot: ph === 'boarding' ? (sim.cabin.announced ? 'Seatbelt sign ON, then sit in the right seat' : 'Make the welcome announcement (galley PA or right seat)') : 'Seatbelt, gear and announcements. Brace the cabin when it gets bumpy.',
+    cabin: ph === 'boarding' ? `Get everyone seated (${c.boarded}/${c.pax}) and close the rear door` : 'Drinks, meals, blankets, lav, crying kids, airsick and unruly passengers',
+    cargo: ph === 'boarding' ? `Load the bags (${c.loaded}/${c.bags}) and close the cargo door` : 'Secure spills, help with the galley flare, return lost keepsakes',
   };
   out.push({ text: `Your job (${label}): ${T[job]}` });
   return out;
@@ -1079,7 +1250,7 @@ $('#bQuit').addEventListener('click', () => quitToMenu());
 $('#bAgain').addEventListener('click', () => { UI.show('#results', false); if (!net.inRoom || net.isHost) restartFlight(); else act({ k: 'reset' }); });
 $('#bResMenu').addEventListener('click', () => quitToMenu());
 
-function restartFlight() { const c = sim.contract; for (const p of sim.pax) sim.stopEjectFx(p); sim.host = !net.inRoom || net.isHost; sim.reset(Math.floor(Math.random() * 1e9)); sim.contract = c || 'standard'; }
+function restartFlight() { const c = sim.contract; for (const p of sim.pax) sim.stopEjectFx(p); sim.host = !net.inRoom || net.isHost; sim.reset(Math.floor(Math.random() * 1e9)); sim.contract = c || 'standard'; spawnedCharms.clear(); seenInc.clear(); attachLocalShift(); }
 function respawn() { if (me.mode === 'pilot' || me.mode === 'copilot') leaveSeat(); resetTermLocal(); const inTerm = airportOn() && sim.phase === 'boarding' && myStep() !== 'boarded'; me.pos.copy(inTerm ? TERM_SPAWN : SPAWN); me.vel.set(0, 0, 0); me.yaw = inTerm ? 0 : 0.45; me.pitch = -0.05; resultsShown = false; UI.show('#results', false); }
 function quitToMenu(msg) {
   if (net.inRoom) net.leave();
@@ -1091,12 +1262,14 @@ function quitToMenu(msg) {
 }
 function start() {
   UI.show('#menu', false); UI.show('#lobby', false); releaseMenuFocus(); UI.show('#hud', true); UI.show('#menuErr', false);
+  attachLocalShift();
   audio.stopMusic();
   playing = true; respawn(); updateWalletHud();
   UI.show('#btnAdmin', (!!net.inRoom && (net.you?.permissions || []).includes('admin.panel')) || myRole === 'DEVELOPER');
   UI.toast(net.inRoom ? `Co-op room ${net.room.code} — share the code!` : 'Solo flight. Load the bags, board everyone, then take the captain\'s seat.');
 }
-$('#bSolo').addEventListener('click', () => { if (net.inRoom) net.leave(); myCrew = null; dressMe(); setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; start(); });
+$('#bSolo').addEventListener('click', () => { tutorialOn = false; if (net.inRoom) net.leave(); myCrew = null; dressMe(); setRoute($('#routeSel').value); sim.host = true; restartFlight(); sim.contract = $('#contractSel').value; start(); });
+$('#bTrain').addEventListener('click', () => { tutorialOn = true; if (net.inRoom) net.leave(); myCrew = null; dressMe(); setRoute('DNB'); $('#routeSel').value = 'DNB'; sim.host = true; restartFlight(); sim.contract = 'standard'; start(); });
 let goingOnline = false;
 async function goOnline(code) {
   if (goingOnline) return; // a double tap must not create two rooms
@@ -1116,8 +1289,14 @@ $('#joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#b
 
 // ---------------- route select, lobby, settings ----------------
 function fillRoutes(sel) {
-  sel.replaceChildren(...Object.values(ROUTES).map((r) => UI.el('option', { value: r.code }, `${r.name} (${r.code}) · ${r.km} km`)));
-  sel.value = DEST.code;
+  const open = new Set(progress.open?.length ? progress.open : ['DNB']);
+  sel.replaceChildren(...Object.values(ROUTES).map((r) => {
+    const locked = !open.has(r.code);
+    const need = r.code === 'CRP' ? 'need 2★ at Dune Bay' : r.code === 'PNR' ? 'need 3★ at Coral Point' : '';
+    return UI.el('option', { value: r.code, disabled: locked ? 'disabled' : false }, locked ? `${r.name} · locked (${need})` : `${r.name} (${r.code}) · ${r.km} km`);
+  }));
+  if (!open.has(sel.value)) sel.value = 'DNB';
+  if (!open.has(DEST.code)) setRoute(sel.value || 'DNB');
 }
 function refreshRouteUi() {
   for (const id of ['#routeSel', '#lobRoute']) $(id).value = DEST.code;
@@ -1126,6 +1305,7 @@ function refreshRouteUi() {
   $('#routeBlurb').textContent = `${ROUTES[DEST.code].blurb}. About ${Math.round(ROUTES[DEST.code].km / 13)} min of flying.`;
   $('#lobRouteNote').textContent = net.inRoom && !net.isHost ? `The host picks the destination: ${DEST.name}.` : ROUTES[DEST.code].blurb;
 }
+loadGuestProgress();
 fillRoutes($('#routeSel')); fillRoutes($('#lobRoute'));
 sim.contract = 'standard';
 $('#contractSel').addEventListener('change', (e) => { sim.contract = e.target.value; });
@@ -1186,12 +1366,14 @@ audio.startMusic();
 // ---------------- saved stats ----------------
 async function reportFlight(res) {
   // keyed by the flight's timestamp: the host's result object is mirrored to guests, so no flags on it
-  if (!user || !res || reportedFlights.has(res.at)) return;
+  if (!res || reportedFlights.has(res.at)) return;
+  if (!user) { if ((res.time || 0) < 10) return; markReported(res.at); saveGuestFlight(res); fillRoutes($('#routeSel')); fillRoutes($('#lobRoute')); return; }
   markReported(res.at);
   if (res.time < 10) return; // aborted on the ground
   try {
     const csrf = (await (await fetch('/api/csrf', { credentials: 'same-origin' })).json()).csrfToken;
-    const body = { score: Math.max(-100000, Math.min(100000, Math.round(res.payout ?? res.total))), stars: res.stars, landing: res.landing || 'none', route: ROUTES[res.route] ? res.route : 'CRP', crashed: !!res.crashed, duration: Math.min(7200, res.time), coop: !!net.inRoom };
+    const card = sim.shiftCard;
+    const body = { score: Math.max(-100000, Math.min(100000, Math.round((res.payout ?? res.total) + (card?.points || 0)))), stars: res.stars, landing: res.landing || 'none', route: ROUTES[res.route] ? res.route : 'CRP', crashed: !!res.crashed, duration: Math.min(7200, res.time), coop: !!net.inRoom };
     const r = await fetch('/api/game/sky-crew/flights', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify(body) });
     if (r.ok) { const j = await r.json(); UI.toast(`Payout saved to your profile · ${j.stats.flights} flights, best ₵${j.stats.bestScore}.`); lastReport = j; }
   } catch { /* offline: stats are a bonus */ }
@@ -1381,8 +1563,11 @@ function renderSalary(d) {
   box.classList.remove('muted');
   updateWalletHud();
 }
-const errMsg = { not_owned: 'You do not own that yet.', class_locked: 'Classes are picked before takeoff.', bad_class: 'Unknown class.', bad_outfit: 'That outfit is not available.' };
-net.addEventListener('error', (e) => { const m = errMsg[e.detail.code]; if (!m) return; if (classWait) { const w = classWait; classWait = null; w({ error: e.detail.message || m }); } else UI.toast(e.detail.message || m, 'warn'); });
+const errMsg = { not_owned: 'You do not own that yet.', class_locked: 'Classes are picked before takeoff.', bad_class: 'Unknown class.', bad_outfit: 'That outfit is not available.', duty: '' };
+net.addEventListener('error', (e) => {
+  if (e.detail.code === 'duty') { UI.toast(e.detail.message || 'Could not do that.', 'warn'); return; }
+  const m = errMsg[e.detail.code]; if (!m) return; if (classWait) { const w = classWait; classWait = null; w({ error: e.detail.message || m }); } else UI.toast(e.detail.message || m, 'warn');
+});
 
 const user = await Net.me();
 if (user) {
@@ -1393,6 +1578,10 @@ if (user) {
   $('#bCreate').disabled = false; $('#bJoin').disabled = false;
   await loadWallet();
   try { const o = await api('GET', '/api/game/sky-crew/outfit'); if (o?.outfit) { myOutfit = o.outfit; dressMe(); } } catch { /* keep the local look */ }
+  try {
+    const j = await (await fetch(`/api/users/${encodeURIComponent(handle)}/game-stats`)).json();
+    if (j.skyCrew?.ladder) { progress = j.skyCrew.ladder; fillRoutes($('#routeSel')); fillRoutes($('#lobRoute')); refreshRouteUi(); }
+  } catch { /* stats are optional */ }
 } else {
   $('#meLine').replaceChildren('Playing as a guest (solo). ', UI.el('a', { href: '/login?next=/play/sky-crew', class: 'back' }, 'Sign in'), ' to play co-op with friends.');
 }
@@ -1418,6 +1607,10 @@ const perfStat = { frames: 0, t0: performance.now(), fps: 0 };
 const RENDER_CAP = Math.max(0, Math.min(60, Number(qs.get('fps')) || 0));
 let lastRender = 0, forceRender = false;
 function frame() {
+  try { frameBody(); } catch (err) { console.error('frame', err); }
+  requestAnimationFrame(frame);
+}
+function frameBody() {
   perfStat.frames++; { const n = performance.now(); if (n - perfStat.t0 > 1000) { perfStat.fps = perfStat.frames * 1000 / (n - perfStat.t0); perfStat.frames = 0; perfStat.t0 = n; } }
   const dt = Math.min(0.05, clock.getDelta());
   if (sim.seed !== seenSeed) { seenSeed = sim.seed; if (playing) respawn(); }
@@ -1426,6 +1619,7 @@ function frame() {
   if (sim.host) sim.update(dt, { onDepart() {}, crew: crewBodies() });
   if (playing && !paused) senseBumps(dt);
   else sim.follow(dt);
+  tickLocalShift(dt);
   ship.update(dt); // eased door animation (both directions) + cabin details
   if (Q.shadow && quality !== 'high' && (keyShadowT += dt) > 0.083) { keyShadowT = 0; ship.cabin.key.shadow.needsUpdate = true; }
   sim.animate(dt);
@@ -1438,14 +1632,14 @@ function frame() {
   // my own body (visible in third person)
   myAvatar.visible = (me.third || shopOpen()) && me.mode === 'walk';
   myAvatar.position.copy(me.pos); myAvatar.rotation.y = me.yaw;
-  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround, running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk', falling: me.downT > 0.08 });
+  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround && !(me.stumbleT > 0.2), running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk', falling: me.downT > 0.08, flail: me.stumbleT > 0.2, panic: me.stumbleT > 0.45 });
+  if (fireFx.visible) { fireFx.rotation.y += dt * 8; fireFx.position.y = 1.05 + Math.sin(performance.now() / 80) * 0.04; }
   updateCamera();
   if (playing) { updateHud(); netTick(dt); updateAudio(); }
   // ?fps=N caps how often the 3D view is DRAWN (the game itself keeps running every frame): used by multi-client
   // tests on software GL, and handy on very weak devices.
   const nowR = performance.now();
   if (!RENDER_CAP || forceRender || nowR - lastRender >= 1000 / RENDER_CAP) { renderer.render(scene, camera); lastRender = nowR; forceRender = false; }
-  requestAnimationFrame(frame);
 }
 UI.show('#loading', false);
 requestAnimationFrame(frame);
@@ -1478,7 +1672,8 @@ window.skyCrew = {
   myCrew: () => myCrew,
   lastReport: () => lastReport,
   paxLooks: () => sim.pax.map((p) => p.look || null),
-  pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible, frozen: (p.frozenT || 0) > 0, sizeK: p.sizeK || 1, cheer: (p.cheerT || 0) > 0, vip: p.id >= 900 })),
+  pax: () => sim.pax.map((p) => ({ id: p.id, state: p.state, carriedBy: p.carriedBy || null, request: p.request || null, reqKind: p.reqKind || null, reqId: p.reqId || null, x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, mood: Math.round(p.mood), panic: p.panicT > 0, chute: !!p.fx?.chute?.visible, frozen: (p.frozenT || 0) > 0, sizeK: p.sizeK || 1, cheer: (p.cheerT || 0) > 0, vip: p.id >= 900 })),
+  shift: () => sim.shiftView || (sim.shift && sim.shift.snapshot()) || null,
   controls: () => controlsDebug(),
   editControls: () => { UI.show('#settings', false); openEditor(); },
   term: () => ({ step: myStep(), local: termLocal.step, lastErr: termLocal.lastErr || null, airport: airportOn(), active: terminalActive(), bag: termLocal.bag, bagDone: terminal.bagDone(), crew: crewStatus(), docs: $('#docs').textContent, solids: solids().filter((c) => c.tag?.startsWith('term:')).map((c) => c.tag), paxInTerminal: sim.pax.filter((p) => p.mesh.position.z > STATIONS.gate.z && p.mesh.position.y < -1).length }),
@@ -1508,6 +1703,7 @@ window.skyCrew = {
     door: (name, open) => { if (sim.host) sim.setDoor(name, open); return { open: ship.doors[name].open, t: ship.doors[name].t }; },
     setPos: (x, y, z, yaw) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); if (yaw != null) me.yaw = yaw; },
     trigger: (id) => sim.trigger(id),
+    forceShift: (kind) => { if (!sim.shift) return null; const made = sim.shift.force(kind); syncShiftView(sim.shift.snapshot()); return made && { id: made.id, kind: made.kind }; },
     request: (i, item) => { const p = sim.pax[i]; p.request = item; p.reqT = 0; return { x: p.mesh.position.x, z: p.mesh.position.z }; },
     score: () => ({ ...sim.score }),
     events: () => sim.events.filter((e) => !e.done).map((e) => e.id),

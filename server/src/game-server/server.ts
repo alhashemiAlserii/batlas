@@ -13,6 +13,7 @@
 import { DEFAULT_OUTFIT, validOutfit, type Outfit } from './outfits.js';
 import { CLASS_IDS, ITEM_BY_KEY, outfitAllowed } from './shop.js';
 import { newFlight, trackSnapshot, salaryFor, type Flight } from './flight-tracker.js';
+import { createShift, type Shift } from './shift.js';
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -80,6 +81,14 @@ interface Room {
   flight: Flight | null; // server-side record of the current flight (salaries)
   flightSeq: number;
   airport: boolean; // walk through the pre-flight terminal (host can skip it for quick rounds)
+  shift: Shift | null; // calls, incidents and the service score (server authority)
+  shiftSeed: number | null;
+  shiftSnap: string;
+  shiftDeparted: boolean;
+  shiftLanded: boolean;
+  shiftDone: boolean;
+  tutorial: boolean;
+  seats: Map<number, { x: number; z: number }>;
 }
 
 type Send = (c: Client, msg: unknown) => void;
@@ -195,6 +204,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     c.room = r;
     c.term = newTerm(now());
     send(c, { ...roomInfo(r, c), you: c.cid, hidden: c.hidden });
+    if (r.shift) send(c, { t: 'shift', s: r.shift.snapshot() });
     if (!c.hidden) broadcast(r, { t: 'joined', player: publicPlayer(c) }, c);
     broadcastRoom(r, c);
     if (dev && !opts.created) void audit(c, 'dev.join', { hidden: c.hidden, bypass, players: visible });
@@ -576,7 +586,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
         return send(c, { t: 'pong', at: m.at });
       case 'create': {
         { const mm = isDev(c) ? null : await maintenanceMsg(); if (mm) return send(c, { t: 'maintenance', message: mm }); }
-        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0, flight: null, flightSeq: 0, airport: true };
+        const room: Room = { code: newCode(), hostCid: c.cid, pilotCid: null, clients: new Map(), weather: 'clear', hour: 13, createdAt: Date.now(), locked: false, route: null, phase: null, config: { difficulty: 'normal', payout: 1, maxPlayers: MAX_PLAYERS }, devItems: new Set(), seq: 0, flight: null, flightSeq: 0, airport: true, shift: null, shiftSeed: null, shiftSnap: '', shiftDeparted: false, shiftLanded: false, shiftDone: false, tutorial: false, seats: new Map() };
         rooms.set(room.code, room);
         log(`room ${room.code} created by ${c.user.username}`);
         return joinRoom(c, room, { created: true });
@@ -636,6 +646,7 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
             for (const o of r.clients.values()) o.term = newTerm(now()); // a new flight: everyone starts at the terminal entrance again
             broadcastRoom(r);
           }
+          syncShift(r, m.w);
           if (r.flight) {
             const crewNow = new Map([...r.clients.values()].filter((o) => o.user && !o.hidden).map((o) => [o.cid, o.user!.userId] as [string, number]));
             const wasAirborne = !!r.flight.airborneAt;
@@ -712,6 +723,22 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
       case 'plane':
         if (!r || r.pilotCid !== c.cid) return; // only the seated pilot controls the aircraft
         return broadcast(r, { t: 'plane', s: m.s }, c);
+      case 'duty': {
+        // Service-shift actions (serve a call, put out a flare, secure a spill). The server scores them.
+        if (!r || !r.shift || c.hidden || c.frozen) return;
+        const a = m.a;
+        if (!a || typeof a !== 'object') return;
+        const pos = vec3(c.state?.p);
+        let seat: { x: number; z: number } | undefined;
+        if (a.k === 'resolve') {
+          const snap = r.shift.snapshot() as { calls?: { id: number; pax: number }[] };
+          const call = snap.calls?.find((x) => x.id === Math.round(Number(a.id)));
+          if (call) seat = r.seats.get(call.pax);
+        }
+        const res = r.shift.act(c.cid, a as Record<string, unknown>, { pos, role: c.crew, seat, reach: c.klass === 'cabin_pro' ? 4.8 : 3.8 });
+        if (!res.ok) return send(c, { t: 'error', code: 'duty', message: res.reason || 'Could not do that.' });
+        return publishShift(r, { cid: c.cid, ...res });
+      }
       case 'act': {
         // gameplay requests (grab/drop/serve/door/fix) go to the host who owns the simulation
         if (!r || c.hidden) return; // spectators don't touch the world
@@ -755,6 +782,88 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     });
     ws.on('error', () => {});
   });
+
+  function publishShift(r: Room, ack?: Record<string, unknown>) {
+    if (!r.shift) return;
+    const s = r.shift.snapshot();
+    const key = JSON.stringify(s);
+    if (!ack && key === r.shiftSnap) return;
+    r.shiftSnap = key;
+    broadcast(r, { t: 'shift', s, ack: ack ?? null });
+  }
+
+  /** Host snapshots feed phase, seats and the depart/landing facts. Calls themselves spawn on the server clock. */
+  function syncShift(r: Room, w: any) {
+    const seed = Number(w?.seed);
+    if (!Number.isFinite(seed)) return;
+    const known = ['DNB', 'CRP', 'PNR'];
+    const route = known.includes(w.route) ? w.route : known.includes(r.route || '') ? r.route! : 'DNB';
+    const px: unknown[] = Array.isArray(w.px) ? w.px : [];
+    const ids: number[] = [];
+    const seatList: { id: number; x: number; z: number }[] = [];
+    for (const row of px) {
+      if (!Array.isArray(row)) continue;
+      const id = Math.round(Number(row[0]));
+      if (!(id > 0 && id < 1000)) continue;
+      ids.push(id);
+      const state = String(row[5] || '');
+      if (state === 'seated' || state === 'return' || state === 'carried') {
+        const x = Number(row[1]) || 0;
+        const z = Number(row[3]) || 0;
+        r.seats.set(id, { x, z });
+        seatList.push({ id, x, z });
+      }
+    }
+    if (!r.shift || r.shiftSeed !== seed) {
+      const roles: Record<string, string> = {};
+      for (const o of r.clients.values()) if (o.crew) roles[o.cid] = o.crew;
+      const visible = [...r.clients.values()].filter((o) => !o.hidden).length;
+      r.tutorial = w.tut === 1 || w.tut === true;
+      r.shift = createShift({ seed, route, tutorial: r.tutorial && route === 'DNB', solo: visible <= 1, paxIds: ids, roles });
+      r.shiftSeed = seed;
+      r.shiftSnap = '';
+      r.shiftDeparted = false;
+      r.shiftLanded = false;
+      r.shiftDone = false;
+      r.seats = new Map(seatList.map((s) => [s.id, { x: s.x, z: s.z }]));
+    }
+    const roles: Record<string, string> = {};
+    for (const o of r.clients.values()) if (o.crew) roles[o.cid] = o.crew;
+    const visible = [...r.clients.values()].filter((o) => !o.hidden).length;
+    r.shift.tick(0, { phase: typeof w.ph === 'string' ? w.ph : 'boarding', roles, solo: visible <= 1, paxIds: ids, belt: !!(w.cabin && w.cabin.seatbelt), seats: seatList });
+    const ph = typeof w.ph === 'string' ? w.ph : '';
+    if (!r.shiftDeparted && (ph === 'taxi' || ph === 'climb' || ph === 'cruise' || ph === 'approach' || ph === 'landed' || ph === 'results')) {
+      r.shiftDeparted = true;
+      const bags = Math.max(0, Math.min(12, Math.round(Number(w.counts?.loaded) || 0)));
+      const seatedN = Math.max(0, Math.min(24, Math.round(Number(w.counts?.boarded) || seatList.length)));
+      r.shift.act('crew', { k: 'depart', bags, seated: seatedN, checklist: !!w.full?.sc?.checklist }, {});
+    }
+    const grade = (w.full && w.full.sc && w.full.sc.landing) || (w.res && w.res.landing);
+    if (!r.shiftLanded && typeof grade === 'string') {
+      r.shiftLanded = true;
+      const pilot = r.pilotCid ? r.clients.get(r.pilotCid) : undefined;
+      const arrivedAt = (w.full && w.full.sc && w.full.sc.landedAt) || (w.res && w.res.landedAt);
+      r.shift.act(pilot?.cid || 'crew', { k: 'land', grade, crashed: !!(w.full?.sc?.crashed || w.res?.crashed) || grade === 'crash', arrived: arrivedAt === route }, { role: pilot?.crew || 'pilot' });
+    }
+    if (!r.shiftDone && ph === 'results') {
+      r.shiftDone = true;
+      r.shift.finish();
+    }
+    publishShift(r);
+  }
+
+  let shiftClock = Date.now();
+  const shiftTimer = setInterval(() => {
+    const t = Date.now();
+    const dt = Math.min(0.5, (t - shiftClock) / 1000);
+    shiftClock = t;
+    for (const room of rooms.values()) {
+      if (!room.shift || room.shiftDone) continue;
+      room.shift.tick(dt);
+      publishShift(room);
+    }
+  }, 250);
+  shiftTimer.unref();
 
   // Heartbeat: drop dead sockets so rooms don't keep ghosts.
   const alive = new WeakMap<WebSocket, boolean>();
@@ -806,6 +915,6 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
     clients,
     gameBans,
     enforceMaintenance,
-    close: () => { clearInterval(hb); clearInterval(auditTimer); clearInterval(maintTimer); for (const c of clients) c.ws.terminate(); wss.close(); },
+    close: () => { clearInterval(hb); clearInterval(auditTimer); clearInterval(maintTimer); clearInterval(shiftTimer); for (const c of clients) c.ws.terminate(); wss.close(); },
   };
 }
