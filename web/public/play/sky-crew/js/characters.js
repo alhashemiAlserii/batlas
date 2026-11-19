@@ -1,10 +1,11 @@
-// Sky Crew crew and passengers: original procedural "jelly" people.
+// Sky Crew crew and passengers: original procedural people with a jelly wobble.
 // One skinned mesh (vertex colours, one draw call) on a 19-bone skeleton. Keyframe clips still
 // choose the action (walk, sit, carry, cheer...) and a cheap local ragdoll layer — springs, not a
 // cannon body per bone — makes the body wobble, the arms flop, and a hard bump fold them onto
 // the floor until they get back up. Every client runs that layer from motion it already has,
 // so the network only needs a knockdown timer, not a bone stream.
-// Proportions: a fat rounded body, a smaller head (or the face sat on the body), stubby limbs, dot eyes.
+// Proportions: a round head on a short neck, a soft torso with shoulders that taper to the hips,
+// and longer floppy arms and legs. Cartoon, chunky, and drawn only for this game.
 import * as THREE from '../../vendor/three.module.js';
 import { mergeGeometries } from '../../vendor/addons/BufferGeometryUtils.js';
 
@@ -20,34 +21,52 @@ const BI = Object.fromEntries(BONES.map((b, i) => [b, i]));
 const PARENT = { spine: 'hips', chest: 'spine', neck: 'chest', head: 'neck', 'shoulder.L': 'chest', 'arm.L': 'shoulder.L', 'forearm.L': 'arm.L', 'hand.L': 'forearm.L', 'shoulder.R': 'chest', 'arm.R': 'shoulder.R', 'forearm.R': 'arm.R', 'hand.R': 'forearm.R', 'thigh.L': 'hips', 'shin.L': 'thigh.L', 'foot.L': 'shin.L', 'thigh.R': 'hips', 'shin.R': 'thigh.R', 'foot.R': 'shin.R' };
 
 /** Body measurements (metres) from a look. Front of the character is -z (same as the aircraft nose).
- *  Short legs, a fat belly and a head smaller than the body: a jelly bean with stubby limbs. */
+ *  A round head on a short neck, shoulders wider than the hips, legs long enough to reach the floor when seated. */
 function dims(look) {
   const s = look.height ?? 1, g = look.girth ?? 1;
-  const leg = 0.24 * s * (look.legs ?? 1), torso = 0.52 * s, headR = (look.headSize ?? 1) * 0.2;
-  const belly = 0.28 * g, chest = 0.23 * (0.7 + 0.3 * g) * (look.shoulders ?? 1);
+  const leg = 0.62 * s * (look.legs ?? 1), torso = 0.40 * s, headR = (look.headSize ?? 1) * 0.20;
+  const neck = 0.09 * s;
+  const belly = 0.20 * g, chest = 0.235 * (0.82 + 0.18 * g) * (look.shoulders ?? 1);
   const footH = 0.05, hipY = footH + leg;
-  return { s, g, leg, torso, headR, belly, chest, footH, hipY, thigh: leg * 0.52, shin: leg * 0.48, arm: 0.14 * s, fore: 0.125 * s, limbR: 0.082 * (0.78 + 0.28 * g), legR: 0.105 * (0.72 + 0.32 * g), hipW: Math.max(0.09, belly * 0.42) };
+  const thigh = leg * 0.44, shin = leg * 0.56;
+  const top = hipY + torso + neck + headR * 1.95;
+  return { s, g, leg, torso, headR, neck, belly, chest, footH, hipY, thigh, shin, arm: 0.23 * s, fore: 0.21 * s, limbR: 0.052 * (0.84 + 0.2 * g), legR: 0.068 * (0.8 + 0.22 * g), hipW: Math.max(0.08, belly * 0.55), top };
 }
 /** Rest-pose joint positions in character space. */
 function joints(d) {
   const J = {};
   J.hips = [0, d.hipY, 0];
-  J.spine = [0, d.hipY + d.torso * 0.28, 0];
-  J.chest = [0, d.hipY + d.torso * 0.62, 0];
-  J.neck = [0, d.hipY + d.torso * 0.98, 0];
-  J.head = [0, d.hipY + d.torso * 1.02, 0];
-  const shY = d.hipY + d.torso * 0.86, shX = d.chest + d.limbR * 0.6;
+  J.spine = [0, d.hipY + d.torso * 0.36, 0];
+  J.chest = [0, d.hipY + d.torso * 0.7, 0];
+  J.neck = [0, d.hipY + d.torso, 0];
+  J.head = [0, d.hipY + d.torso + d.neck, 0];
+  const shY = d.hipY + d.torso * 0.9;
   for (const [k, sx] of [['L', 1], ['R', -1]]) {
-    J[`shoulder.${k}`] = [sx * (d.chest * 0.6), shY, 0];
-    J[`arm.${k}`] = [sx * shX, shY, 0];
-    J[`forearm.${k}`] = [sx * shX, shY - d.arm, 0];
-    J[`hand.${k}`] = [sx * shX, shY - d.arm - d.fore, 0];
-    J[`thigh.${k}`] = [sx * d.hipW, d.hipY, 0];
+    const ax = d.chest * 0.88;
+    J[`shoulder.${k}`] = [sx * ax, shY, 0];
+    J[`arm.${k}`] = [sx * ax, shY - 0.015, 0];
+    J[`forearm.${k}`] = [sx * ax, shY - 0.015 - d.arm, 0];
+    J[`hand.${k}`] = [sx * ax, shY - 0.015 - d.arm - d.fore, 0];
+    J[`thigh.${k}`] = [sx * d.hipW, d.hipY - 0.02, 0];
     J[`shin.${k}`] = [sx * d.hipW, d.hipY - d.thigh, 0];
-    J[`foot.${k}`] = [sx * d.hipW, d.footH, 0];
+    J[`foot.${k}`] = [sx * d.hipW, d.footH + 0.02, 0];
   }
   return J;
 }
+/** Lathe profile: narrow hips, a soft belly, then a shoulder shelf that closes into the neck. */
+function torsoProfile(d) {
+  const y0 = d.hipY - 0.03, y1 = Jneck(d);
+  const span = y1 - y0;
+  const neckR = Math.max(0.045, d.headR * 0.46);
+  const hip = Math.max(d.belly * 0.82, d.chest * 0.72);
+  const belly = Math.max(d.belly, hip * 0.92);
+  const waist = belly * 0.9;
+  const chest = Math.max(d.chest * 0.96, waist);
+  const shoulder = Math.max(d.chest, chest);
+  const samples = [[0.045, 0], [hip * 0.78, 0.08], [hip, 0.18], [belly, 0.36], [waist, 0.52], [chest, 0.7], [shoulder, 0.86], [shoulder * 0.98, 0.93], [neckR * 1.45, 0.975], [neckR, 1]];
+  return samples.map(([r, t]) => new THREE.Vector2(Math.max(0.02, r), y0 + t * span));
+}
+const Jneck = (d) => d.hipY + d.torso;
 
 // ---------------------------------------------------------------- geometry helpers
 const _c = new THREE.Color();
@@ -140,55 +159,112 @@ const MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
 export function makeCharacter(look = {}) {
   look = { skin: SKIN[1], shirt: 0x3a86ff, pants: 0x2b2d42, shoes: 0x2b2b33, hair: 'short', hairColor: HAIRC[0], ...look };
   const u = look.uniform;
-  if (u === 'pilot' || u === 'copilot') Object.assign(look, { shirt: 0x14285e, shirt2: 0xffffff, pattern: 'jacket', pants: 0x14285e, hat: look.hat ?? 'pilot', hatColor: 0x14285e, shoes: 0x111111 });
-  if (u === 'cabin') Object.assign(look, { shirt: 0x19b3a6, shirt2: 0xffffff, pattern: 'vest', pants: 0x14285e, hat: look.hat ?? 'pillbox', hatColor: 0x19b3a6, scarf: 0xffc93c });
-  if (u === 'cargo') Object.assign(look, { shirt: 0xff8a1a, shirt2: 0xe8f060, pattern: 'hivis', pants: 0x37474f, hat: look.hat ?? 'hardhat', hatColor: 0xffd23f, shoes: 0x4e342e });
+  if (u === 'pilot' || u === 'copilot') {
+    const stripes = look.stripes ?? (u === 'copilot' ? 3 : 4);
+    Object.assign(look, { shirt: 0x14285e, shirt2: 0xffffff, pattern: 'jacket', pants: 0x14285e, shoes: 0x111111, tie: look.tie ?? 0xf5c542, stripes, sleeves: 'long', hat: look.hat === undefined ? 'pilot' : look.hat, hatColor: look.hatColor ?? 0x14285e });
+  }
+  if (u === 'cabin') {
+    const vest = look.accent ?? 0x19b3a6;
+    Object.assign(look, { shirt: vest, shirt2: 0xffffff, pattern: 'vest', pants: 0x14285e, scarf: look.scarf ?? 0xffc93c, hat: look.hat === undefined ? 'pillbox' : look.hat, hatColor: look.hatColor ?? vest });
+  }
+  if (u === 'cargo') Object.assign(look, { shirt: 0xff8a1a, shirt2: 0x263238, pattern: 'hivis', pants: 0x37474f, shoes: 0x4e342e, gloves: look.gloves ?? 0x37474f, hat: look.hat === undefined ? 'hardhat' : look.hat, hatColor: look.hatColor ?? 0xffd23f });
   const d = dims(look), J = joints(d);
   const parts = [];
   const skin = look.skin, shirt = look.shirt, pants = look.pants;
-  const pantsTop = d.hipY + d.torso * 0.12;
-  // --- torso: a bean (lathe), painted shirt / pants / belt, weighted hips -> spine -> chest
-  const prof = [];
-  const N = 16;
-  for (let i = 0; i <= N; i++) {
-    const t = i / N, y = d.hipY - d.torso * 0.2 + t * d.torso * 1.18;
-    const bell = Math.sin(Math.PI * t) ** 0.5; // egg: widest through the middle, soft at both ends
-    const r = Math.max(0.03, d.belly * (0.5 + 0.55 * bell) * (1 - t * 0.22) + d.chest * t * 0.2);
-    prof.push(new THREE.Vector2(i === 0 || i === N ? 0.02 : r, y));
-  }
+  const pantsTop = d.hipY + d.torso * 0.08;
+  const yN = J.neck[1];
+  // --- torso: shoulders widest, tapering to the hips. One low-segment lathe, still one draw call.
   const torsoW = (x, y) => (y < J.spine[1] ? blendY('hips', 'spine', J.hips[1] + 0.02, J.spine[1])(x, y) : blendY('spine', 'chest', J.spine[1], J.chest[1])(x, y));
   const paintTorso = (x, y, z) => {
     if (look.dress) return y < d.hipY + d.torso * 0.62 && Math.abs(Math.sin(y * 40)) > 0.97 ? look.shirt2 ?? 0xffffff : shirt;
     if (y < pantsTop) return pants;
-    if (y < pantsTop + 0.03) return look.belt ?? 0x3b2a1e;
+    if (y < pantsTop + 0.025) return look.belt ?? 0x3b2a1e;
     const p = look.pattern;
-    if (p === 'stripes') return Math.floor((y - pantsTop) / 0.06) % 2 ? look.shirt2 ?? 0xffffff : shirt;
-    if (p === 'dots') return (Math.sin(x * 60) * Math.sin(y * 55) * Math.sin(z * 60)) > 0.35 ? look.shirt2 ?? 0xffffff : shirt;
-    if (p === 'split') return y > d.hipY + d.torso * 0.55 ? look.shirt2 ?? 0xffffff : shirt;
-    if (p === 'jacket') return z < 0 && Math.abs(x) < 0.035 + (y - pantsTop) * 0.12 && y > d.hipY + d.torso * 0.5 ? look.shirt2 : shirt; // white shirt V
-    if (p === 'vest') return z < 0 && Math.abs(x) < 0.05 && y > d.hipY + d.torso * 0.35 ? look.shirt2 : shirt;
-    if (p === 'hivis') return Math.abs(y - (d.hipY + d.torso * 0.45)) < 0.025 || Math.abs(y - (d.hipY + d.torso * 0.7)) < 0.025 ? 0xf2f2f2 : shirt;
+    if (p === 'stripes') return Math.floor((y - pantsTop) / 0.055) % 2 ? look.shirt2 ?? 0xffffff : shirt;
+    if (p === 'dots') return (Math.sin(x * 55) * Math.sin(y * 50) * Math.sin(z * 55)) > 0.35 ? look.shirt2 ?? 0xffffff : shirt;
+    if (p === 'split') return y > d.hipY + d.torso * 0.5 ? look.shirt2 ?? 0xffffff : shirt;
+    if (p === 'jacket') return z < -d.chest * 0.2 && Math.abs(x) < 0.018 + (yN - y) * 0.2 && y > d.hipY + d.torso * 0.38 ? look.shirt2 : shirt;
+    if (p === 'vest') return z < -d.chest * 0.12 && Math.abs(x) < d.chest * 0.32 ? (look.shirt2 ?? 0xffffff) : shirt;
+    if (p === 'hivis') return shirt;
+    if (p === 'hoodie') return z < 0 && Math.abs(x) < d.chest * 0.42 && y > d.hipY + d.torso * 0.16 && y < d.hipY + d.torso * 0.46 ? shade(shirt, 0.8) : shirt;
+    if (p === 'explorer') {
+      if (Math.abs(y - (d.hipY + d.torso * 0.18)) < 0.016) return 0x5d4037;
+      if (z < 0 && Math.abs(x) < 0.012) return 0x8d6e3f;
+      return shirt;
+    }
+    if (p === 'overalls') {
+      if (z < 0 && Math.abs(x) < 0.045 && Math.abs(y - (d.hipY + d.torso * 0.42)) < 0.035) return shade(shirt, 0.72);
+      if (z < 0 && Math.abs(x) < d.chest * 0.5 && y > d.hipY + d.torso * 0.3) return shade(shirt, 1.12);
+      return y < d.hipY + d.torso * 0.3 ? shirt : 0xc5ced6;
+    }
+    if (p === 'astronaut') return Math.abs(y - (d.hipY + d.torso * 0.55)) < 0.014 ? (look.accent ?? 0x1e6bff) : shirt;
+    if (p === 'dino') {
+      const by = d.hipY + d.torso * 0.42;
+      if (z < 0 && (x / (d.chest * 0.65)) ** 2 + ((y - by) / (d.torso * 0.26)) ** 2 < 1) return shade(shirt, 1.35);
+      return shirt;
+    }
     return shirt;
   };
-  parts.push(part(new THREE.LatheGeometry(prof, 16), shirt, 'chest', { paint: paintTorso, weights: torsoW, scale: [1, 1, 0.9] }));
+  parts.push(part(new THREE.LatheGeometry(torsoProfile(d), 12), shirt, 'chest', { paint: paintTorso, weights: torsoW, scale: [1, 1, 0.86] }));
   if (look.skirt || look.dress) {
-    const sk = new THREE.CylinderGeometry(d.belly * 0.95, d.belly * 1.5, d.thigh * 0.95, 18, 1, true);
-    parts.push(part(sk, look.dress ? shirt : look.skirtColor ?? pants, 'hips', { pos: [0, d.hipY - d.thigh * 0.4, 0], scale: [1, 1, 0.9] }));
+    const sk = new THREE.CylinderGeometry(d.belly * 0.9, d.belly * 1.35, d.thigh * 0.85, 12, 1, true);
+    parts.push(part(sk, look.dress ? shirt : look.skirtColor ?? pants, 'hips', { pos: [0, d.hipY - d.thigh * 0.35, 0], scale: [1, 1, 0.88] }));
   }
-  if (look.scarf) parts.push(part(new THREE.TorusGeometry(d.chest * 0.55, 0.035, 6, 14), look.scarf, 'chest', { pos: [0, J.neck[1] - 0.03, 0], rot: [Math.PI / 2, 0, 0] }));
-  if (look.tie) parts.push(part(new THREE.ConeGeometry(0.03, 0.18, 4), look.tie, 'chest', { pos: [0, J.neck[1] - 0.13, -d.chest * 0.86], rot: [Math.PI, 0, 0] }));
-  // --- head: big, slightly squashed sphere + ears + nose
+  if (look.scarf) {
+    parts.push(part(new THREE.TorusGeometry(Math.max(0.06, d.headR * 0.78), 0.016, 5, 12), look.scarf, 'neck', { pos: [0, J.neck[1] + 0.02, 0], rot: [Math.PI / 2, 0, 0.35] }));
+    parts.push(part(new THREE.BoxGeometry(0.04, 0.16, 0.012), look.scarf, 'chest', { pos: [0.03, J.neck[1] - 0.1, -d.chest * 0.78], rot: [0.15, 0, 0.2] }));
+  }
+  if (look.tie) {
+    parts.push(part(new THREE.BoxGeometry(0.028, 0.03, 0.018), shade(look.tie, 0.75), 'chest', { pos: [0, J.neck[1] - 0.03, -d.chest * 0.72] }));
+    parts.push(part(new THREE.ConeGeometry(0.032, 0.2, 4), look.tie, 'chest', { pos: [0, J.neck[1] - 0.14, -d.chest * 0.78], rot: [Math.PI, 0, 0] }));
+  }
+  if (look.pattern === 'hivis' || u === 'cargo') {
+    for (const t of [0.42, 0.66]) parts.push(part(new THREE.TorusGeometry(Math.max(0.08, d.chest * 0.9), 0.01, 4, 14), 0xf4f7fb, 'chest', { pos: [0, d.hipY + d.torso * t, 0], rot: [Math.PI / 2, 0, 0], scale: [1, 0.86, 1] }));
+  }
+  if (look.stripes) {
+    const n = look.stripes;
+    for (const [k, sx] of [['L', 1], ['R', -1]]) {
+      const sh = J[`shoulder.${k}`];
+      const y = sh[1] + d.limbR * 1.45;
+      parts.push(part(new THREE.BoxGeometry(0.11, 0.012, 0.046), 0x0c1838, `shoulder.${k}`, { pos: [sh[0], y, -0.025] }));
+      for (let i = 0; i < n; i++) {
+        const x = sh[0] + sx * ((i - (n - 1) / 2) * 0.02);
+        const gold = !(u === 'copilot' && i === n - 1);
+        parts.push(part(new THREE.BoxGeometry(0.014, 0.01, 0.042), gold ? 0xf5c542 : 0xe7eef8, `shoulder.${k}`, { pos: [x, y + 0.01, -0.028] }));
+      }
+    }
+  }
+  if (look.pattern === 'hoodie') {
+    parts.push(part(new THREE.TorusGeometry(d.headR * 0.85, 0.028, 5, 12), shade(shirt, 0.85), 'neck', { pos: [0, J.neck[1] + 0.02, 0.02], rot: [Math.PI / 2 - 0.3, 0, 0] }));
+    for (const sx of [-1, 1]) parts.push(part(capsule(0.006, 0.08, 2, 4), 0xffffff, 'chest', { pos: [sx * 0.03, J.neck[1] - 0.08, -d.chest * 0.8] }));
+  }
+  if (look.pattern === 'explorer') {
+    for (const sx of [-1, 1]) parts.push(part(new THREE.BoxGeometry(0.06, 0.05, 0.02), 0xa9844c, 'chest', { pos: [sx * d.chest * 0.45, d.hipY + d.torso * 0.62, -d.chest * 0.72] }));
+  }
+  if (look.pattern === 'dino') {
+    for (let i = 0; i < 5; i++) {
+      const y = d.hipY + 0.06 + i * (d.torso / 5);
+      parts.push(part(new THREE.ConeGeometry(0.035, 0.09, 5), shade(shirt, 1.25), i > 3 ? 'neck' : 'chest', { pos: [0, y, d.chest * 0.72], rot: [Math.PI / 2 - 0.4, 0, 0] }));
+    }
+    parts.push(part(new THREE.ConeGeometry(0.07, 0.32, 7), shirt, 'hips', { pos: [0, d.hipY - 0.02, d.belly + 0.12], rot: [Math.PI / 2 + 0.4, 0, 0] }));
+  }
+  if (look.pattern === 'astronaut') {
+    parts.push(part(new THREE.BoxGeometry(0.16, 0.18, 0.06), 0xb0b7c3, 'chest', { pos: [0, J.chest[1], -d.chest * 0.78] }));
+    parts.push(part(new THREE.TorusGeometry(d.headR * 0.7, 0.02, 5, 12), 0x9aa3ad, 'neck', { pos: [0, J.neck[1], 0], rot: [Math.PI / 2, 0, 0] }));
+  }
+  // --- head: round, a little large, sitting on a short neck. The face is parented to the head bone.
   const hc = [0, J.head[1] + d.headR * 0.92, 0];
-  const headW = blendY('neck', 'head', J.neck[1] - 0.02, J.head[1] + 0.02);
-  parts.push(part(sphere(d.headR, 16, 12), skin, 'head', { pos: hc, scale: [1.08, 0.94, 1.02] }));
-  parts.push(part(new THREE.CylinderGeometry(0.06, 0.07, 0.08, 8), skin, 'neck', { pos: [0, J.neck[1] + 0.01, 0], weights: headW }));
-  for (const s of [-1, 1]) parts.push(part(sphere(d.headR * 0.2, 8, 6), skin, 'head', { pos: [s * d.headR * 1.0, hc[1] - d.headR * 0.05, 0.02], scale: [0.6, 1, 0.8] }));
+  const headW = blendY('neck', 'head', J.neck[1], J.head[1]);
+  parts.push(part(sphere(d.headR, 14, 10), skin, 'head', { pos: hc, scale: [1.04, 1, 1.02] }));
+  parts.push(part(new THREE.CylinderGeometry(d.headR * 0.4, d.headR * 0.48, d.neck * 0.92, 8), skin, 'neck', { pos: [0, (J.neck[1] + J.head[1]) / 2, 0], weights: headW }));
+  parts.push(part(new THREE.CylinderGeometry(d.headR * 0.58, d.chest * 0.42, 0.028, 10), shirt, 'neck', { pos: [0, J.neck[1] + 0.012, 0] }));
+  for (const s of [-1, 1]) parts.push(part(sphere(d.headR * 0.18, 7, 5), skin, 'head', { pos: [s * d.headR * 1.02, hc[1] - d.headR * 0.08, 0], scale: [0.55, 1, 0.75] }));
   const noseKind = look.nose ?? 'round';
   if (noseKind === 'round') parts.push(part(sphere(d.headR * 0.13, 8, 6), _c.set(skin).multiplyScalar(0.92).getHex(), 'head', { pos: [0, hc[1] - d.headR * 0.1, hc[2] - d.headR * 0.98] }));
   else parts.push(part(new THREE.ConeGeometry(d.headR * 0.1, d.headR * 0.32, 6), skin, 'head', { pos: [0, hc[1] - d.headR * 0.08, hc[2] - d.headR * 1.08], rot: [-Math.PI / 2, 0, 0] }));
   // --- hair styles
   const hr = d.headR, hcol = look.hairColor;
-  const cap = (k = 0.56, sc = [1.08, 1.06, 1.08], dy = 0.02) => part(new THREE.SphereGeometry(hr, 20, 12, 0, Math.PI * 2, 0, Math.PI * k), hcol, 'head', { pos: [0, hc[1] + dy, hc[2] + 0.01], scale: sc });
+  const cap = (k = 0.56, sc = [1.08, 1.06, 1.08], dy = 0.02) => part(new THREE.SphereGeometry(hr, 14, 8, 0, Math.PI * 2, 0, Math.PI * k), hcol, 'head', { pos: [0, hc[1] + dy, hc[2] + 0.01], scale: sc });
   const hat = look.hat;
   const hairUnderHat = hat && !['pilot', 'pillbox'].includes(hat) ? null : look.hair;
   switch (hat ? (['pilot', 'pillbox'].includes(hat) ? look.hair : 'none') : look.hair) {
@@ -211,14 +287,16 @@ export function makeCharacter(look = {}) {
   const hcolr = look.hatColor ?? 0xd63031;
   const top = hc[1] + hr * 0.62;
   if (hat === 'pilot') { parts.push(part(new THREE.CylinderGeometry(hr * 1.08, hr * 0.95, hr * 0.42, 18), hcolr, 'head', { pos: [0, top + hr * 0.1, 0.02] })); parts.push(part(new THREE.CylinderGeometry(hr * 0.75, hr * 0.75, hr * 0.04, 14, 1, false, Math.PI * 0.6, Math.PI * 0.8), 0x111111, 'head', { pos: [0, top - hr * 0.08, -hr * 0.3], rot: [0.25, 0, 0] })); parts.push(part(sphere(hr * 0.12, 8, 6), 0xf5c542, 'head', { pos: [0, top + hr * 0.12, -hr * 1.02], scale: [1, 1, 0.4] })); parts.push(part(new THREE.TorusGeometry(hr * 0.98, hr * 0.035, 4, 18), 0xf5c542, 'head', { pos: [0, top - hr * 0.04, 0.02], rot: [Math.PI / 2, 0, 0] })); }
-  if (hat === 'pillbox') parts.push(part(new THREE.CylinderGeometry(hr * 0.55, hr * 0.6, hr * 0.32, 14), hcolr, 'head', { pos: [hr * 0.2, top + hr * 0.18, 0], rot: [0, 0, -0.25] }));
+  if (hat === 'pillbox') { parts.push(part(new THREE.CylinderGeometry(hr * 0.78, hr * 0.86, hr * 0.22, 12), hcolr, 'head', { pos: [0, hc[1] + hr * 0.82, 0.02] })); parts.push(part(new THREE.TorusGeometry(hr * 0.8, hr * 0.035, 4, 12), 0xf5c542, 'head', { pos: [0, hc[1] + hr * 0.74, 0.02], rot: [Math.PI / 2, 0, 0] })); }
   if (hat === 'hardhat') { parts.push(part(new THREE.SphereGeometry(hr * 1.08, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), hcolr, 'head', { pos: [0, hc[1] + hr * 0.15, 0] })); parts.push(part(new THREE.CylinderGeometry(hr * 1.25, hr * 1.25, hr * 0.05, 18), hcolr, 'head', { pos: [0, hc[1] + hr * 0.15, -hr * 0.1] })); parts.push(part(capsule(hr * 0.1, hr * 1.2, 2, 6), _c.set(hcolr).multiplyScalar(0.85).getHex(), 'head', { pos: [0, hc[1] + hr * 1.1, 0], rot: [Math.PI / 2, 0, 0] })); for (const s of [-1, 1]) parts.push(part(sphere(hr * 0.3, 10, 6), 0x263238, 'head', { pos: [s * hr * 1.02, hc[1], 0], scale: [0.5, 1, 1] })); }
   if (hat === 'cap') { parts.push(part(new THREE.SphereGeometry(hr * 1.06, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), hcolr, 'head', { pos: [0, hc[1] + hr * 0.12, 0] })); parts.push(part(new THREE.CylinderGeometry(hr * 0.75, hr * 0.75, hr * 0.05, 14, 1, false, Math.PI * 0.6, Math.PI * 0.8), hcolr, 'head', { pos: [0, hc[1] + hr * 0.16, -hr * 0.55], rot: [0.15, 0, 0] })); }
   if (hat === 'beanie') { parts.push(part(new THREE.SphereGeometry(hr * 1.07, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hcolr, 'head', { pos: [0, hc[1] + hr * 0.1, 0], paint: (x, y) => (Math.floor(y * 30) % 2 ? hcolr : 0xffffff) })); parts.push(part(sphere(hr * 0.25, 8, 6), 0xffffff, 'head', { pos: [0, hc[1] + hr * 1.15, 0] })); }
   if (hat === 'tophat') { parts.push(part(new THREE.CylinderGeometry(hr * 0.7, hr * 0.7, hr * 1.1, 16), hcolr, 'head', { pos: [0, top + hr * 0.5, 0] })); parts.push(part(new THREE.CylinderGeometry(hr * 1.15, hr * 1.15, hr * 0.06, 18), hcolr, 'head', { pos: [0, top - hr * 0.02, 0] })); parts.push(part(new THREE.CylinderGeometry(hr * 0.71, hr * 0.71, hr * 0.15, 16), 0xd63031, 'head', { pos: [0, top + hr * 0.1, 0] })); }
   if (hat === 'sunhat') { parts.push(part(new THREE.CylinderGeometry(hr * 1.8, hr * 1.8, hr * 0.05, 22), hcolr, 'head', { pos: [0, top - hr * 0.1, 0] })); parts.push(part(new THREE.SphereGeometry(hr * 0.95, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hcolr, 'head', { pos: [0, top - hr * 0.12, 0] })); parts.push(part(new THREE.TorusGeometry(hr * 0.92, hr * 0.06, 4, 18), 0xff5a5f, 'head', { pos: [0, top - hr * 0.02, 0], rot: [Math.PI / 2, 0, 0] })); }
   if (hat === 'party') parts.push(part(new THREE.ConeGeometry(hr * 0.45, hr * 1.1, 12), hcolr, 'head', { pos: [hr * 0.15, top + hr * 0.5, 0], rot: [0, 0, -0.2], paint: (x, y) => (Math.floor(y * 25) % 2 ? hcolr : 0xffffff) }));
-  if (hat === 'cowboy') { parts.push(part(new THREE.CylinderGeometry(hr * 1.6, hr * 1.6, hr * 0.06, 20), hcolr, 'head', { pos: [0, top - hr * 0.05, 0], scale: [1, 1, 0.8] })); parts.push(part(new THREE.CylinderGeometry(hr * 0.75, hr * 0.85, hr * 0.6, 14), hcolr, 'head', { pos: [0, top + hr * 0.25, 0] })); }
+  if (hat === 'cowboy') { parts.push(part(new THREE.CylinderGeometry(hr * 1.6, hr * 1.6, hr * 0.06, 16), hcolr, 'head', { pos: [0, top - hr * 0.05, 0], scale: [1, 1, 0.8] })); parts.push(part(new THREE.CylinderGeometry(hr * 0.75, hr * 0.85, hr * 0.6, 12), hcolr, 'head', { pos: [0, top + hr * 0.25, 0] })); }
+  if (hat === 'bucket') { parts.push(part(new THREE.CylinderGeometry(hr * 0.9, hr * 1.05, hr * 0.5, 12), hcolr, 'head', { pos: [0, hc[1] + hr * 0.35, 0] })); parts.push(part(new THREE.CylinderGeometry(hr * 1.55, hr * 1.55, hr * 0.04, 14), shade(hcolr, 0.85), 'head', { pos: [0, hc[1] + hr * 0.1, 0] })); }
+  if (hat === 'headphones') { parts.push(part(new THREE.TorusGeometry(hr * 1.05, hr * 0.07, 5, 12, Math.PI), 0x2d3436, 'head', { pos: [0, hc[1] + hr * 0.02, 0], rot: [0, Math.PI / 2, 0] })); for (const s of [-1, 1]) parts.push(part(new THREE.CylinderGeometry(hr * 0.28, hr * 0.28, hr * 0.14, 8), hcolr, 'head', { pos: [s * hr * 1.02, hc[1], 0], rot: [0, 0, Math.PI / 2] })); }
   // --- glasses
   if (look.glasses) {
     const gc = look.glasses === 2 ? 0x111111 : 0x2d2d2d;
@@ -228,22 +306,31 @@ export function makeCharacter(look = {}) {
     }
     parts.push(part(new THREE.BoxGeometry(hr * 0.22, hr * 0.03, hr * 0.03), gc, 'head', { pos: [0, hc[1] + hr * 0.15, hc[2] - hr * 1.0] }));
   }
-  // --- arms (shirt sleeves + skin forearms or full sleeves), mitten hands
+  // --- arms (longer, still soft) with a palm, a thumb and three fingers; legs end in shoes
   const sleeveCol = look.sleeves === 'short' ? skin : shirt;
+  const foreBase = look.pattern === 'hivis' || look.pattern === 'overalls' ? (look.shirt2 ?? 0x263238) : (u === 'pilot' || u === 'copilot' ? shirt : sleeveCol);
+  const handC = look.gloves ?? (look.pattern === 'dino' ? shirt : look.pattern === 'astronaut' ? 0xffffff : skin);
   for (const [k, sx] of [['L', 1], ['R', -1]]) {
     const a = J[`arm.${k}`], f = J[`forearm.${k}`], h = J[`hand.${k}`];
-    parts.push(part(sphere(d.limbR * 1.15, 10, 8), shirt, `arm.${k}`, { pos: a }));
-    parts.push(part(capsule(d.limbR, d.arm * 0.9, 3, 10), shirt, `arm.${k}`, { pos: [a[0], a[1] - d.arm / 2, a[2]] }));
-    const foreCol = look.pattern === 'hivis' || u === 'pilot' || u === 'copilot' ? shirt : sleeveCol;
-    parts.push(part(capsule(d.limbR * 0.92, d.fore * 0.85, 3, 10), foreCol, `forearm.${k}`, { pos: [f[0], f[1] - d.fore / 2, f[2]], paint: (x, y) => (u === 'pilot' || u === 'copilot') && y < f[1] - d.fore * 0.78 ? 0xf5c542 : foreCol }));
-    parts.push(part(sphere(d.limbR * 1.85, 8, 6), look.gloves ?? skin, `hand.${k}`, { pos: [h[0], h[1] - d.limbR * 0.9, h[2]], scale: [0.9, 0.85, 1] }));
-    parts.push(part(sphere(d.limbR * 0.7, 6, 5), look.gloves ?? skin, `hand.${k}`, { pos: [h[0] - sx * 0.0, h[1] - d.limbR * 0.35, h[2] - d.limbR * 1.15] })); // thumb
-    // legs: thighs and shins in trousers (or skin under a skirt), chunky shoes
-    const t = J[`thigh.${k}`], sh = J[`shin.${k}`], ft = J[`foot.${k}`];
+    const sh = J[`shoulder.${k}`];
+    const armSleeve = look.pattern === 'hivis' ? (look.shirt2 ?? 0x263238) : shirt;
+    parts.push(part(sphere(d.limbR * 1.65, 8, 6), shirt, `shoulder.${k}`, { pos: sh, scale: [1.15, 0.85, 1.05] }));
+    parts.push(part(capsule(d.limbR, Math.max(0.05, d.arm - d.limbR * 0.15), 2, 6), armSleeve, `arm.${k}`, { pos: [a[0], a[1] - d.arm / 2, a[2]] }));
+    parts.push(part(capsule(d.limbR * 0.9, Math.max(0.05, d.fore - d.limbR * 0.1), 2, 6), foreBase, `forearm.${k}`, { pos: [f[0], f[1] - d.fore / 2, f[2]], paint: (x, y) => (u === 'pilot' || u === 'copilot') && y < f[1] - d.fore * 0.55 ? 0xf5c542 : foreBase }));
+    const hrim = d.limbR * 1.15;
+    parts.push(part(sphere(hrim, 7, 5), handC, `hand.${k}`, { pos: [h[0], h[1] - hrim * 0.55, h[2] - hrim * 0.15], scale: [1.2, 0.85, 0.7] }));
+    parts.push(part(capsule(hrim * 0.32, hrim * 0.55, 2, 4), handC, `hand.${k}`, { pos: [h[0] - sx * hrim * 0.85, h[1] - hrim * 0.25, h[2] - hrim * 0.45], rot: [0.5, 0, sx * 0.9] }));
+    for (let i = 0; i < 3; i++) parts.push(part(capsule(hrim * 0.22, hrim * 0.62, 2, 4), handC, `hand.${k}`, { pos: [h[0] + (i - 1) * hrim * 0.48, h[1] - hrim * 1.15, h[2] - hrim * 0.2] }));
+    const t = J[`thigh.${k}`], shn = J[`shin.${k}`], ft = J[`foot.${k}`];
     const legCol = look.skirt || look.dress ? skin : pants;
-    parts.push(part(capsule(d.legR, d.thigh * 0.85, 3, 10), look.shorts ? pants : legCol, `thigh.${k}`, { pos: [t[0], t[1] - d.thigh / 2, t[2]] }));
-    parts.push(part(capsule(d.legR * 0.88, d.shin * 0.8, 3, 10), look.shorts || look.skirt || look.dress ? skin : pants, `shin.${k}`, { pos: [sh[0], sh[1] - d.shin / 2 + 0.02, sh[2]] }));
-    parts.push(part(sphere(Math.max(0.08, d.legR * 0.95), 10, 8), look.shoes, `foot.${k}`, { pos: [ft[0], ft[1] - 0.02, ft[2] - 0.04], scale: [0.95, 0.62, 1.35] }));
+    const thighCol = look.shorts ? pants : legCol;
+    const shinCol = look.shorts || look.skirt || look.dress ? skin : pants;
+    parts.push(part(capsule(d.legR, Math.max(0.05, d.thigh - d.legR * 0.15), 2, 7), thighCol, `thigh.${k}`, { pos: [t[0], t[1] - d.thigh / 2, t[2]] }));
+    parts.push(part(capsule(d.legR * 0.86, Math.max(0.05, d.shin - d.legR * 0.1), 2, 7), shinCol, `shin.${k}`, { pos: [shn[0], shn[1] - d.shin / 2, shn[2]] }));
+    const shoe = look.shoes;
+    parts.push(part(new THREE.BoxGeometry(d.legR * 1.55, 0.028, d.legR * 2.6), shade(shoe, 0.72), `foot.${k}`, { pos: [ft[0], ft[1] - 0.012, ft[2] - d.legR * 0.45] }));
+    parts.push(part(new THREE.BoxGeometry(d.legR * 1.35, 0.05, d.legR * 1.55), shoe, `foot.${k}`, { pos: [ft[0], ft[1] + 0.02, ft[2] - d.legR * 0.2] }));
+    parts.push(part(sphere(d.legR * 0.52, 7, 5), shoe, `foot.${k}`, { pos: [ft[0], ft[1] + 0.028, ft[2] - d.legR * 1.2], scale: [1.15, 0.62, 1.2] }));
   }
   if (look.backpack) parts.push(part(new THREE.CapsuleGeometry(d.chest * 0.6, d.torso * 0.25, 3, 10), look.backpack, 'chest', { pos: [0, J.chest[1], d.chest * 0.95], scale: [1, 1, 0.55] }));
   const geo = mergeGeometries(parts, false);
@@ -264,6 +351,11 @@ export function makeCharacter(look = {}) {
   g.updateMatrixWorld(true);
   mesh.bind(new THREE.Skeleton(bones));
   const face = buildFace(d, look); face.position.set(hc[0] - J.head[0], hc[1] - J.head[1], hc[2] - J.head[2]); bones[BI.head].add(face);
+  if (look.pattern === 'astronaut') {
+    const hel = new THREE.Mesh(new THREE.SphereGeometry(d.headR * 1.28, 14, 10), HELMET);
+    hel.position.set(hc[0] - J.head[0], hc[1] - J.head[1], 0);
+    hel.renderOrder = 2; bones[BI.head].add(hel);
+  }
   const mixer = new THREE.AnimationMixer(g);
   g.userData = { mesh, bones, boneByName: Object.fromEntries(bones.map((b) => [b.name, b])), face, dims: d, mixer, clips: clipsFor(d), actions: {}, current: null, expr: null, t: Math.random() * 10, look, oneShot: null, wob: { k: look.wobble ?? 1.15 }, rag: { phase: '', k: 0 } };
   setExpression(g, 'neutral');
@@ -511,7 +603,7 @@ export const CLIP_NAMES = ['idle', 'walk', 'run', 'sitDown', 'sit', 'standUp', '
 export function randomPassengerLook(rnd = Math.random) {
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const fem = rnd() < 0.5;
-  // same jelly family as the crew, with their own shapes: fat balls, pears, short bricks, the odd noodle
+  // same people as the crew, with their own shapes: round, lanky, pear-shaped, broad, short, elder
   const shape = pick(['ball', 'noodle', 'pear', 'brick', 'egg', 'tiny', 'average', 'elder', 'ball', 'pear']);
   const sh = { average: [1, 1.12, 1.05, 1], ball: [0.86, 1.5, 0.95, 1.05], noodle: [1.16, 0.78, 1.05, 0.72], pear: [0.96, 1.4, 1.05, 0.78], brick: [1.02, 1.25, 0.95, 1.35], egg: [0.9, 1.3, 1.1, 0.88], tiny: [0.72, 1.05, 1.15, 0.92], elder: [0.94, 1.22, 1.02, 0.95] }[shape];
   const hair = fem ? pick(['long', 'bun', 'ponytail', 'bob', 'curly', 'afro', 'short']) : pick(['short', 'short', 'spiky', 'bald', 'mohawk', 'curly', 'afro', 'bob']);
@@ -548,7 +640,7 @@ export function nameTag(name, role, badge = '') {
   g.font = 'bold 44px -apple-system, Segoe UI, sans-serif'; g.fillStyle = color; g.fillText(name, x0 + 12 + bw + 14, 66, 330);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  s.scale.set(1.6, 0.4, 1); s.position.y = 1.62; s.renderOrder = 10;
+  s.scale.set(1.6, 0.4, 1); s.position.y = 1.95; s.renderOrder = 10;
   return s;
 }
 
@@ -571,9 +663,9 @@ export function bubble(kind) {
 
 function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 
-// ================================================================ crew "bean" explorers (players)
-// Original Sky Crew design: one soft jelly-bean body with the face sat on it, dot eyes, a tiny mouth,
-// stubby arms and little legs. Same rig and clips as the passengers, with a looser wobble.
+// ================================================================ crew (players)
+// Same people as the passengers, with the shop outfit or the co-op job uniform and a looser wobble.
+// role (pilot | copilot | cabin | cargo) dresses the job; hat, colour and skin stay the player's.
 export const OUTFIT_PALETTE = [0x2f6fde, 0xe8453c, 0x2bb673, 0xf6b93b, 0x8e5bd9, 0xff7eb6, 0x1fb5c9, 0xff8a1a, 0x3b3f4a, 0xf3f0e6];
 export const CREW_SKINS = [0xffe0c4, 0xf1c27d, 0xe0ac69, 0xc68642, 0x9c6136, 0x70432a, 0xfff0e0];
 export const OUTFIT_NAMES = { captain: 'Captain uniform', attendant: 'Flight attendant', mechanic: 'Mechanic overalls', hoodie: 'Comfy hoodie', explorer: 'Explorer jacket', dino: 'Dino costume', astronaut: 'Space suit' };
@@ -581,122 +673,41 @@ const HELMET = new THREE.MeshPhongMaterial({ color: 0xbfe6ff, transparent: true,
 const shade = (c, k) => _c.set(c).multiplyScalar(k).getHex();
 
 export function makeCrew(o = {}) {
-  o = { outfit: 'captain', hat: 'captain', color: 0, skin: 1, ...o };
-  const col = OUTFIT_PALETTE[o.color] ?? OUTFIT_PALETTE[0], skin = CREW_SKINS[o.skin] ?? CREW_SKINS[1];
-  const fit = o.outfit;
-  // --- proportions
-  const footH = 0.05, thigh = 0.12, shin = 0.11, hipY = footH + thigh + shin;
-  const y0 = hipY - 0.06, H = 1.02, rB = 0.4, rT = 0.36;
-  const d = { s: 1, g: 1.15, leg: thigh + shin, torso: 0.72, headR: 0.34, belly: rB, chest: rT, footH, hipY, thigh, shin, arm: 0.15, fore: 0.13, limbR: 0.074, legR: 0.098, hipW: 0.16 };
-  const J = {
-    hips: [0, hipY, 0], spine: [0, hipY + 0.22, 0], chest: [0, hipY + 0.42, 0], neck: [0, hipY + 0.58, 0], head: [0, hipY + 0.64, 0],
+  o = { outfit: 'captain', hat: 'captain', color: 0, skin: 1, role: null, ...o };
+  const col = OUTFIT_PALETTE[o.color] ?? OUTFIT_PALETTE[0];
+  const skin = CREW_SKINS[o.skin] ?? CREW_SKINS[1];
+  const hat = o.hat === 'none' ? null : o.hat === 'captain' ? 'pilot' : o.hat;
+  const base = {
+    skin, hair: 'short', hairColor: 0x2b1b12, hat, hatColor: col, accent: col,
+    shoulders: 1.18, height: 1.02, girth: 1.12, headSize: 1.08, legs: 1,
+    eyeSize: 0.36, wobble: 1.85, nose: 'round',
   };
-  const shY = hipY + 0.46;
-  for (const [k, sx] of [['L', 1], ['R', -1]]) {
-    J[`shoulder.${k}`] = [sx * 0.16, shY, 0]; J[`arm.${k}`] = [sx * 0.29, shY, 0]; J[`forearm.${k}`] = [sx * 0.29, shY - d.arm, 0]; J[`hand.${k}`] = [sx * 0.29, shY - d.arm - d.fore, 0];
-    J[`thigh.${k}`] = [sx * d.hipW, hipY, 0]; J[`shin.${k}`] = [sx * d.hipW, hipY - thigh, 0]; J[`foot.${k}`] = [sx * d.hipW, footH, 0];
-  }
-  const radAt = (y) => { const t = Math.max(0, Math.min(1, (y - y0) / H)); const w = rB + (rT - rB) * t; return w * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(2 * t - 1), 2.6)), 1 / 2.6); };
-  const collarY = hipY + 0.55, faceY = hipY + 0.7, topY = y0 + H;
-  const parts = [];
-  // --- body bean: weights blend hips -> spine -> chest -> neck -> head going up (floppy top)
-  const prof = []; const N = 44;
-  for (let i = 0; i <= N; i++) { const t = i / N, y = y0 + t * H; prof.push(new THREE.Vector2(i === 0 ? 0.001 : i === N ? 0.001 : Math.max(0.01, radAt(y)), y)); }
-  const beanW = (x, y) => {
-    if (y < J.spine[1]) return blendY('hips', 'spine', hipY, J.spine[1])(x, y);
-    if (y < J.chest[1]) return blendY('spine', 'chest', J.spine[1], J.chest[1])(x, y);
-    if (y < J.neck[1]) return blendY('chest', 'neck', J.chest[1], J.neck[1])(x, y);
-    return blendY('neck', 'head', J.neck[1], J.head[1] + 0.06)(x, y);
-  };
-  const front = (z) => z < 0;
-  const inFace = (x, y, z) => front(z) && ((x / 0.2) ** 2 + ((y - faceY) / 0.2) ** 2) < 1; // the hood opening
-  const paint = (x, y, z) => {
-    if (fit === 'dino') { if (y >= collarY - 0.02 && inFace(x, y, z)) return skin; if (front(z) && ((x / 0.19) ** 2 + ((y - (hipY + 0.28)) / 0.27) ** 2) < 1) return shade(col, 1.35); return col; }
-    if (y >= collarY) return skin;
-    if (fit === 'astronaut') return Math.abs(y - (hipY + 0.4)) < 0.03 ? col : 0xf2f2f2;
-    if (y < hipY + 0.05 && fit !== 'mechanic' && fit !== 'dino') return fit === 'captain' ? 0x1b2a5c : fit === 'explorer' ? 0x6b5b3a : fit === 'attendant' ? 0x1d3557 : 0x3d5a80; // trousers band
-    if (fit === 'captain') {
-      if (front(z) && Math.abs(x) < 0.028 && y > collarY - 0.3 && y < collarY - 0.02) return col; // tie
-      if (front(z) && Math.abs(x) < 0.03 + (y - (collarY - 0.32)) * 0.35 && y > collarY - 0.32) return 0xffffff; // shirt V
-      if (front(z) && Math.abs(Math.abs(x) - 0.09) < 0.014 && Math.abs(((y - hipY) % 0.1) - 0.05) < 0.014 && y < collarY - 0.1) return 0xf5c542; // buttons
-      return Math.abs(y - (hipY + 0.07)) < 0.018 ? 0x101828 : 0x1b2a5c;
-    }
-    if (fit === 'attendant') { if (front(z) && Math.abs(x) < 0.02 + (y - (collarY - 0.22)) * 0.5 && y > collarY - 0.22) return 0xffffff; return Math.abs(y - (hipY + 0.2)) < 0.02 ? 0xf5c542 : col; }
-    if (fit === 'mechanic') {
-      if (front(z) && Math.abs(x) < 0.15 && y > hipY + 0.22 && y < collarY - 0.06) return shade(col, 1.15); // bib
-      if (front(z) && Math.abs(x - 0.06) < 0.045 && Math.abs(y - (hipY + 0.3)) < 0.04) return shade(col, 0.7); // pocket
-      if (Math.abs(Math.abs(x) - 0.12) < 0.022 && y > collarY - 0.12) return shade(col, 1.25); // straps
-      return y > collarY - 0.06 ? 0x9aa3ad : col;
-    }
-    if (fit === 'hoodie') { if (front(z) && Math.abs(x) < 0.15 && y > hipY + 0.12 && y < hipY + 0.3) return shade(col, 0.82); if (y < hipY + 0.11) return shade(col, 0.75); return col; }
-    if (fit === 'explorer') {
-      const kh = 0xc8a165;
-      if (front(z) && Math.abs(Math.abs(x) - 0.12) < 0.05 && Math.abs(y - (hipY + 0.42)) < 0.045) return 0xa9844c; // chest pockets
-      if (Math.abs(y - (hipY + 0.13)) < 0.022) return 0x5d4037; // belt
-      if (front(z) && Math.abs(x) < 0.012) return 0x8d6e3f; // zip
-      return kh;
-    }
-    return col;
-  };
-  parts.push(part(new THREE.LatheGeometry(prof, 36), col, 'chest', { paint, weights: beanW, scale: [1, 1, 0.92] }));
-  // --- outfit extras
-  const bodyCol = { captain: 0x1b2a5c, attendant: col, mechanic: col, hoodie: col, explorer: 0xc8a165, dino: col, astronaut: 0xf2f2f2 }[fit] ?? col;
-  if (fit === 'attendant') parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.85, 0.03, 6, 16), 0xf5c542, 'neck', { pos: [0, collarY - 0.02, 0], rot: [Math.PI / 2, 0, 0], scale: [1, 0.92, 1] }));
-  if (fit === 'attendant') parts.push(part(new THREE.CylinderGeometry(rB * 1.0, rB * 1.22, 0.16, 18, 1, true), col, 'hips', { pos: [0, hipY - 0.02, 0] }));
-  if (fit === 'explorer') { parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.88, 0.035, 6, 16), col, 'neck', { pos: [0, collarY - 0.02, 0], rot: [Math.PI / 2, 0, 0] })); parts.push(part(capsule(0.17, 0.2, 3, 10), 0x8d6e3f, 'chest', { pos: [0, hipY + 0.38, radAt(hipY + 0.38) * 0.95], scale: [1, 1, 0.55] })); }
-  if (fit === 'hoodie') { parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.9, 0.06, 6, 16), shade(col, 0.85), 'neck', { pos: [0, collarY, 0.03], rot: [Math.PI / 2 - 0.25, 0, 0] })); for (const sx of [-1, 1]) parts.push(part(capsule(0.008, 0.1, 2, 4), 0xffffff, 'chest', { pos: [sx * 0.04, collarY - 0.1, -radAt(collarY - 0.1) * 0.92] })); }
-  if (fit === 'mechanic') parts.push(part(new THREE.TorusGeometry(0.035, 0.012, 4, 10), 0xc0c0c0, 'hips', { pos: [-0.2, hipY + 0.05, -0.12], rot: [0, 0.6, 0] })); // wrench loop
-  if (fit === 'astronaut') { parts.push(part(new THREE.BoxGeometry(0.34, 0.4, 0.16), 0xb0b7c3, 'chest', { pos: [0, hipY + 0.38, radAt(hipY + 0.38) * 0.9] })); parts.push(part(new THREE.TorusGeometry(radAt(collarY) * 0.95, 0.04, 6, 18), 0x9aa3ad, 'neck', { pos: [0, collarY, 0], rot: [Math.PI / 2, 0, 0] })); }
-  if (fit === 'dino') {
-    for (let i = 0; i < 6; i++) { const y = hipY + 0.1 + i * 0.16; parts.push(part(new THREE.ConeGeometry(0.05, 0.12, 5), shade(col, 1.3), i > 3 ? 'head' : 'chest', { pos: [0, y, radAt(y) * 0.92 + 0.03], rot: [Math.PI / 2 - 0.3, 0, 0], weights: beanW })); }
-    parts.push(part(new THREE.ConeGeometry(0.12, 0.45, 10), col, 'hips', { pos: [0, hipY + 0.02, rB + 0.12], rot: [Math.PI / 2 + 0.5, 0, 0] })); // tail
-    for (const sx of [-1, 1]) parts.push(part(new THREE.ConeGeometry(0.03, 0.06, 4), 0xffffff, 'head', { pos: [sx * 0.08, faceY + 0.2, -radAt(faceY + 0.2) * 0.95], rot: [Math.PI, 0, 0], weights: beanW })); // felt teeth on the hood
-  }
-  // --- arms (noodles) + mitten hands
-  const sleeve = { captain: 0x1b2a5c, attendant: col, mechanic: 0x9aa3ad, hoodie: col, explorer: 0xc8a165, dino: col, astronaut: 0xf2f2f2 }[fit] ?? col;
-  const handC = fit === 'astronaut' ? 0xffffff : fit === 'mechanic' ? 0x37474f : fit === 'dino' ? col : skin;
-  for (const [k, sx] of [['L', 1], ['R', -1]]) {
-    const a = J[`arm.${k}`], f = J[`forearm.${k}`], h = J[`hand.${k}`];
-    parts.push(part(capsule(d.limbR, d.arm * 0.95, 3, 8), sleeve, `arm.${k}`, { pos: [a[0], a[1] - d.arm / 2, a[2]] }));
-    parts.push(part(capsule(d.limbR * 0.95, d.fore * 0.9, 3, 8), fit === 'mechanic' ? skin : sleeve, `forearm.${k}`, { pos: [f[0], f[1] - d.fore / 2, f[2]], paint: (x, y) => (fit === 'captain' && y < f[1] - d.fore * 0.75 ? 0xf5c542 : fit === 'astronaut' && y < f[1] - d.fore * 0.75 ? col : fit === 'mechanic' ? skin : sleeve) }));
-    parts.push(part(sphere(0.09, 8, 6), handC, `hand.${k}`, { pos: [h[0], h[1] - 0.04, h[2]], scale: [0.95, 0.85, 1] }));
-    parts.push(part(sphere(0.038, 6, 5), handC, `hand.${k}`, { pos: [h[0] - sx * 0.04, h[1] - 0.02, h[2] - 0.045] }));
-    const t = J[`thigh.${k}`], sh = J[`shin.${k}`], ft = J[`foot.${k}`];
-    const pants = { captain: 0x1b2a5c, attendant: 0x1d3557, mechanic: col, hoodie: 0x3d5a80, explorer: 0x6b5b3a, dino: col, astronaut: 0xf2f2f2 }[fit] ?? 0x2b2d42;
-    const shoe = { captain: 0x111111, attendant: 0x111111, mechanic: 0x4e342e, hoodie: 0xffffff, explorer: 0x5d4037, dino: shade(col, 0.7), astronaut: 0x9aa3ad }[fit] ?? 0x2b2b33;
-    parts.push(part(capsule(d.legR, thigh * 0.8, 3, 8), pants, `thigh.${k}`, { pos: [t[0], t[1] - thigh / 2, t[2]] }));
-    parts.push(part(capsule(d.legR * 0.92, shin * 0.75, 3, 8), pants, `shin.${k}`, { pos: [sh[0], sh[1] - shin / 2 + 0.02, sh[2]] }));
-    parts.push(part(sphere(0.1, 10, 8), shoe, `foot.${k}`, { pos: [ft[0], ft[1] - 0.02, ft[2] - 0.035], scale: [1, 0.62, 1.3] }));
-  }
-  void bodyCol;
-  // --- hats (sit on the top of the bean)
-  const hat = fit === 'astronaut' ? 'none' : o.hat;
-  const tr = radAt(topY - 0.12) * 1.02, ht = topY - 0.1, hc = col;
-  const HP = (geo, c, opt) => part(geo, c, 'head', opt);
-  if (hat === 'captain') { parts.push(HP(new THREE.CylinderGeometry(tr * 1.12, tr * 0.98, 0.13, 18), 0x1b2a5c, { pos: [0, ht + 0.07, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 0.8, tr * 0.8, 0.015, 14, 1, false, Math.PI * 0.6, Math.PI * 0.8), 0x111111, { pos: [0, ht + 0.01, -tr * 0.25], rot: [0.22, 0, 0] })); parts.push(HP(new THREE.TorusGeometry(tr * 1.0, 0.012, 4, 18), 0xf5c542, { pos: [0, ht + 0.03, 0], rot: [Math.PI / 2, 0, 0] })); parts.push(HP(sphere(0.03, 8, 6), 0xf5c542, { pos: [0, ht + 0.08, -tr * 1.1], scale: [1, 1, 0.4] })); }
-  if (hat === 'pillbox') parts.push(HP(new THREE.CylinderGeometry(tr * 0.55, tr * 0.6, 0.1, 14), hc, { pos: [tr * 0.25, ht + 0.07, 0], rot: [0, 0, -0.25] }));
-  if (hat === 'beanie') { parts.push(HP(new THREE.SphereGeometry(tr * 1.06, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hc, { pos: [0, ht - 0.04, 0], paint: (x, y) => (Math.floor(y * 40) % 2 ? hc : 0xffffff) })); parts.push(HP(sphere(0.06, 8, 6), 0xffffff, { pos: [0, ht + tr * 1.02, 0] })); }
-  if (hat === 'cap') { parts.push(HP(new THREE.SphereGeometry(tr * 1.05, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hc, { pos: [0, ht - 0.03, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 0.8, tr * 0.8, 0.015, 14, 1, false, Math.PI * 0.6, Math.PI * 0.8), hc, { pos: [0, ht - 0.02, -tr * 0.55], rot: [0.1, 0, 0] })); }
-  if (hat === 'bucket') { parts.push(HP(new THREE.CylinderGeometry(tr * 0.85, tr * 1.05, 0.14, 16), 0xc8a165, { pos: [0, ht + 0.04, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 1.45, tr * 1.45, 0.015, 18), 0xb08d55, { pos: [0, ht - 0.02, 0] })); parts.push(HP(new THREE.TorusGeometry(tr * 0.98, 0.015, 4, 16), hc, { pos: [0, ht + 0.0, 0], rot: [Math.PI / 2, 0, 0] })); }
-  if (hat === 'hardhat') { parts.push(HP(new THREE.SphereGeometry(tr * 1.1, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), 0xffd23f, { pos: [0, ht - 0.03, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 1.3, tr * 1.3, 0.015, 18), 0xffd23f, { pos: [0, ht - 0.03, -0.02] })); }
-  if (hat === 'party') parts.push(HP(new THREE.ConeGeometry(tr * 0.45, 0.3, 12), hc, { pos: [tr * 0.15, ht + 0.16, 0], rot: [0, 0, -0.2], paint: (x, y) => (Math.floor(y * 30) % 2 ? hc : 0xffffff) }));
-  if (hat === 'tophat') { parts.push(HP(new THREE.CylinderGeometry(tr * 0.7, tr * 0.7, 0.3, 16), 0x222222, { pos: [0, ht + 0.16, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 1.15, tr * 1.15, 0.015, 18), 0x222222, { pos: [0, ht + 0.01, 0] })); parts.push(HP(new THREE.CylinderGeometry(tr * 0.71, tr * 0.71, 0.04, 16), hc, { pos: [0, ht + 0.04, 0] })); }
-  if (hat === 'headphones') { parts.push(HP(new THREE.TorusGeometry(radAt(faceY + 0.08) * 1.04, 0.022, 6, 18, Math.PI), 0x2d3436, { pos: [0, faceY + 0.06, 0], rot: [0, Math.PI / 2, 0] })); for (const sx of [-1, 1]) parts.push(HP(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 12), hc, { pos: [sx * radAt(faceY) * 1.02, faceY, 0], rot: [0, 0, Math.PI / 2] })); }
-  // --- assemble (same skeleton setup as makeCharacter)
-  const geo = mergeGeometries(parts, false); for (const p2 of parts) p2.dispose(); geo.computeBoundingSphere();
-  const bones = BONES.map((n) => { const b = new THREE.Bone(); b.name = n; return b; });
-  for (const n of BONES) { const b = bones[BI[n]], p2 = PARENT[n]; const wp = J[n], pp = p2 ? J[p2] : [0, 0, 0]; b.position.set(wp[0] - pp[0], wp[1] - pp[1], wp[2] - pp[2]); if (p2) bones[BI[p2]].add(b); }
-  const mesh = new THREE.SkinnedMesh(geo, MAT); mesh.castShadow = true; mesh.frustumCulled = false;
-  const g = new THREE.Group(); g.add(bones[0]); g.add(mesh); g.updateMatrixWorld(true); mesh.bind(new THREE.Skeleton(bones));
-  // face right on the bean: big eyes, tiny mouth (built at the bean radius so it hugs the surface)
-  const fr = radAt(faceY) * 0.94;
-  const face = buildFace({ headR: fr }, { eyeSize: 0.3 });
-  face.userData.brows.forEach((b) => b.scale.multiplyScalar(0.8));
-  face.position.set(0, faceY - J.head[1], -0.035); bones[BI.head].add(face);
-  if (fit === 'astronaut') { const hel = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 14), HELMET); hel.position.set(0, faceY - J.head[1] + 0.04, 0); hel.renderOrder = 2; bones[BI.head].add(hel); }
-  const mixer = new THREE.AnimationMixer(g);
-  d.headR = fr;
-  g.userData = { mesh, bones, boneByName: Object.fromEntries(bones.map((b) => [b.name, b])), face, dims: d, mixer, clips: clipsFor(d), actions: {}, current: null, expr: null, t: Math.random() * 10, look: { crew: o }, oneShot: null, wob: { k: 1.85 }, rag: { phase: '', k: 0 }, crew: true };
-  setExpression(g, 'neutral'); play(g, 'idle', 0);
+  const role = o.role;
+  let look;
+  if (role === 'pilot' || role === 'copilot') {
+    look = { ...base, uniform: role, stripes: role === 'copilot' ? 3 : 4, tie: 0xf5c542, hatColor: 0x14285e, hat: o.hat === 'captain' || o.hat == null ? 'pilot' : hat };
+  } else if (role === 'cabin') {
+    look = { ...base, uniform: 'cabin', accent: col, scarf: 0xffc93c, hat: o.hat === 'captain' ? 'pillbox' : hat, hatColor: col };
+  } else if (role === 'cargo') {
+    look = { ...base, uniform: 'cargo', hat: o.hat === 'captain' || o.hat == null ? 'hardhat' : hat, hatColor: 0xffd23f };
+  } else if (o.outfit === 'captain') {
+    look = { ...base, uniform: 'pilot', stripes: 4, tie: 0xf5c542, hatColor: 0x14285e };
+  } else if (o.outfit === 'attendant') {
+    look = { ...base, uniform: 'cabin', accent: col, scarf: 0xffc93c, hat: hat === 'pilot' ? 'pillbox' : hat, hatColor: col };
+  } else if (o.outfit === 'mechanic') {
+    look = { ...base, shirt: col, pants: col, pattern: 'overalls', shoes: 0x4e342e, gloves: 0x37474f, sleeves: 'short', hat: hat === 'pilot' ? 'cap' : hat, hatColor: col };
+  } else if (o.outfit === 'hoodie') {
+    look = { ...base, shirt: col, pants: 0x3d5a80, pattern: 'hoodie', shoes: 0xffffff, sleeves: 'long' };
+  } else if (o.outfit === 'explorer') {
+    look = { ...base, shirt: 0xc8a165, pants: 0x6b5b3a, pattern: 'explorer', shoes: 0x5d4037, backpack: 0x8d6e3f, hat: hat === 'pilot' ? 'bucket' : hat, hatColor: 0xc8a165 };
+  } else if (o.outfit === 'dino') {
+    look = { ...base, shirt: col, pants: col, pattern: 'dino', shoes: shade(col, 0.7), hair: 'none', hat: null };
+  } else if (o.outfit === 'astronaut') {
+    look = { ...base, shirt: 0xf2f2f2, pants: 0xf2f2f2, pattern: 'astronaut', shoes: 0x9aa3ad, hair: 'none', hat: null, accent: col };
+  } else look = { ...base, shirt: col, pants: 0x2b2d42 };
+  const g = makeCharacter(look);
+  g.userData.look = { crew: { outfit: o.outfit, hat: o.hat, color: o.color, skin: o.skin, role: role || null } };
+  g.userData.crew = true;
+  g.userData.wob.k = 1.85;
   return g;
 }

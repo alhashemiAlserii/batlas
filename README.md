@@ -267,7 +267,7 @@ The overlay shows only the tools your rank allows. **The game server re-checks e
 
 All designs below are original to Sky Crew (see `docs/ASSETS.md`). Nothing is copied from another game.
 
-- **Crew characters:** round, friendly "bean" crew with faces, little arms and feet, idle wobble, walk, run, sit, wave and cheer animations.
+- **Crew characters:** cartoon people with a round head, a short neck, shoulders, hands and shoes. They keep the idle wobble, walk, run, sit, wave and cheer animations.
   - 7 outfits (captain, attendant, mechanic, hoodie, explorer, dino suit, astronaut), 9 hats (or none), 10 colours and 7 skin tones.
   - Choose them in the **Shop & locker**. The choice is saved to your account (`PUT /api/game/sky-crew/outfit`) and synced to everyone in the room. The server only accepts whitelisted values.
 - **Passengers:** comedic NPCs with personalities, requests, reactions and seeded looks (everyone in a room sees the same people).

@@ -83,7 +83,7 @@ let myClass = null; // class for the next flight (server-checked in rooms)
 let myAvatar = makeCrew(myOutfit);
 ship.plane.add(myAvatar);
 let myCrew = null; // lobby pick: pilot | copilot | cabin | cargo (solo: null = do everything)
-function dressMe() { ship.plane.remove(myAvatar); myAvatar = makeCrew(myOutfit); ship.plane.add(myAvatar); if (gadgets) gadgets.rebuild(myId()); }
+function dressMe() { ship.plane.remove(myAvatar); myAvatar = makeCrew({ ...myOutfit, role: myCrew }); ship.plane.add(myAvatar); if (gadgets) gadgets.rebuild(myId()); }
 let gadgets = null; // Developer gadgets (created once the remote-player table exists)
 let myCid = 'solo', myRole = null, playing = false, paused = false, seenSeed = sim.seed, resultsShown = false;
 const myId = () => (net.inRoom ? net.cid : 'solo');
@@ -246,8 +246,8 @@ function bumpCrew() {
   }
 }
 function updatePlayer(dt) {
-  if (me.mode === 'pilot') { me.pos.set(-0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
-  if (me.mode === 'copilot') { me.pos.set(0.6, 0.48, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
+  if (me.mode === 'pilot') { me.pos.set(-0.6, 0, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
+  if (me.mode === 'copilot') { me.pos.set(0.6, 0, -14.6); me.vel.set(0, 0, 0); me.onGround = true; me.downT = 0; return; }
   if (me.downT > 0) me.downT = Math.max(0, me.downT - dt);
   let fx = 0, fz = 0;
   if (keys.has('KeyW') || keys.has('ArrowUp')) fz -= 1;
@@ -667,14 +667,14 @@ function showMaintenance(message) {
 $('#maintClose').addEventListener('click', () => UI.show('#maint', false));
 function syncRemotes(room) {
   const ids = new Set(room ? room.players.map((p) => p.cid) : []);
-  const lookKey = (p) => `${JSON.stringify(p?.outfit || DEFAULT_OUTFIT)}|${p?.klass || ''}`;
+  const lookKey = (p) => `${JSON.stringify(p?.outfit || DEFAULT_OUTFIT)}|${p?.klass || ''}|${p?.crew || ''}`;
   for (const [cid, r] of remotes) if (!ids.has(cid) || cid === myId() || r.key !== lookKey(room?.players.find((p) => p.cid === cid))) { ship.plane.remove(r.mesh); remotes.delete(cid); }
   if (!room) return;
   for (const p of room.players) {
     if (p.cid === myId()) { if ((p.crew || null) !== myCrew) { myCrew = p.crew || null; dressMe(); } continue; }
     if (remotes.has(p.cid)) { remotes.get(p.cid).info = p; continue; }
     // the outfit each player picked (server-validated) + their class badge
-    const mesh = makeCrew(p.outfit || DEFAULT_OUTFIT);
+    const mesh = makeCrew({ ...(p.outfit || DEFAULT_OUTFIT), role: p.crew || null });
     mesh.add(nameTag(p.displayName || p.username, p.role, CLASS_INFO[p.klass]?.icon || ''));
     ship.plane.add(mesh);
     const r = { mesh, target: new THREE.Vector3(...(p.state?.p || SPOTS.apron)), ry: 0, mode: p.state?.mode || 'walk', moving: false, info: p, crew: p.crew || null, key: lookKey(p) };
@@ -863,7 +863,7 @@ function updateCamera() {
   }
   if (shopOpen() && me.mode === 'walk') { // locker preview: look at my crew member from the front, character on the left
     const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
-    const c = me.pos.clone(); c.y += 0.72;
+    const c = me.pos.clone(); c.y += 1.08;
     const right = new THREE.Vector3(fwd.z, 0, -fwd.x); // camera's right when it looks back at the avatar
     camera.position.copy(c).addScaledVector(fwd, 3.1); camera.position.y += 0.2;
     camera.lookAt(ship.plane.localToWorld(c.clone().addScaledVector(right, innerWidth > innerHeight ? 0.95 : 0)));
@@ -881,7 +881,7 @@ function updateCamera() {
     back.y = Math.max(-0.35, Math.min(0.45, back.y));
     if (back.lengthSq() < 1e-4) back.set(0, 0, 1);
     back.normalize().multiplyScalar(-1);
-    const focus = me.pos.clone(); focus.y += 0.78; // the bean, not the tall first-person eye
+    const focus = me.pos.clone(); focus.y += 1.15; // chest and head, not the first-person eye
     const cols = solids();
     const rad = 0.2;
     const blocked = (q) => cols.some((c) => q.x > c.min[0] - rad && q.x < c.max[0] + rad && q.y > c.min[1] - rad && q.y < c.max[1] + rad && q.z > c.min[2] - rad && q.z < c.max[2] + rad);
@@ -994,8 +994,8 @@ function placeCarriedPax() {
     const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const seenFirstPerson = p.carriedBy === myId() && !me.third;
     // draped over the short arms, across the belly — a bit ridiculous, which is the point
-    p.mesh.position.copy(base).addScaledVector(fwd, seenFirstPerson ? 0.85 : 0.42).addScaledVector(right, seenFirstPerson ? 0.15 : 0.02);
-    p.mesh.position.y = base.y + (seenFirstPerson ? 0.55 : 0.58);
+    p.mesh.position.copy(base).addScaledVector(fwd, seenFirstPerson ? 0.85 : 0.5).addScaledVector(right, seenFirstPerson ? 0.15 : 0.02);
+    p.mesh.position.y = base.y + (seenFirstPerson ? 0.55 : 0.98);
     p.mesh.rotation.set(0.85, yaw + Math.PI / 2, 0.35, 'YXZ');
     p.mesh.rotation.order = 'YXZ';
   }
@@ -1009,13 +1009,13 @@ function placeHeld() {
     let pos, yaw;
     if (it.heldBy === myId()) {
       const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
-      if (me.third) pos = new THREE.Vector3(me.pos.x, me.pos.y + 0.72, me.pos.z).addScaledVector(fwd, 0.46);
+      if (me.third) pos = new THREE.Vector3(me.pos.x, me.pos.y + 1.02, me.pos.z).addScaledVector(fwd, 0.42);
       else pos = eyePos().addScaledVector(lookDir(), 0.78).add(new THREE.Vector3(Math.cos(me.yaw) * 0.28, -0.42, -Math.sin(me.yaw) * 0.28));
       yaw = me.yaw;
     } else {
       const r = remotes.get(it.heldBy);
       if (!r) continue;
-      pos = r.mesh.position.clone().add(new THREE.Vector3(-Math.sin(r.mesh.rotation.y) * 0.46, 0.72, -Math.cos(r.mesh.rotation.y) * 0.46));
+      pos = r.mesh.position.clone().add(new THREE.Vector3(-Math.sin(r.mesh.rotation.y) * 0.42, 1.02, -Math.cos(r.mesh.rotation.y) * 0.42));
       yaw = r.mesh.rotation.y;
     }
     it.mesh.position.copy(pos); it.mesh.position.y += k * 0.4; it.mesh.rotation.set(0, yaw, 0);
@@ -1630,9 +1630,10 @@ function frameBody() {
   updateSplashes(dt);
   updateWeather(dt);
   // my own body (visible in third person)
-  myAvatar.visible = (me.third || shopOpen()) && me.mode === 'walk';
+  myAvatar.visible = me.third || shopOpen();
   myAvatar.position.copy(me.pos); myAvatar.rotation.y = me.yaw;
-  animateCharacter(myAvatar, dt, { moving: me.moving && me.onGround && !(me.stumbleT > 0.2), running: me.moving && me.sprint, carrying: !!heldItem() || !!heldPax(), jumping: !me.onGround && me.mode === 'walk', falling: me.downT > 0.08, flail: me.stumbleT > 0.2, panic: me.stumbleT > 0.45 });
+  const seatedMe = me.mode === 'pilot' || me.mode === 'copilot';
+  animateCharacter(myAvatar, dt, { moving: !seatedMe && me.moving && me.onGround && !(me.stumbleT > 0.2), running: !seatedMe && me.moving && me.sprint, sitting: seatedMe, pilot: seatedMe, carrying: !seatedMe && (!!heldItem() || !!heldPax()), jumping: !seatedMe && !me.onGround && me.mode === 'walk', falling: !seatedMe && me.downT > 0.08, flail: !seatedMe && me.stumbleT > 0.2, panic: !seatedMe && me.stumbleT > 0.45 });
   if (fireFx.visible) { fireFx.rotation.y += dt * 8; fireFx.position.y = 1.05 + Math.sin(performance.now() / 80) * 0.04; }
   updateCamera();
   if (playing) { updateHud(); netTick(dt); updateAudio(); }
@@ -1711,6 +1712,8 @@ window.skyCrew = {
     cam: (pos, at) => { camOverride = pos ? { pos, at } : null; },
     watchEject: (on = true) => { camOverride = on ? { eject: true } : null; },
     bump: (power = 1.4) => knockMe(power || 1.4),
+    dress: (o) => { if (o && Object.prototype.hasOwnProperty.call(o, 'role')) myCrew = o.role; if (o) { const { role, ...rest } = o; if (Object.keys(rest).length) myOutfit = { ...DEFAULT_OUTFIT, ...myOutfit, ...rest }; } dressMe(); return myAvatar.userData.look?.crew || null; },
+    body: () => ({ visible: myAvatar.visible, third: me.third, mode: me.mode, p: [+myAvatar.position.x.toFixed(2), +myAvatar.position.y.toFixed(2), +myAvatar.position.z.toFixed(2)], parent: myAvatar.parent === ship.plane, tris: renderer.info.render.triangles }),
     rag: () => ({ down: +me.downT.toFixed(2), phase: myAvatar.userData.rag?.phase || '', k: +((myAvatar.userData.rag?.k || 0).toFixed(2)) }),
     camDist: () => +camera.position.distanceTo(me.pos).toFixed(2),
     colsAt: (x, y, z) => solids().filter((c) => overlaps({ x, y, z }, c, H)).map((c) => ({ min: c.min, max: c.max, tag: c.tag })),
