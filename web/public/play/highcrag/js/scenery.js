@@ -2,7 +2,7 @@
 // Everything is procedural low-poly; nothing is loaded from files.
 import * as THREE from '../../vendor/three.module.js';
 import { mergeGeometries } from '../../vendor/addons/BufferGeometryUtils.js';
-import { BANDS, R } from './terrain.js';
+import { BANDS, R, COAST, HALF } from './terrain.js';
 
 export const shared = { time: { value: 0 } };
 
@@ -56,7 +56,7 @@ export function makeSky() {
 export function makeWater(q) {
   const geo = new THREE.PlaneGeometry(3600, 3600, q.standard ? 160 : 90, q.standard ? 160 : 90);
   geo.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x1f8fb6, roughness: 0.18, metalness: 0.05, transparent: true, opacity: 0.86, flatShading: true });
+  const mat = new THREE.MeshStandardMaterial({ color: 0x14709c, roughness: 0.2, metalness: 0.05, flatShading: true });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = shared.time;
     sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -64,19 +64,86 @@ export function makeWater(q) {
       transformed.y += sin(wp.x * 0.06 + uTime * 1.1) * 0.35 + cos(wp.z * 0.05 + uTime * 0.8) * 0.3 + sin((wp.x + wp.z) * 0.13 + uTime * 1.9) * 0.12;`);
   };
   const m = new THREE.Mesh(geo, mat);
-  m.position.y = -0.15;
+  m.position.y = -1.3;
+  return m;
+}
+
+// GLSL value noise shared by the terrain and water shaders.
+const NOISE_GLSL = `
+float hc_hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float hc_noise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hc_hash(i), hc_hash(i + vec2(1,0)), u.x), mix(hc_hash(i + vec2(0,1)), hc_hash(i + vec2(1,1)), u.x), u.y); }
+`;
+
+/** Water over the island area: turquoise in the shallows, deep blue further out, foam along the shore.
+ *  Depth comes from the terrain heightfield, baked per vertex. */
+export function makeShoreWater(T, q) {
+  const size = HALF * 2 + 120, seg = q.standard ? 260 : 180;
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const depth = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) depth[i] = Math.min(30, Math.max(-2, -T.height(pos.getX(i), pos.getZ(i))));
+  geo.setAttribute('depth', new THREE.BufferAttribute(depth, 1));
+  const Mat = q.standard ? THREE.MeshStandardMaterial : THREE.MeshLambertMaterial;
+  const mat = new Mat({ color: 0xffffff, transparent: true, ...(q.standard ? { roughness: 0.12, metalness: 0.04 } : {}) });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = shared.time;
+    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec2 vW;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      vDepth = depth;
+      vW = transformed.xz;
+      float amp = smoothstep(0.0, 4.0, depth);
+      transformed.y += amp * (sin(transformed.x * 0.08 + uTime * 1.1) * 0.22 + cos(transformed.z * 0.07 + uTime * 0.9) * 0.18);`);
+    sh.fragmentShader = 'uniform float uTime;\nvarying float vDepth;\nvarying vec2 vW;\n' + NOISE_GLSL + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+      float d = vDepth;
+      vec3 shallow = vec3(0.30, 0.86, 0.80);
+      vec3 mid = vec3(0.10, 0.62, 0.74);
+      vec3 deep = vec3(0.05, 0.36, 0.56);
+      vec3 wc = mix(shallow, mid, smoothstep(0.0, 3.0, d));
+      wc = mix(wc, deep, smoothstep(3.0, 14.0, d));
+      float n = hc_noise(vW * 0.35 + vec2(uTime * 0.25, uTime * 0.18)) * 0.6 + hc_noise(vW * 1.3 - uTime * 0.4) * 0.4;
+      float foam = smoothstep(0.75, 0.0, d + (n - 0.5) * 0.7);
+      float sparkle = smoothstep(0.82, 0.95, hc_noise(vW * 2.2 + uTime * 0.6)) * smoothstep(1.0, 6.0, d) * 0.25;
+      diffuseColor.rgb = mix(wc, vec3(1.0), clamp(foam * 0.9 + sparkle, 0.0, 1.0));
+      diffuseColor.a = mix(0.62, 0.95, smoothstep(0.2, 6.0, d)) + foam * 0.3;`);
+  };
+  const m = new THREE.Mesh(geo, mat);
+  m.position.y = 0.02;
   m.receiveShadow = !!q.shadows;
   return m;
 }
 
+/** Gentle wind sway for instanced plants. k scales with height above the plant's base. */
+export function sway(mat, k) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = shared.time;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        vec2 ip = instanceMatrix[3].xz;
+      #else
+        vec2 ip = vec2(0.0);
+      #endif
+      float hh = max(transformed.y, 0.0);
+      float ph = uTime * 1.7 + ip.x * 0.31 + ip.y * 0.23;
+      transformed.x += sin(ph) * ${k.toFixed(4)} * hh * hh;
+      transformed.z += cos(ph * 0.83) * ${(k * 0.7).toFixed(4)} * hh * hh;`);
+  };
+  return mat;
+}
+
 // ---------------- terrain material (lava glow) ----------------
 export function terrainMaterial(q) {
-  const opts = { vertexColors: true, flatShading: true };
+  const opts = { vertexColors: true, flatShading: false };
   const mat = q.standard ? new THREE.MeshStandardMaterial({ ...opts, roughness: 0.95, metalness: 0 }) : new THREE.MeshLambertMaterial(opts);
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = shared.time;
-    sh.vertexShader = 'attribute float glow;\nvarying float vGlow;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;');
-    sh.fragmentShader = 'uniform float uTime;\nvarying float vGlow;\n' + sh.fragmentShader.replace(
+    sh.vertexShader = 'attribute float glow;\nvarying float vGlow;\nvarying vec3 vWP;\nvarying vec3 vWN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;\nvWP = transformed;\nvWN = normal;');
+    sh.fragmentShader = 'uniform float uTime;\nvarying float vGlow;\nvarying vec3 vWP;\nvarying vec3 vWN;\n' + NOISE_GLSL + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+      // Surface detail: soft blotches up close, grain further in, rock streaks on steep faces.
+      float steep = 1.0 - smoothstep(0.55, 0.85, vWN.y);
+      vec2 tp = mix(vWP.xz, vec2(vWP.x + vWP.z, vWP.y * 2.2), steep);
+      float dn = hc_noise(tp * 0.35) * 0.55 + hc_noise(tp * 1.7) * 0.3 + hc_noise(tp * 6.0) * 0.15;
+      diffuseColor.rgb *= 0.84 + dn * 0.32;`).replace(
       '#include <emissivemap_fragment>',
       '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.32, 0.05) * vGlow * (0.9 + 0.35 * sin(uTime * 1.7 + vGlow * 6.0));',
     );
@@ -86,9 +153,9 @@ export function terrainMaterial(q) {
 
 // ---------------- lights ----------------
 export function makeLights(scene, q) {
-  const hemi = new THREE.HemisphereLight(0xe2f2ff, 0x6b5440, 1.35);
+  const hemi = new THREE.HemisphereLight(0xd8ecff, 0x7a6a4a, 1.15);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff0d0, 2.6);
+  const sun = new THREE.DirectionalLight(0xffe6bf, 3.1);
   sun.position.set(90, 120, 60);
   scene.add(sun, sun.target);
   if (q.shadows) {
@@ -117,7 +184,7 @@ export function makeClouds(q, rng) {
   const d = new THREE.Object3D();
   for (let i = 0; i < q.clouds; i++) {
     const a = rng() * Math.PI * 2;
-    const r = 120 + rng() * 300;
+    const r = 180 + rng() * 460;
     const ring = i % 3 === 0;
     d.position.set(Math.cos(a) * r, ring ? 150 + rng() * 40 : 60 + rng() * 260, Math.sin(a) * r);
     const s = 9 + rng() * 14;
@@ -258,25 +325,34 @@ export function dressMountain(root, T, rng, q, avoid) {
   const trunkMat = lam(0x8a5a34);
 
   const palm = palmGeometry();
-  const palms = scatter(90, 2.5, 34, 0.9);
-  instanced(root, palm.trunk, lam(0x9b6b3e), palms, place(), sh);
-  instanced(root, palm.top, lam(0x5cbf3f, { side: THREE.DoubleSide }), palms, place(), sh);
-
   const jt = jungleTreeGeometry(rng);
+  const patch = (p) => Math.sin(p.x * 0.021) + Math.sin(p.z * 0.024 + 1.3) + Math.sin((p.x + p.z) * 0.013) > -0.4;
+  const palms = [...scatter(130, 1.7, 5, 0.88), ...scatter(70, 5, 30, 0.9)];
+  instanced(root, palm.trunk, lam(0x9b6b3e), palms, place(), sh);
+  instanced(root, palm.top, sway(lam(0x5cbf3f, { side: THREE.DoubleSide }), 0.006), palms, place(), sh);
+  // Lowland woods: broadleaf trees in clumps, with bushes, ferns and flowers.
+  const woods = scatter(620, 4, 34, 0.9).filter(patch);
+  instanced(root, jt.trunk, trunkMat, woods, place(), sh);
+  instanced(root, jt.top, sway(lam(0x4fa83a), 0.004), woods.filter((_, i) => i % 3 === 0), place(), sh);
+  instanced(root, jt.top, sway(lam(0x67b845), 0.004), woods.filter((_, i) => i % 3 === 1), place(), sh);
+  instanced(root, jt.top, sway(lam(0x8fbf3f), 0.004), woods.filter((_, i) => i % 3 === 2), place(), sh);
+
   const jungle = scatter(360, 37, 124, 0.88);
   instanced(root, jt.trunk, trunkMat, jungle, place(), sh);
-  instanced(root, jt.top, lam(0x3e8f2f), jungle.filter((_, i) => i % 2 === 0), place(), sh);
-  instanced(root, jt.top, lam(0x56a83a), jungle.filter((_, i) => i % 2 === 1), place(), sh);
-  const bushes = scatter(420, 37, 124, 0.85, 1);
-  instanced(root, bushGeometry(), lam(0x4b9a37), bushes, place(), sh);
-  const flowers = scatter(260, 37, 124, 0.9, 1);
+  instanced(root, jt.top, sway(lam(0x3e8f2f), 0.004), jungle.filter((_, i) => i % 2 === 0), place(), sh);
+  instanced(root, jt.top, sway(lam(0x56a83a), 0.004), jungle.filter((_, i) => i % 2 === 1), place(), sh);
+  const bushes = [...scatter(420, 37, 124, 0.85, 1), ...scatter(460, 3, 34, 0.88, 1)];
+  instanced(root, bushGeometry(), sway(lam(0x4b9a37), 0.08), bushes, place(), sh);
+  const flowers = scatter(620, 3, 124, 0.9, 1);
   const flowerGeo = new THREE.IcosahedronGeometry(0.16, 0);
   flowerGeo.translate(0, 0.25, 0);
-  instanced(root, flowerGeo, lam(0xff6fa8, { emissive: 0x551133 }), flowers.filter((_, i) => i % 2), place(), false);
-  instanced(root, flowerGeo, lam(0xffd23f, { emissive: 0x443300 }), flowers.filter((_, i) => !(i % 2)), place(), false);
-  const grass = scatter(1600, 2.5, 124, 0.9, 0.5);
-  instanced(root, grassGeometry(), lam(0x6cc24a), grass.filter((p) => p.y > 36), place(), false);
-  instanced(root, grassGeometry(), lam(0xb9c96a), grass.filter((p) => p.y <= 36), place(), false);
+  instanced(root, flowerGeo, sway(lam(0xff6fa8, { emissive: 0x551133 }), 0.2), flowers.filter((_, i) => i % 3 === 0), place(), false);
+  instanced(root, flowerGeo, sway(lam(0xffd23f, { emissive: 0x443300 }), 0.2), flowers.filter((_, i) => i % 3 === 1), place(), false);
+  instanced(root, flowerGeo, sway(lam(0xffffff, { emissive: 0x333333 }), 0.2), flowers.filter((_, i) => i % 3 === 2), place(), false);
+  const grass = scatter(3400, 2.2, 124, 0.88, 0.5);
+  instanced(root, grassGeometry(), sway(lam(0x6cc24a), 0.25), grass.filter((p) => p.y > 36), place(), false);
+  instanced(root, grassGeometry(), sway(lam(0x7fc24a), 0.25), grass.filter((p) => p.y <= 36 && p.y > 3), place(), false);
+  instanced(root, grassGeometry(), sway(lam(0xc8c47a), 0.25), grass.filter((p) => p.y <= 3), place(), false);
 
   const pine = pineGeometry();
   const pines = scatter(240, 127, 210, 0.88);
@@ -298,7 +374,7 @@ export function dressMountain(root, T, rng, q, avoid) {
   instanced(root, rockGeo, lam(0x8d8678), rocks.filter((p) => p.y < 216), place(0.15), sh);
   instanced(root, rockGeo, lam(0x3d3433), rocks.filter((p) => p.y >= 216), place(0.15), sh);
 
-  for (const p of [...palms, ...jungle, ...pines, ...dead]) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.35 * p.userData.s });
+  for (const p of [...palms, ...woods, ...jungle, ...pines, ...dead]) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.35 * p.userData.s });
 
   // Vines hanging down jungle cliff faces.
   const vines = [];
@@ -385,4 +461,167 @@ export function bandSkyColors(y) {
     fog: new THREE.Color(a.fog).lerp(new THREE.Color(b.fog), k),
     sky: new THREE.Color(a.sky).lerp(new THREE.Color(b.sky), k),
   };
+}
+
+
+// ---------------- lowland landmarks ----------------
+function signTex(lines) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = '#c8955a'; x.fillRect(0, 0, 256, 64);
+  x.strokeStyle = '#7a5532'; x.lineWidth = 6; x.strokeRect(3, 3, 250, 58);
+  x.fillStyle = '#2a1a08'; x.font = '900 30px ui-rounded, system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(lines, 128, 34);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Lighthouse, ruins and a signpost in the lowlands. Returns colliders and things to animate. */
+export function buildLandmarks(root, T, rng, q, spawn, summit) {
+  const colliders = [];
+  const anim = {};
+  const n = new THREE.Vector3();
+  const flatAt = (x, z, r = 2.5) => {
+    const y = T.height(x, z);
+    for (const [ox, oz] of [[r, 0], [-r, 0], [0, r], [0, -r]]) if (Math.abs(T.height(x + ox, z + oz) - y) > 1.2) return false;
+    return T.normal(x, z, n).y > 0.88;
+  };
+
+  // Lighthouse on a coastal rise a little way along from the crash site.
+  const sa = Math.atan2(spawn.z, spawn.x) - 0.55;
+  let lh = null;
+  for (let d = COAST + 60; d > R + 40 && !lh; d -= 1) {
+    const x = Math.cos(sa) * d, z = Math.sin(sa) * d;
+    if (T.height(x, z) > 2.2 && flatAt(x, z)) lh = new THREE.Vector3(x, T.height(x, z), z);
+  }
+  if (lh) {
+    const g = new THREE.Group();
+    g.position.copy(lh);
+    for (let i = 0; i < 6; i++) {
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(2.0 - (i + 1) * 0.08, 2.0 - i * 0.08, 2.4, 16), lam(i % 2 ? 0xe94e3c : 0xfaf6ee));
+      seg.position.y = 1.2 + i * 2.4;
+      g.add(seg);
+    }
+    const gallery = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.3, 16), lam(0x2a3140));
+    gallery.position.y = 14.6;
+    const lamp = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 1.8, 12), new THREE.MeshLambertMaterial({ color: 0xfff2b0, emissive: 0xffd23f, emissiveIntensity: 0.9 }));
+    lamp.position.y = 15.7;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(1.5, 1.6, 12), lam(0xe94e3c));
+    roof.position.y = 17.4;
+    const glow = glowSprite(0xffe08a, 9);
+    glow.position.y = 15.8;
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(3.5, 60, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.07, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false }));
+    beam.geometry.translate(0, -30, 0);
+    beam.rotation.z = Math.PI / 2;
+    const beamPivot = new THREE.Group();
+    beamPivot.position.y = 15.8;
+    beamPivot.add(beam);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(3, 3.3, 0.8, 16), lam(0x9a9286));
+    base.position.y = 0.2;
+    g.add(gallery, lamp, roof, glow, beamPivot, base);
+    g.traverse((o) => { if (o.isMesh && o !== beam) { o.castShadow = !!q.shadows; o.receiveShadow = !!q.shadows; } });
+    root.add(g);
+    colliders.push({ x: lh.x, z: lh.z, y: lh.y, r: 2.6 });
+    anim.beam = beamPivot;
+    anim.lighthouse = lh;
+  }
+
+  // Two old ruins: a ring of broken pillars and a stone arch.
+  const stone = lam(0xb9ad98);
+  const mossy = lam(0x8ea07a);
+  const ruins = [];
+  for (let t = 0; t < 600 && ruins.length < 2; t++) {
+    const a = rng() * Math.PI * 2, d = R + 30 + rng() * (COAST - R - 80);
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    const y = T.height(x, z);
+    if (y < 3 || y > 30 || !flatAt(x, z, 6) || Math.hypot(x - spawn.x, z - spawn.z) < 40 || ruins.some((r) => r.distanceTo(new THREE.Vector3(x, y, z)) < 80)) continue;
+    ruins.push(new THREE.Vector3(x, y, z));
+  }
+  for (const c of ruins) {
+    const g = new THREE.Group();
+    g.position.copy(c);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const h = 1 + rng() * 3.5;
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, h, 8), i % 3 ? stone : mossy);
+      p.position.set(Math.cos(a) * 6, h / 2, Math.sin(a) * 6);
+      g.add(p);
+      colliders.push({ x: c.x + Math.cos(a) * 6, z: c.z + Math.sin(a) * 6, y: c.y, r: 0.6 });
+    }
+    for (const sx of [-1.6, 1.6]) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.9, 4.2, 0.9), stone);
+      p.position.set(sx, 2.1, 0);
+      g.add(p);
+      colliders.push({ x: c.x + sx, z: c.z, y: c.y, r: 0.6 });
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.8, 1.1), mossy);
+    lintel.position.y = 4.5;
+    g.add(lintel);
+    for (let i = 0; i < 5; i++) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.8 + rng(), 0.5, 0.6 + rng() * 0.5), stone);
+      b.position.set((rng() - 0.5) * 10, 0.2, (rng() - 0.5) * 10);
+      b.rotation.set(rng() * 0.4, rng() * 6, rng() * 0.4);
+      g.add(b);
+    }
+    g.rotation.y = rng() * 6;
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = !!q.shadows; o.receiveShadow = !!q.shadows; } });
+    root.add(g);
+  }
+
+  // A signpost just inland from the crash, pointing at the summit and the lighthouse.
+  const toSummit = new THREE.Vector3(summit.x - spawn.x, 0, summit.z - spawn.z).normalize();
+  const sp = spawn.clone().addScaledVector(toSummit, 7).add(new THREE.Vector3(-toSummit.z * 3, 0, toSummit.x * 3));
+  sp.y = T.height(sp.x, sp.z);
+  const sg = new THREE.Group();
+  sg.position.copy(sp);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.6, 6), lam(0x7a5532));
+  post.position.y = 1.3;
+  sg.add(post);
+  const board = (text, dir, y) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.45), new THREE.MeshLambertMaterial({ map: signTex(text), side: THREE.DoubleSide }));
+    m.position.y = y;
+    m.rotation.y = Math.atan2(dir.x, dir.z) - Math.PI / 2;
+    m.translateX(0.8);
+    sg.add(m);
+  };
+  board('SUMMIT ▶', toSummit, 2.2);
+  if (anim.lighthouse) board('LIGHTHOUSE ▶', new THREE.Vector3(anim.lighthouse.x - sp.x, 0, anim.lighthouse.z - sp.z).normalize(), 1.7);
+  root.add(sg);
+  colliders.push({ x: sp.x, z: sp.z, y: sp.y, r: 0.3 });
+  return { colliders, anim };
+}
+
+// ---------------- seagulls ----------------
+export class Gulls {
+  constructor(root, center, count = 10) {
+    this.birds = [];
+    const white = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const grey = new THREE.MeshLambertMaterial({ color: 0x9aa3ad, side: THREE.DoubleSide });
+    const wingGeo = new THREE.BufferGeometry();
+    wingGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.25, 0, 0, -0.2, 1.1, 0, -0.05], 3));
+    wingGeo.computeVertexNormals();
+    for (let i = 0; i < count; i++) {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.45, 3, 6), white);
+      body.rotation.x = Math.PI / 2;
+      const wl = new THREE.Mesh(wingGeo, grey);
+      const wr = new THREE.Mesh(wingGeo, grey);
+      wr.scale.x = -1;
+      g.add(body, wl, wr);
+      root.add(g);
+      this.birds.push({ g, wl, wr, r: 25 + Math.random() * 45, h: 14 + Math.random() * 22, sp: (0.25 + Math.random() * 0.25) * (Math.random() < 0.5 ? 1 : -1), ph: Math.random() * 6.28, c: center.clone().add(new THREE.Vector3((Math.random() - 0.5) * 60, 0, (Math.random() - 0.5) * 60)) });
+    }
+  }
+  update(t) {
+    for (const b of this.birds) {
+      const a = b.ph + t * b.sp;
+      b.g.position.set(b.c.x + Math.cos(a) * b.r, b.c.y + b.h + Math.sin(t * 0.7 + b.ph) * 2, b.c.z + Math.sin(a) * b.r);
+      b.g.rotation.set(0, -a + (b.sp > 0 ? 0 : Math.PI), Math.sin(t + b.ph) * 0.25);
+      const flap = Math.sin(t * 9 + b.ph) * 0.6;
+      b.wl.rotation.z = flap;
+      b.wr.rotation.z = -flap;
+    }
+  }
 }

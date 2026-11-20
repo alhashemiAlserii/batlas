@@ -3,11 +3,12 @@
 // flat ledges separated by steep rock walls. Collision samples the exact triangles that are drawn.
 import * as THREE from '../../vendor/three.module.js';
 
-export const SIZE = 480;
-export const N = 321;
+export const SIZE = 736;
+export const N = 421;
 export const STEP = SIZE / (N - 1);
 export const HALF = SIZE / 2;
-export const R = 205;
+export const R = 205; // mountain radius
+export const COAST = 318; // average coastline radius: lowlands lie between the mountain and the beach
 export const HMAX = 300;
 export const SEA = 0;
 
@@ -17,6 +18,8 @@ export const BANDS = [
   { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xf2f7ff, rock: 0x7e8ea6, fog: 0xdbe6f2, sky: 0x6d9fd4 },
   { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x3f3433, rock: 0x2c2626, fog: 0xe4a585, sky: 0x8a5a9c },
 ];
+/** Display name for where you are (the lowlands share the shore band's rules). */
+export const zoneName = (y) => (y < 3.5 ? 'Saltwind Shore' : y < 36 ? 'Palm Lowlands' : bandAt(y).name);
 export const bandAt = (y) => (y < BANDS[1].y0 ? BANDS[0] : y < BANDS[2].y0 ? BANDS[1] : y < BANDS[3].y0 ? BANDS[2] : BANDS[3]);
 
 export function makeRng(seed) {
@@ -86,9 +89,31 @@ export class Terrain {
     const d = Math.hypot(x, z);
     const warp = fbm(x * 0.008, z * 0.008, s) * 30 + fbm(x * 0.03, z * 0.03, s + 5) * 7;
     const dd = Math.max(0, d + warp);
-    let h0;
-    if (dd < R) h0 = HMAX * Math.pow(1 - dd / R, 1.25) - 4;
-    else h0 = -4 - (dd - R) * 0.3;
+    // The mountain itself (unchanged shape).
+    const mt = dd < R ? HMAX * Math.pow(1 - dd / R, 1.25) - 4 : -4 - (dd - R) * 0.3;
+    // Lowlands: rolling hills between the mountain foot and a wavy coastline, then a beach.
+    const coast = COAST + fbm(x * 0.006, z * 0.006, s + 11) * 38;
+    const hills = 7 + fbm(x * 0.012, z * 0.012, s + 21) * 10 + fbm(x * 0.05, z * 0.05, s + 23) * 2.2;
+    let low;
+    if (d < coast - 34) low = hills;
+    else if (d < coast) low = hills + (1.4 - hills) * smooth(coast - 34, coast, d);
+    else low = 1.4 - (d - coast) * 0.22;
+    // Smooth max so the foothills blend into the lowlands.
+    const k = 10;
+    let h0 = Math.max(mt, low) + Math.pow(Math.max(k - Math.abs(mt - low), 0), 2) / (4 * k);
+    // A winding river from the foothills to the sea, and a few ponds.
+    if (d > R * 0.7 && h0 < 30) {
+      const a = Math.atan2(z, x);
+      const course = 2.45 + fbm(d * 0.012, 0.5, s + 41) * 0.5;
+      let da = a - course;
+      da = Math.atan2(Math.sin(da), Math.cos(da));
+      const perp = Math.abs(da) * d;
+      const w = 7 + d * 0.02;
+      const cut = smooth(w * 1.6, w * 0.5, perp) * smooth(R * 0.7, R * 0.95, d);
+      h0 = h0 + (-1.8 - h0) * cut;
+      const pond = smooth(0.42, 0.55, fbm(x * 0.018, z * 0.018, s + 57));
+      if (d < coast - 40) h0 = h0 + (-1.4 - h0) * pond * smooth(30, 18, h0);
+    }
     let h = h0;
     for (let b = 1; b < BANDS.length; b++) {
       const band = BANDS[b];
@@ -155,7 +180,13 @@ export class Terrain {
         cr.offsetHSL(0, 0, Math.sin(y * 1.7 + n * 3) * 0.035);
         if (band.id === 'moss') cg.offsetHSL(n * 0.03, 0, n * 0.06); // patchy jungle floor
         if (band.id === 'frost') cg.offsetHSL(0, 0, -Math.max(0, -n) * 0.06);
-        if (y < 2.2) cg.setHex(0xf3dfa6);
+        if (band.id === 'shore' && y >= 2.6) {
+          // Lowland meadows: lush green with dry golden patches and darker forest floor.
+          const dry = smooth(0.15, 0.5, fbm(x * 0.02, z * 0.02, this.seed + 61, 3));
+          cg.setHex(0x5fae3e).lerp(new THREE.Color(0xb7b45a), dry * 0.7).offsetHSL(0, 0, n * 0.05);
+          cr.setHex(0x8a7a5e);
+        }
+        if (y < 2.6) cg.setHex(0xf3dfa6).lerp(new THREE.Color(0x5fae3e), smooth(1.8, 2.6, y));
         if (y < 0.35) cg.setHex(0xfffbf0); // surf foam along the waterline
         if (y < -0.6) cg.setHex(0x9fd8d0);
         if (y < -3) cg.setHex(0x4fa3b6);
@@ -168,6 +199,15 @@ export class Terrain {
           glow[k] = Math.max(0, 1 - f / 0.045);
           if (glow[k] > 0) cc.lerp(new THREE.Color(0xff5a1a), glow[k] * 0.7);
         }
+        // Cheap ambient occlusion: darken hollows and the foot of walls, lighten ridges.
+        let avg = 0, cnt = 0;
+        for (const [di, dj] of [[3, 0], [-3, 0], [0, 3], [0, -3], [2, 2], [-2, -2], [2, -2], [-2, 2]]) {
+          const ii = Math.min(N - 1, Math.max(0, i + di)), jj = Math.min(N - 1, Math.max(0, j + dj));
+          avg += this.h[jj * N + ii]; cnt++;
+        }
+        const cav = avg / cnt - y;
+        const ao = cav > 0 ? Math.max(0.58, 1 - cav * 0.045) : Math.min(1.12, 1 - cav * 0.02);
+        cc.multiplyScalar(ao);
         col[k * 3] = cc.r; col[k * 3 + 1] = cc.g; col[k * 3 + 2] = cc.b;
       }
     }
@@ -193,7 +233,7 @@ export class Terrain {
   flatSpot(rng, y0, y1, minNy = 0.9, tries = 400) {
     const n = new THREE.Vector3();
     for (let t = 0; t < tries; t++) {
-      const a = rng() * Math.PI * 2, d = rng() * (R + 25);
+      const a = rng() * Math.PI * 2, d = Math.sqrt(rng()) * (COAST + 30);
       const x = Math.cos(a) * d, z = Math.sin(a) * d;
       const y = this.height(x, z);
       if (y < y0 || y > y1 || y < 0.6) continue;

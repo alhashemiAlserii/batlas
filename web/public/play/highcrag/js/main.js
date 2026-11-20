@@ -1,10 +1,10 @@
 // Highcrag — an original survival climbing game for the Batlas site (1–4 players).
 // Flow: title → airport terminal → flight → crash on the beach → climb → summit beacon.
 import * as THREE from '../../vendor/three.module.js';
-import { Terrain, BANDS, bandAt, makeRng, R, HALF } from './terrain.js';
+import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST } from './terrain.js';
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
-import { pickQuality, QUALITY, makeSky, makeWater, terrainMaterial, makeLights, makeClouds, dressMountain, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
+import { pickQuality, QUALITY, makeSky, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
 import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, OUTFIT_NAMES, HATS, SKINS, DEFAULT_LOOK, validLook } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
@@ -21,11 +21,15 @@ if (isTouch) document.body.classList.add('touch');
   const stop = (e) => e.preventDefault();
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend', 'dblclick']) document.addEventListener(ev, stop, { passive: false });
   document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
-  let lastTap = 0;
+  // Only a second tap close to the first one (that's what Safari zooms on); quick taps on different buttons pass.
+  let lastTap = 0, lastX = -999, lastY = -999;
   document.addEventListener('touchend', (e) => {
+    const t = e.changedTouches[0];
     const now = performance.now();
-    if (now - lastTap < 320 && !e.target.closest?.('input, select, textarea')) e.preventDefault();
+    const near = t && Math.hypot(t.clientX - lastX, t.clientY - lastY) < 40;
+    if (now - lastTap < 320 && near && !e.target.closest?.('input, select, textarea')) e.preventDefault();
     lastTap = now;
+    if (t) { lastX = t.clientX; lastY = t.clientY; }
   }, { passive: false });
 }
 
@@ -235,12 +239,12 @@ function buildWorld(seed) {
   root.add(terrain);
 
   // The crash site: spawn on the beach on the +x side, wreck alongside it.
-  let spawn = new V3(R + 20, 1.5, 0);
-  for (let d = R + 40; d > 0; d -= 0.5) {
+  let spawn = new V3(COAST, 1.5, 0);
+  for (let d = COAST + 90; d > 0; d -= 0.5) {
     const y = T.height(d, 0);
     if (y > 1.4) { spawn = new V3(d, y, 0); break; }
   }
-  const wreckOrigin = spawn.clone().add(new V3(1, 0, 19));
+  const wreckOrigin = spawn.clone().add(new V3(1, 0, 25));
   const wreck = buildWreck(wreckOrigin, new V3(0, 0, 1), (x, z) => Math.max(T.height(x, z), 0), rng);
   root.add(wreck.group);
 
@@ -256,6 +260,10 @@ function buildWorld(seed) {
   const avoid = [{ p: spawn, r: 4 }, { p: wreckOrigin, r: 16 }, ...camps.map((c) => ({ p: c.pos, r: 5 })), { p: beacon.pos, r: 6 }];
   const trees = dressMountain(root, T, rng, Q, avoid);
   trees.push(...wreck.colliders);
+  const marks = buildLandmarks(root, T, rng, Q, spawn, T.summit);
+  trees.push(...marks.colliders);
+  root.add(makeShoreWater(T, Q));
+  const gulls = new Gulls(root, spawn.clone().add(new V3(-20, 0, 10)), Q.decor > 0.5 ? 12 : 7);
 
   const thorns = [];
   const thornMat = new THREE.MeshLambertMaterial({ color: 0x7a2f4a, flatShading: true });
@@ -282,7 +290,7 @@ function buildWorld(seed) {
   }
 
   const items = [];
-  const counts = { shore: 10, moss: 28, frost: 24, crown: 16 };
+  const counts = { shore: 28, moss: 28, frost: 24, crown: 16 };
   for (const band of BANDS) {
     const pool = LOOT[band.id];
     for (let i = 0; i < counts[band.id]; i++) {
@@ -323,7 +331,7 @@ function buildWorld(seed) {
   const pitonGroup = new THREE.Group();
   root.add(pitonGroup);
   scene.add(root);
-  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], smokes };
+  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], smokes, gulls, marks: marks.anim };
 }
 
 // ---------------- player & game state ----------------
@@ -733,7 +741,7 @@ function tryGrab(dx, dz, handY) {
 function tryRope() {
   for (const r of world.ropes) {
     // Standing by the stake at the top: swing onto the rope and start climbing down.
-    if (P.mode === 'ground' && Math.hypot(P.pos.x - r.anchor.x, P.pos.z - r.anchor.z) < 1.6 && Math.abs(P.pos.y - r.anchor.y) < 1.2) {
+    if (P.mode === 'ground' && Math.hypot(P.pos.x - r.anchor.x, P.pos.z - r.anchor.z) < 3 && Math.abs(P.pos.y - r.anchor.y) < 1.2) {
       P.mode = 'rope';
       P.rope = r;
       P.ropeY = r.top.y;
@@ -1183,7 +1191,7 @@ function startFlight() {
   if (touch) $('#touch').classList.add('hidden');
   const dir = new V3(world.spawn.x, 0, world.spawn.z).normalize();
   const crash = world.wreckOrigin.clone();
-  flight = { t: 0, crash, start: dir.clone().multiplyScalar(820).add(new V3(0, 120, 0)), mid: dir.clone().multiplyScalar(R + 160).add(new V3(0, 70, 0)), caption: -1, crashed: false };
+  flight = { t: 0, crash, start: dir.clone().multiplyScalar(COAST + 620).add(new V3(0, 120, 0)), mid: dir.clone().multiplyScalar(COAST + 170).add(new V3(0, 70, 0)), caption: -1, crashed: false };
   flightPlane.visible = true;
   flightPlane.position.copy(flight.start);
   camera.position.copy(flight.start).add(new V3(30, 10, 30));
@@ -1274,8 +1282,8 @@ const camTarget = new V3();
 function updateCamera(dt) {
   if (state === 'title') {
     const t = (performance.now() / 1000) * 0.05;
-    camera.position.set(Math.cos(t) * 430, 170, Math.sin(t) * 430);
-    camera.lookAt(0, 110, 0);
+    camera.position.set(Math.cos(t) * 600, 190, Math.sin(t) * 600);
+    camera.lookAt(0, 80, 0);
     climber.visible = false;
     return;
   }
@@ -1321,7 +1329,7 @@ function updateSkyFor(y, indoor) {
   sky.uniforms.horizon.value.copy(c.fog);
   scene.fog.color.copy(c.fog);
   scene.fog.near = indoor ? 120 : 80 - storm * 74;
-  scene.fog.far = indoor ? 900 : 760 - storm * 700;
+  scene.fog.far = indoor ? 900 : 900 - storm * 840;
   sky.mesh.position.copy(camera.position);
 }
 
@@ -1379,6 +1387,8 @@ function updateScene(dt, now) {
       }
     }
     for (const f of world.flares) f.glow.material.opacity = 0.75 + Math.sin(now * 23 + f.p.x) * 0.25;
+    world.gulls.update(now);
+    if (world.marks.beam) world.marks.beam.rotation.y = now * 0.6;
     if (nearest && nd < 40 && onIsland()) {
       fireLight.position.copy(nearest.pos).add(new V3(0, nearest.isBeacon ? 4.5 : 1, 0));
       fireLight.intensity = (nearest.isBeacon ? 40 : 14) * (0.85 + Math.sin(now * 13) * 0.15);
@@ -1442,7 +1452,7 @@ function updateHud(dt) {
   } else if (world && onIsland()) {
     const T = world.T;
     const y = P.mode === 'climb' ? T.height(P.cx, P.cz) : P.pos.y;
-    $('#zone').textContent = bandAt(y).name;
+    $('#zone').textContent = zoneName(y);
     $('#alt').textContent = `${Math.max(0, Math.round(y))} m`;
     $('#timer').textContent = `⏱ ${fmtTime(elapsed)}`;
     const next = world.camps.find((c) => !c.lit && c.pos.y > y - 20) ?? world.beacon;
