@@ -5,7 +5,7 @@ import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST } from './ter
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
 import { pickQuality, QUALITY, makeSky, makeEnvironment, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
-import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, OUTFIT_NAMES, HATS, SKINS, DEFAULT_LOOK, validLook } from './characters.js';
+import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, WARDROBE, DEFAULT_LOOK, validLook, randomLook } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
 
@@ -1514,6 +1514,7 @@ function updateHud(dt) {
       if (h > P.pos.y + 1.2 && T.normal(P.pos.x + f.x * 0.9, P.pos.z + f.z * 0.9, tmpN).y < WALL_NY) prompt = isTouch ? 'Turn on ✋ Grab to climb' : 'Hold left mouse to climb';
     }
   }
+  if (overlayOpen()) prompt = '';
   $('#prompt').textContent = prompt;
   $('#prompt').classList.toggle('hidden', !prompt);
   touch?.setAct(P.isDown ? 'Respawn' : act);
@@ -1545,21 +1546,37 @@ function updateHud(dt) {
 
 // ---------------- wardrobe ----------------
 function buildWardrobeUi() {
-  const sw = (wrap, list, key, render) => {
-    wrap.replaceChildren();
-    list.forEach((v, i) => {
+  const wrap = $('#wSections');
+  wrap.replaceChildren();
+  for (const sec of WARDROBE) {
+    const label = document.createElement('div');
+    label.className = 'wlabel';
+    label.textContent = sec.label;
+    const row = document.createElement('div');
+    row.className = 'swatches';
+    sec.items.forEach((v, i) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'swatch';
-      render(b, v, i);
-      b.classList.toggle('on', look[key] === i);
-      b.addEventListener('click', () => { look = { ...look, [key]: i }; applyLook(); buildWardrobeUi(); sfx.click(); });
-      wrap.appendChild(b);
+      if (sec.type === 'color') {
+        b.style.background = `#${v.toString(16).padStart(6, '0')}`;
+        const name = sec.names ? sec.names[i] : `${sec.label} ${i + 1}`;
+        b.title = name;
+        b.setAttribute('aria-label', name);
+      } else {
+        b.classList.add('wide');
+        b.textContent = v;
+      }
+      b.classList.toggle('on', look[sec.key] === i);
+      b.addEventListener('click', () => { look = { ...look, [sec.key]: i }; applyLook(); markWardrobe(); sfx.click(); });
+      row.appendChild(b);
     });
-  };
-  sw($('#wOutfit'), OUTFITS, 'c', (b, v, i) => { b.style.background = `#${v.toString(16).padStart(6, '0')}`; b.title = OUTFIT_NAMES[i]; b.setAttribute('aria-label', OUTFIT_NAMES[i]); });
-  sw($('#wHat'), HATS, 'h', (b, v) => { b.classList.add('wide'); b.textContent = v; });
-  sw($('#wSkin'), SKINS, 's', (b, v, i) => { b.style.background = `#${v.toString(16).padStart(6, '0')}`; b.setAttribute('aria-label', `Skin tone ${i + 1}`); });
+    wrap.append(label, row);
+  }
+}
+function markWardrobe() {
+  const rows = $('#wSections').querySelectorAll('.swatches');
+  WARDROBE.forEach((sec, k) => rows[k]?.querySelectorAll('.swatch').forEach((b, i) => b.classList.toggle('on', look[sec.key] === i)));
 }
 function applyLook() {
   store.set('look', look);
@@ -1574,6 +1591,7 @@ function applyLook() {
 function openWardrobe() {
   buildWardrobeUi();
   $('#wardrobe').classList.remove('hidden');
+  if (touch) $('#touch').classList.add('hidden');
   document.exitPointerLock?.();
   keys.clear();
   // Stand in front of the mirror, facing the camera, so you can see the outfit.
@@ -1585,9 +1603,11 @@ function openWardrobe() {
 function closeWardrobe() {
   if (!overlayOpen()) return;
   $('#wardrobe').classList.add('hidden');
+  if (touch && (state === 'lobby' || state === 'play')) $('#touch').classList.remove('hidden');
   if (!isTouch && (state === 'lobby' || state === 'play')) canvas.requestPointerLock?.();
 }
 $('#wDone').addEventListener('click', closeWardrobe);
+$('#wRandom').addEventListener('click', () => { look = validLook(randomLook()); applyLook(); markWardrobe(); sfx.click(); });
 
 // ---------------- co-op ----------------
 const net = new HNet();
@@ -1643,7 +1663,7 @@ function updateRemotes(dt) {
     const down = r.st.m === 'down';
     r.model.visible = !hide;
     r.tag.visible = !hide;
-    r.tag.position.copy(r.pos).add(new V3(0, down ? 1.0 : 2.5, 0));
+    r.tag.position.copy(r.pos).add(new V3(0, down ? 1.0 : 2.1, 0));
     r.help.visible = down && !hide;
     r.help.position.copy(r.pos).add(new V3(0, 1.6, 0));
   }
