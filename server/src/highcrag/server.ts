@@ -14,12 +14,14 @@ import type { SiteBridge } from '../game-server/bridge.js';
 
 export const HC_WS_PATH = '/ws/highcrag';
 export const HC_MAX_PLAYERS = 4;
-const ITEM_TYPES = new Set(['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit']);
+const ITEM_TYPES = new Set(['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit', 'binoculars', 'horn', 'lantern', 'chalk', 'bean', 'marshmallow']);
 const EMOTES = new Set(['wave', 'cheer', 'point']);
 const MAX_ITEMS = 400;
 const MAX_PITONS = 300;
 const MAX_ROPES = 120;
 const MAX_FLARES = 60;
+const MAX_VINES = 80;
+const PING_KINDS = new Set(['ping', 'horn']);
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 interface Client {
@@ -44,6 +46,7 @@ interface Room {
   pitons: [number, number, number][];
   ropes: [number, number, number][][];
   flares: [number, number, number][];
+  vines: number[][];
   boarded: boolean;
   beacon: { by: string } | null;
   dropSeq: number;
@@ -84,6 +87,7 @@ export function attachHighcragServer(
       pitons: room.pitons,
       ropes: room.ropes,
       flares: room.flares,
+      vines: room.vines,
       boarded: room.boarded,
       beacon: room.beacon,
       states: Object.fromEntries([...room.clients.values()].filter((c) => c !== you && c.lastState).map((c) => [c.cid, c.lastState])),
@@ -126,7 +130,7 @@ export function attachHighcragServer(
         if (room) leave(c);
         if (rooms.size >= (opts.maxRooms ?? 500)) return send(c, { t: 'error', code: 'full', message: 'Too many rooms are open right now.' });
         const seed = num(m.seed, 4294967295) && m.seed > 0 ? Math.floor(m.seed) : Math.floor(Math.random() * 1e9) + 1;
-        const r: Room = { code: newCode(), seed, clients: new Map(), items: null, camps: null, lit: new Set(), pitons: [], ropes: [], flares: [], boarded: false, beacon: null, dropSeq: 0, createdAt: Date.now() };
+        const r: Room = { code: newCode(), seed, clients: new Map(), items: null, camps: null, lit: new Set(), pitons: [], ropes: [], flares: [], vines: [], boarded: false, beacon: null, dropSeq: 0, createdAt: Date.now() };
         rooms.set(r.code, r);
         c.slot = 0;
         r.clients.set(c.cid, c);
@@ -226,12 +230,31 @@ export function attachHighcragServer(
         room.flares.push(p);
         return broadcast(room, { t: 'flare', p, by: c.cid }, c);
       }
+      case 'vine': {
+        // A magic-bean vine: base point and the horizontal direction into the wall.
+        if (!vec3(m.p) || !Array.isArray(m.d) || m.d.length !== 2 || !m.d.every((v: unknown) => num(v, 2)) || room.vines.length >= MAX_VINES) return;
+        const v = [...m.p.map(round), round(m.d[0]), round(m.d[1])];
+        room.vines.push(v);
+        return broadcast(room, { t: 'vine', p: v.slice(0, 3), d: v.slice(3), by: c.cid }, c);
+      }
+      case 'ping': {
+        if (!vec3(m.p) || !PING_KINDS.has(m.k)) return;
+        return broadcast(room, { t: 'ping', p: m.p.map(round), k: m.k, by: c.cid }, c);
+      }
+      case 'give': {
+        // Hand an item to a teammate; the receiver adds it to their pack (or drops it if full).
+        const target = room.clients.get(Number(m.to));
+        if (!target || target === c || !ITEM_TYPES.has(m.type)) return;
+        return send(target, { t: 'give', from: c.cid, type: m.type });
+      }
       case 'beacon': {
         if (room.beacon) return;
         room.beacon = { by: c.user.displayName || c.user.username };
         return broadcast(room, { t: 'beacon', by: c.cid, name: room.beacon.by });
       }
       case 'pull':
+      case 'carry':
+      case 'uncarry':
       case 'revive': {
         // Player-to-player help: relayed to the target, who checks range/state on their side.
         const target = room.clients.get(Number(m.to));

@@ -243,3 +243,12 @@ body.phone .swatch.wide{width:auto;min-height:30px;padding:0 8px;font-size:.72re
 body.phone .wbtns{margin-top:8px}
 body.phone .wbtns .btn{min-height:38px;font-size:.85rem;padding:6px 10px}
 body.tablet #wardrobe .card{width:min(420px,46vw)}
+
+/* Extra afflictions on the stamina bar and the binoculars view. */
+.lg.pois::before{background:#7bd13b}.lg.wt::before{background:#8c8c8c}
+#bPois{background:repeating-linear-gradient(-45deg,#7bd13b 0 6px,#4f9a24 6px 12px)}
+#bWeight{background:repeating-linear-gradient(90deg,#8c8c8c 0 3px,#6e6e6e 3px 6px)}
+#scope{position:fixed;inset:0;pointer-events:none;z-index:5;background:radial-gradient(circle at center,transparent 0,transparent 34vmin,rgba(0,0,0,.9) 36vmin)}
+#bPing{right:200px;bottom:40px}
+body.phone #bPing{right:190px;bottom:30px}
+#bDrop.lit{background:linear-gradient(180deg,#ffe98a,var(--st));box-shadow:0 0 0 3px rgba(255,210,63,.5),0 5px 0 rgba(107,82,51,.45)}
