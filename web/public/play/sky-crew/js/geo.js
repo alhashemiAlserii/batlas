@@ -1,5 +1,6 @@
 // Geometry helpers: vertex-coloured batching (one draw call per batch), lofted tubes, swept planforms, canvas textures.
 import * as THREE from '../../vendor/three.module.js';
+import { stylize } from './look.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -43,7 +44,7 @@ export class Batch {
     const { basic = false, side = THREE.FrontSide, shadows = true, roughness = 0.72, metalness = 0.06, ...rest } = opts;
     const mat = basic
       ? new THREE.MeshBasicMaterial({ vertexColors: true, side, ...rest })
-      : new THREE.MeshStandardMaterial({ vertexColors: true, side, roughness, metalness, envMapIntensity: 0.55, ...rest });
+      : stylize(new THREE.MeshStandardMaterial({ vertexColors: true, side, roughness, metalness, envMapIntensity: 0.5, ...rest }));
     const m = new THREE.Mesh(this.geometry(), mat);
     m.castShadow = shadows; m.receiveShadow = shadows;
     return m;

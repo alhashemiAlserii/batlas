@@ -3,6 +3,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import * as CANNON from '../../vendor/cannon-es.js';
 import { makeCharacter, animateCharacter, pokeRagdoll, randomPassengerLook, bubble } from './characters.js';
+import { stylize } from './look.js';
 import { HALF_W, Z_TAIL, Z_NOSE, CEIL, GEAR_H, DEST, ORIGIN, ROUTES, MATERIALS, setRoute, REAR_DOOR, CARGO_DOOR, RAMP, Z_HOLD0, Z_HOLD1 } from './world.js';
 import { newFlight, distTo } from './flight.js';
 import { paxTerminalPath, paxTerminalStart } from './terminal.js';
@@ -141,6 +142,7 @@ export class Sim {
       if (type === 'giant_duck') { const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8), mesh.material); head.position.set(0, 0.5, -0.25); mesh.add(head); const beak = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.2), new THREE.MeshLambertMaterial({ color: 0xff8c00 })); beak.position.set(0, 0.48, -0.5); mesh.add(beak); }
     }
     mesh.position.set(...pos);
+    mesh.traverse((o) => { if (o.isMesh && o.material) stylize(o.material); });
     this.ship.plane.add(mesh);
     const shape = def.ball ? new CANNON.Sphere(w / 2) : new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2));
     const body = new CANNON.Body({ mass: def.mass, shape, linearDamping: 0.15, angularDamping: 0.3 });

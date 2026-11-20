@@ -1,8 +1,9 @@
 // Sky Crew v0 — bootstrap, input, player controller, camera, networking glue.
 import { api } from '/js/common.js';
 import * as THREE from '../../vendor/three.module.js';
-import { ACESFilmicToneMapping, PMREMGenerator } from '../../vendor/three.module.js';
+import { NeutralToneMapping, PCFShadowMap, PMREMGenerator } from '../../vendor/three.module.js';
 import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, setRoute, Z_TAIL, Z_NOSE, PILOT_LIFT, PILOT_EYE_Y } from './world.js';
+import { createPresenter, createFlightFx } from './look.js';
 import { Sim, ITEM_DEFS } from './sim.js';
 import { stepFlight, KT, FT, distTo, relBearing, glidePath } from './flight.js';
 import { Audio } from './audio.js';
@@ -28,25 +29,36 @@ const QKEY = 'skycrew.quality';
 const qualityPref = ['auto', 'low', 'medium', 'high'].includes(localStorage.getItem(QKEY)) ? localStorage.getItem(QKEY) : 'auto';
 const lowEnd = isTouch && (navigator.hardwareConcurrency || 4) <= 2;
 const quality = qualityPref !== 'auto' ? qualityPref : lowEnd ? 'low' : isTouch ? 'medium' : 'high';
-const Q = { low: { aa: false, pr: 1, shadow: 0 }, medium: { aa: !isTouch, pr: isTouch ? 1.5 : 1.5, shadow: 1024 }, high: { aa: true, pr: 2, shadow: 2048 } }[quality];
-const renderer = new THREE.WebGLRenderer({ antialias: Q.aa, powerPreference: 'high-performance' });
+const Q = {
+  low: { aa: false, pr: 1, shadow: 0, soft: false, bloom: false, particles: false },
+  medium: { aa: !isTouch, pr: isTouch ? 1.5 : 1.5, shadow: 1024, soft: true, bloom: false, particles: true },
+  high: { aa: true, pr: 1.75, shadow: 2048, soft: true, bloom: !isTouch, particles: true },
+}[quality];
+const shotMode = new URLSearchParams(location.search).has('shot');
+const renderer = new THREE.WebGLRenderer({ antialias: Q.aa, powerPreference: 'high-performance', preserveDrawingBuffer: shotMode });
 renderer.setPixelRatio(Math.min(devicePixelRatio, Q.pr));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
-if (Q.shadow) { renderer.shadowMap.enabled = true; renderer.shadowMap.type = quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap; }
+renderer.toneMapping = NeutralToneMapping;
+renderer.toneMappingExposure = 1.12;
+// This three.js build removed PCFSoftShadowMap (it warns and falls back). Softness is the PCF blur radius.
+if (Q.shadow) { renderer.shadowMap.enabled = true; renderer.shadowMap.type = PCFShadowMap; }
 $('#view').append(renderer.domElement);
 const scene = new THREE.Scene();
 scene.environment = skyEnvironment(renderer);
 const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 40000);
 const env = buildWorld(scene, { quality });
-if (Q.shadow) { env.sun.castShadow = true; env.sun.shadow.mapSize.set(Q.shadow, Q.shadow); }
+if (Q.shadow) {
+  env.sun.castShadow = true; env.sun.shadow.mapSize.set(Q.shadow, Q.shadow);
+  env.sun.shadow.radius = quality === 'high' ? 4 : 2;
+}
 const SUN_OFF = new THREE.Vector3(350, 550, 250).normalize().multiplyScalar(600);
-const ship = buildPlane();
+const ship = buildPlane({ quality });
+const presenter = createPresenter(renderer, { bloom: Q.bloom });
+const fx = createFlightFx({ plane: ship.plane, camera, scene, quality, gearH: GEAR_H });
 const terminal = buildTerminal(ship); // pre-flight airport behind the parked plane (before the physics world is built)
 // cabin key light: soft shadows from seats/bins/people (1024 map on iPad 'medium', 2048 on desktop 'high')
-if (Q.shadow) { const k = ship.cabin.key; k.castShadow = true; k.shadow.mapSize.set(Q.shadow, Q.shadow / 2); if (quality !== 'high') k.shadow.autoUpdate = false; }
+if (Q.shadow) { const k = ship.cabin.key; k.castShadow = true; k.shadow.mapSize.set(Q.shadow, Q.shadow / 2); k.shadow.radius = quality === 'high' ? 5 : 3; if (quality !== 'high') k.shadow.autoUpdate = false; }
 let keyShadowT = 0; // medium (iPad): the cabin shadow map is refreshed at ~12 Hz instead of every frame
 const audio = new Audio();
 scene.add(ship.plane);
@@ -58,6 +70,7 @@ for (let i = 0; i < 3; i++) {
   fireFx.add(flame);
 }
 fireFx.position.set(1.55, 1.05, 10.2);
+fireFx.scale.setScalar(1.7);
 fireFx.visible = false;
 ship.plane.add(fireFx);
 /** A small generated sky used as the reflection environment for standard materials. */
@@ -79,6 +92,7 @@ function skyEnvironment(renderer) {
 }
 function resizeView() {
   renderer.setSize(innerWidth, innerHeight);
+  presenter.resize();
   camera.aspect = innerWidth / Math.max(1, innerHeight);
   camera.updateProjectionMatrix();
 }
@@ -1044,7 +1058,12 @@ function updateCamera() {
     camera.position.copy(eye);
     camera.rotation.set(me.pitch, me.yaw, 0, 'YXZ');
   }
-  if (sim.turb) { camera.position.x += (Math.random() - 0.5) * sim.turb * 0.03; camera.position.y += (Math.random() - 0.5) * sim.turb * 0.03; }
+  if (sim.turb) {
+    const m = sim.turb * (quality === 'low' ? 0.02 : 0.04);
+    camera.position.x += (Math.random() - 0.5) * m;
+    camera.position.y += (Math.random() - 0.5) * m;
+    if (!me.third) camera.rotation.z = (Math.random() - 0.5) * sim.turb * 0.02;
+  }
   void f;
 }
 
@@ -1083,6 +1102,8 @@ function updateWeather(dt) {
   if (day.warm > 0.01) scene.fog.color.lerp(cB.setHex(0xffa36b), day.warm * 0.5);
   scene.fog.color.multiplyScalar(0.25 + 0.75 * day.k);
   u.mid.value.copy(mix(P0.mid, P1.mid, near)); u.bottom.value.copy(mix(P0.bottom, P1.bottom, near));
+  const night = 1 - day.k;
+  u.top.value.setHex(0x1556d8).lerp(cB.setHex(storm ? 0x12182c : 0x101c3e), Math.max(night * 0.82, storm ? 0.62 : 0));
   if (day.warm > 0.01) u.bottom.value.lerp(cB.setHex(0xff9a5a), day.warm * 0.7);
   env.sea.material.color.copy(mix(P0.sea, P1.sea, near)).multiplyScalar(0.35 + 0.65 * day.k);
   env.sun.intensity = w.sun * day.k;
@@ -1099,7 +1120,7 @@ function updateWeather(dt) {
   // cabin lights matter more at night
   ship.cabin.key.intensity = ship.cabin.key.userData.base * (1.25 - 0.25 * day.k);
   if (wet && !rain) {
-    const geo = new THREE.BufferGeometry(); const n = 1500, a = new Float32Array(n * 3);
+    const geo = new THREE.BufferGeometry(); const n = quality === 'low' ? 400 : 1200, a = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { a[i * 3] = (Math.random() - 0.5) * 60; a[i * 3 + 1] = Math.random() * 30 - 8; a[i * 3 + 2] = (Math.random() - 0.5) * 70; }
     geo.setAttribute('position', new THREE.BufferAttribute(a, 3));
     rain = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xaabbdd, size: 0.08 }));
@@ -1115,6 +1136,17 @@ function updateWeather(dt) {
   const warn = (sim.host ? sim.events.filter((e) => !e.done && e.fix).length : (sim.activeEvents || []).filter((e) => e[0] === 'engine_warning' || e[0] === 'cabin_pressure').length) > 0;
   ship.warnLight.intensity = warn ? (Math.sin(performance.now() / 180) > 0 ? 14 : 0) : 0;
   ship.panelLight.material = warn ? warnMat : okMat;
+  if (env.sea.material.userData.uTime) env.sea.material.userData.uTime.value = performance.now() / 1000;
+  env.clouds.position.x = Math.sin(performance.now() / 9000) * 90;
+  env.clouds.position.z = Math.cos(performance.now() / 12000) * 70;
+  env.clouds.material.color.setScalar(storm ? 0.45 : wet ? 0.72 : 1);
+  env.clouds.material.emissiveIntensity = storm ? 0.08 : 0.35;
+  for (const L of env.floods || []) L.intensity = (0.6 + night * 9) * (storm ? 0.45 : 1);
+  const hit = fx.update(dt, {
+    wet, storm, seated: me.mode === 'pilot' || me.mode === 'copilot', fire: !!sim.fireOn, spill: !!sim.spillOn,
+    warn, turb: sim.turb, onGround: sim.flight.onGround, flying: !sim.flight.onGround && (sim.flight.speed || 0) > 15, flash: flashT > 0,
+  });
+  if (hit.bird && playing) UI.toast('Birds off the nose. Feathers on the windscreen.', 'warn');
 }
 const warnMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a }), okMat = new THREE.MeshBasicMaterial({ color: 0x3ddc84 });
 
@@ -1521,7 +1553,7 @@ let settingsFrom = null;
 function openSettings(from) {
   settingsFrom = from;
   $('#setQuality').value = qualityPref;
-  const qNote = { low: 'Fastest: no shadows, 1× resolution.', medium: 'Shadows and a mid resolution, the auto choice on iPad and iPhone.', high: 'Soft shadows, up to 2× resolution, and fuller lighting.' }[quality];
+  const qNote = { low: 'Fastest: no shadows, no bloom, light particles, 1× resolution.', medium: 'Soft shadows and particles. The auto choice on iPad and iPhone. Bloom stays off so the cabin can hold 60fps.', high: 'Soft shadows, fuller clouds, and bloom on lights and gauges when the browser can keep an extra color target.' }[quality];
   $('#setQualityNote').textContent = `Now using: ${quality}${qualityPref === 'auto' ? ' (auto)' : ''}. ${qNote}`;
   $('#volMaster').value = audio.vol.master; $('#volMusic').value = audio.vol.music; $('#volSfx').value = audio.vol.sfx;
   UI.show('#settings', true);
@@ -1851,6 +1883,7 @@ function padEdge(i, seated) {
 }
 
 // ---------------- main loop ----------------
+let celebrated = false;
 const clock = new THREE.Clock();
 const perfStat = { frames: 0, t0: performance.now(), fps: 0 };
 const RENDER_CAP = Math.max(0, Math.min(60, Number(qs.get('fps')) || 0));
@@ -1892,7 +1925,9 @@ function frameBody() {
   // ?fps=N caps how often the 3D view is DRAWN (the game itself keeps running every frame): used by multi-client
   // tests on software GL, and handy on very weak devices.
   const nowR = performance.now();
-  if (!RENDER_CAP || forceRender || nowR - lastRender >= 1000 / RENDER_CAP) { renderer.render(scene, camera); lastRender = nowR; forceRender = false; }
+  if (sim.score.landing === 'butter' || sim.score.landing === 'good') { if (!celebrated) { celebrated = true; fx.celebrate(); } }
+  else if (!sim.score.landing) celebrated = false;
+  if (!RENDER_CAP || forceRender || nowR - lastRender >= 1000 / RENDER_CAP) { presenter.render(scene, camera); lastRender = nowR; forceRender = false; }
 }
 UI.show('#loading', false);
 requestAnimationFrame(frame);
@@ -1919,7 +1954,7 @@ window.skyCrew = {
   cabin: () => ({ ...sim.cabin }),
   checklist: () => sim.checklist(),
   glide: () => glidePath(sim.flight),
-  quality: () => ({ pref: qualityPref, quality, shadows: renderer.shadowMap.enabled }),
+  quality: () => ({ pref: qualityPref, quality, shadows: renderer.shadowMap.enabled, shadowRadius: env.sun.shadow.radius, bloom: presenter.enabled, particles: Q.particles }),
   audio: () => ({ ready: audio.ready, music: audio.musicOn, vol: { ...audio.vol } }),
   crew: (role) => net.send({ t: 'crew', role }),
   myCrew: () => myCrew,
@@ -1957,7 +1992,11 @@ window.skyCrew = {
     pax: () => sim.pax.map((q) => ({ state: q.state, x: +q.mesh.position.x.toFixed(2), y: +q.mesh.position.y.toFixed(2), z: +q.mesh.position.z.toFixed(2), visible: q.mesh.visible })),
     tris: () => { const out = []; scene.traverse((o) => { if (o.isMesh && o.geometry) { const g = o.geometry, n = (g.index ? g.index.count : g.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1); let k = o, path = []; while (k && k !== scene) { path.push(k.name || k.type); k = k.parent; } out.push([path.reverse().join('/'), Math.round(n)]); } }); const agg = {}; for (const [p, n] of out) { const key = p.split('/').slice(0, 3).join('/'); agg[key] = (agg[key] || 0) + n; } return Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 25); },
     planeTris: () => ship.plane.children.filter((o) => o.isMesh).map((o) => [o.name || '?', o.material?.type, Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3)]).sort((a, b) => b[2] - a[2]).slice(0, 12),
-    perf: () => ({ fps: Math.round(perfStat.fps * 10) / 10, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, quality, shadows: renderer.shadowMap.enabled }),
+    perf: () => ({ fps: Math.round(perfStat.fps * 10) / 10, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, quality, shadows: renderer.shadowMap.enabled, bloom: presenter.enabled }),
+    gear: (down) => { sim.cabin.gearDown = !!down; ship.gear.visible = !!down; },
+    bird: () => fx.bird(),
+    celebrate: () => fx.celebrate(),
+    weather: (w, hour) => { if (w) sim.weather = w; if (hour != null) sim.hour = hour; },
     door: (name, open) => { if (sim.host) sim.setDoor(name, open); return { open: ship.doors[name].open, t: ship.doors[name].t }; },
     setPos: (x, y, z, yaw) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); if (yaw != null) me.yaw = yaw; },
     trigger: (id) => sim.trigger(id),

@@ -8,6 +8,7 @@
 // and longer floppy arms and legs. Cartoon, chunky, and drawn only for this game.
 import * as THREE from '../../vendor/three.module.js';
 import { mergeGeometries } from '../../vendor/addons/BufferGeometryUtils.js';
+import { stylize } from './look.js';
 
 export const RANK_COLORS = { DEVELOPER: '#f5c542', ADMIN: '#4a8cff', TRUSTED: '#3ddc84', PLAYER: '#f2f4fa' };
 export const SKIN = [0xffd9b8, 0xf1c27d, 0xe0ac69, 0xc68642, 0x9c6136, 0x70432a, 0xffe3cf];
@@ -24,13 +25,13 @@ const PARENT = { spine: 'hips', chest: 'spine', neck: 'chest', head: 'neck', 'sh
  *  A round head on a short neck, shoulders wider than the hips, legs long enough to reach the floor when seated. */
 function dims(look) {
   const s = look.height ?? 1, g = look.girth ?? 1;
-  const leg = 0.62 * s * (look.legs ?? 1), torso = 0.40 * s, headR = (look.headSize ?? 1) * 0.20;
+  const leg = 0.62 * s * (look.legs ?? 1), torso = 0.40 * s, headR = (look.headSize ?? 1) * 0.225;
   const neck = 0.09 * s;
   const belly = 0.20 * g, chest = 0.235 * (0.82 + 0.18 * g) * (look.shoulders ?? 1);
   const footH = 0.05, hipY = footH + leg;
   const thigh = leg * 0.44, shin = leg * 0.56;
   const top = hipY + torso + neck + headR * 1.95;
-  return { s, g, leg, torso, headR, neck, belly, chest, footH, hipY, thigh, shin, arm: 0.23 * s, fore: 0.21 * s, limbR: 0.052 * (0.84 + 0.2 * g), legR: 0.068 * (0.8 + 0.22 * g), hipW: Math.max(0.08, belly * 0.55), top };
+  return { s, g, leg, torso, headR, neck, belly, chest, footH, hipY, thigh, shin, arm: 0.23 * s, fore: 0.21 * s, limbR: 0.06 * (0.86 + 0.22 * g), legR: 0.078 * (0.82 + 0.24 * g), hipW: Math.max(0.08, belly * 0.55), top };
 }
 /** Rest-pose joint positions in character space. */
 function joints(d) {
@@ -151,7 +152,7 @@ function setExpression(ch, kind) {
 }
 
 // ---------------------------------------------------------------- the character
-const MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.02, envMapIntensity: 0.35 });
+const MAT = stylize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.02, envMapIntensity: 0.4 }));
 /**
  * look: { skin, shirt, shirt2, pattern: plain|stripes|dots|split, pants, skirt, dress, shoes, hair, hairColor, hat, hatColor,
  *         glasses: 0|1|2(sun), beard, moustache, height, girth, headSize, legs, shoulders, eyeSize, uniform: pilot|copilot|cabin|cargo|null, bag }
@@ -267,7 +268,8 @@ export function makeCharacter(look = {}) {
   const cap = (k = 0.56, sc = [1.08, 1.06, 1.08], dy = 0.02) => part(new THREE.SphereGeometry(hr, 14, 8, 0, Math.PI * 2, 0, Math.PI * k), hcol, 'head', { pos: [0, hc[1] + dy, hc[2] + 0.01], scale: sc });
   const hat = look.hat;
   const hairUnderHat = hat && !['pilot', 'pillbox'].includes(hat) ? null : look.hair;
-  switch (hat ? (['pilot', 'pillbox'].includes(hat) ? look.hair : 'none') : look.hair) {
+  const coversHair = hat && !['bow', 'flower'].includes(hat);
+  switch (coversHair ? (['pilot', 'pillbox'].includes(hat) ? look.hair : 'none') : look.hair) {
     case 'bald': break;
     case 'none': break;
     case 'long': parts.push(cap(0.6)); parts.push(part(capsule(hr * 0.7, hr * 0.7, 4, 12), hcol, 'head', { pos: [0, hc[1] - hr * 0.35, hr * 0.45], scale: [1.3, 1, 0.6] })); break;
@@ -277,6 +279,7 @@ export function makeCharacter(look = {}) {
     case 'spiky': parts.push(cap(0.5)); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; parts.push(part(new THREE.ConeGeometry(hr * 0.16, hr * 0.55, 5), hcol, 'head', { pos: [Math.cos(a) * hr * 0.55, hc[1] + hr * 0.8, hc[2] + Math.sin(a) * hr * 0.5], rot: [Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5] })); } break;
     case 'mohawk': parts.push(cap(0.45, [1.05, 1.03, 1.05], 0)); for (let i = 0; i < 6; i++) parts.push(part(new THREE.ConeGeometry(hr * 0.13, hr * 0.6, 4), look.hairColor2 ?? 0xff2fa0, 'head', { pos: [0, hc[1] + hr * 0.95 - Math.abs(i - 2.5) * 0.02, hc[2] - hr * 0.6 + i * hr * 0.25], rot: [-0.3 + i * 0.12, 0, 0] })); break;
     case 'bob': parts.push(cap(0.62, [1.12, 1.08, 1.12])); parts.push(part(new THREE.CylinderGeometry(hr * 1.12, hr * 1.18, hr * 0.7, 18, 1, true, Math.PI * 0.32, Math.PI * 1.36), hcol, 'head', { pos: [0, hc[1] - hr * 0.15, hc[2]] })); break;
+    case 'pigtails': parts.push(cap(0.55)); for (const s of [-1, 1]) parts.push(part(capsule(hr * 0.22, hr * 0.7, 3, 8), hcol, 'head', { pos: [s * hr * 0.95, hc[1] - hr * 0.15, hr * 0.15], rot: [0.35, 0, s * 0.45] })); break;
     case 'curly': for (let i = 0; i < 14; i++) { const a = i * 2.39996, yy = 0.15 + (i % 3) * 0.28; parts.push(part(sphere(hr * 0.3, 8, 6), hcol, 'head', { pos: [Math.cos(a) * hr * 0.85 * Math.sqrt(1 - yy * yy), hc[1] + hr * yy + hr * 0.2, hc[2] + Math.sin(a) * hr * 0.85 * Math.sqrt(1 - yy * yy) + 0.03] })); } break;
     default: parts.push(cap(0.56)); parts.push(part(sphere(hr * 0.35, 10, 6), hcol, 'head', { pos: [hr * 0.35, hc[1] + hr * 0.72, hc[2] - hr * 0.55], scale: [1.4, 0.5, 0.8] })); // side-swept fringe
   }
@@ -295,6 +298,15 @@ export function makeCharacter(look = {}) {
   if (hat === 'sunhat') { parts.push(part(new THREE.CylinderGeometry(hr * 1.8, hr * 1.8, hr * 0.05, 22), hcolr, 'head', { pos: [0, top - hr * 0.1, 0] })); parts.push(part(new THREE.SphereGeometry(hr * 0.95, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hcolr, 'head', { pos: [0, top - hr * 0.12, 0] })); parts.push(part(new THREE.TorusGeometry(hr * 0.92, hr * 0.06, 4, 18), 0xff5a5f, 'head', { pos: [0, top - hr * 0.02, 0], rot: [Math.PI / 2, 0, 0] })); }
   if (hat === 'party') parts.push(part(new THREE.ConeGeometry(hr * 0.45, hr * 1.1, 12), hcolr, 'head', { pos: [hr * 0.15, top + hr * 0.5, 0], rot: [0, 0, -0.2], paint: (x, y) => (Math.floor(y * 25) % 2 ? hcolr : 0xffffff) }));
   if (hat === 'cowboy') { parts.push(part(new THREE.CylinderGeometry(hr * 1.6, hr * 1.6, hr * 0.06, 16), hcolr, 'head', { pos: [0, top - hr * 0.05, 0], scale: [1, 1, 0.8] })); parts.push(part(new THREE.CylinderGeometry(hr * 0.75, hr * 0.85, hr * 0.6, 12), hcolr, 'head', { pos: [0, top + hr * 0.25, 0] })); }
+  if (hat === 'bow') {
+    parts.push(part(new THREE.BoxGeometry(hr * 0.85, hr * 0.22, hr * 0.08), hcolr, 'head', { pos: [0, hc[1] + hr * 0.72, -hr * 0.15] }));
+    parts.push(part(sphere(hr * 0.14, 8, 6), hcolr, 'head', { pos: [0, hc[1] + hr * 0.72, -hr * 0.22] }));
+    for (const s of [-1, 1]) parts.push(part(sphere(hr * 0.2, 8, 6), hcolr, 'head', { pos: [s * hr * 0.28, hc[1] + hr * 0.7, -hr * 0.12], scale: [1.3, 0.7, 0.5] }));
+  }
+  if (hat === 'flower') {
+    parts.push(part(sphere(hr * 0.12, 8, 6), 0xffd23f, 'head', { pos: [hr * 0.55, hc[1] + hr * 0.55, -hr * 0.55] }));
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; parts.push(part(sphere(hr * 0.11, 6, 5), hcolr, 'head', { pos: [hr * 0.55 + Math.cos(a) * hr * 0.2, hc[1] + hr * 0.55 + Math.sin(a) * hr * 0.16, -hr * 0.55] })); }
+  }
   if (hat === 'bucket') { parts.push(part(new THREE.CylinderGeometry(hr * 0.9, hr * 1.05, hr * 0.5, 12), hcolr, 'head', { pos: [0, hc[1] + hr * 0.35, 0] })); parts.push(part(new THREE.CylinderGeometry(hr * 1.55, hr * 1.55, hr * 0.04, 14), shade(hcolr, 0.85), 'head', { pos: [0, hc[1] + hr * 0.1, 0] })); }
   if (hat === 'headphones') { parts.push(part(new THREE.TorusGeometry(hr * 1.05, hr * 0.07, 5, 12, Math.PI), 0x2d3436, 'head', { pos: [0, hc[1] + hr * 0.02, 0], rot: [0, Math.PI / 2, 0] })); for (const s of [-1, 1]) parts.push(part(new THREE.CylinderGeometry(hr * 0.28, hr * 0.28, hr * 0.14, 8), hcolr, 'head', { pos: [s * hr * 1.02, hc[1], 0], rot: [0, 0, Math.PI / 2] })); }
   // --- glasses
@@ -604,18 +616,19 @@ export function randomPassengerLook(rnd = Math.random) {
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const fem = rnd() < 0.5;
   // same people as the crew, with their own shapes: round, lanky, pear-shaped, broad, short, elder
-  const shape = pick(['ball', 'noodle', 'pear', 'brick', 'egg', 'tiny', 'average', 'elder', 'ball', 'pear']);
+  const shape = pick(['ball', 'ball', 'pear', 'pear', 'brick', 'egg', 'tiny', 'average', 'elder', 'noodle']);
   const sh = { average: [1, 1.12, 1.05, 1], ball: [0.86, 1.5, 0.95, 1.05], noodle: [1.16, 0.78, 1.05, 0.72], pear: [0.96, 1.4, 1.05, 0.78], brick: [1.02, 1.25, 0.95, 1.35], egg: [0.9, 1.3, 1.1, 0.88], tiny: [0.72, 1.05, 1.15, 0.92], elder: [0.94, 1.22, 1.02, 0.95] }[shape];
-  const hair = fem ? pick(['long', 'bun', 'ponytail', 'bob', 'curly', 'afro', 'short']) : pick(['short', 'short', 'spiky', 'bald', 'mohawk', 'curly', 'afro', 'bob']);
-  const hats = ['cap', 'beanie', 'tophat', 'sunhat', 'cowboy', 'party'];
+  const hair = fem ? pick(['long', 'bun', 'ponytail', 'pigtails', 'bob', 'curly', 'afro', 'short']) : pick(['short', 'short', 'spiky', 'bald', 'mohawk', 'curly', 'afro', 'bob']);
+  const hats = ['cap', 'beanie', 'tophat', 'sunhat', 'cowboy', 'party', 'headphones', 'bow', 'flower'];
   const pattern = pick(['plain', 'plain', 'stripes', 'dots', 'split']);
   return {
     skin: pick(SKIN), shirt: pick(SHIRTS), shirt2: pick([0xffffff, 0xfff3b0, 0x1d3557, pick(SHIRTS)]), pattern, pants: pick(PANTS), shoes: pick([0x2b2b33, 0xffffff, 0xd62828, 0x6d4c41, 0x3a86ff]),
     hair, hairColor: shape === 'elder' ? pick([0xb8b8b8, 0xf2efe6]) : pick(HAIRC), hairColor2: pick([0xff2fa0, 0x2aa7c9, 0x9bde7e]),
-    hat: rnd() < 0.3 ? pick(hats) : null, hatColor: pick([0xd63031, 0x0984e3, 0xfdcb6e, 0x2d3436, 0x6ab04c, 0xe84393, 0xf5f0e1]),
+    hat: rnd() < 0.42 ? pick(hats) : null, hatColor: pick([0xd63031, 0x0984e3, 0xfdcb6e, 0x2d3436, 0x6ab04c, 0xe84393, 0xf5f0e1]),
+    scarf: rnd() < 0.22 ? pick([0xff5a5f, 0xffbe0b, 0x19d3c5, 0xf7f4ee, 0x8338ec]) : null,
     skirt: fem && rnd() < 0.35, dress: fem && rnd() < 0.15, shorts: !fem && rnd() < 0.2, sleeves: rnd() < 0.45 ? 'short' : 'long',
     glasses: rnd() < 0.3 ? (rnd() < 0.4 ? 2 : 1) : 0, beard: !fem && rnd() < 0.18, moustache: !fem && rnd() < 0.15, tie: !fem && rnd() < 0.15 ? pick([0xd62828, 0x1d3557, 0xffbe0b]) : null,
-    height: sh[0] * (0.95 + rnd() * 0.1), girth: sh[1] * (0.92 + rnd() * 0.14), headSize: sh[2] * (0.95 + rnd() * 0.1), shoulders: sh[3], legs: shape === 'tiny' || shape === 'ball' ? 0.8 : shape === 'noodle' ? 1.16 : 0.92,
+    height: sh[0] * (0.94 + rnd() * 0.1), girth: sh[1] * (1.08 + rnd() * 0.18), headSize: sh[2] * (1.12 + rnd() * 0.14), shoulders: sh[3], legs: shape === 'tiny' || shape === 'ball' ? 0.8 : shape === 'noodle' ? 1.16 : 0.92,
     eyeSize: 0.28 + rnd() * 0.08, wobble: shape === 'ball' || shape === 'pear' ? 1.65 : 1.25, nose: rnd() < 0.7 ? 'round' : 'pointy', backpack: rnd() < 0.15 ? pick(SHIRTS) : null, shape,
   };
 }

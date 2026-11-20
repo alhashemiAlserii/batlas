@@ -6,6 +6,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { RoundedBoxGeometry } from '../../vendor/addons/RoundedBoxGeometry.js';
 import { Batch, loft, slab, fin, canvasTexture, rng } from './geo.js';
+import { stylize, waveSea } from './look.js';
 
 export const GEAR_H = 2.4; // cabin floor height above ground when parked
 export const HALF_W = 2.2; // interior half width (wide cabin, 1.4 m aisle)
@@ -36,7 +37,7 @@ export function setRoute(code) { if (ROUTES[code]) Object.assign(DEST, ROUTES[co
 /** Terrain obstacles (cones) the aircraft can crash into: {x, z, r, h}. Filled by buildWorld. */
 export const OBSTACLES = [];
 
-const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.08, envMapIntensity: 0.45, ...extra });
+const mat = (color, extra = {}) => stylize(new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.08, envMapIntensity: 0.45, ...extra }));
 const M = {
   dark: mat(0x1b2333), metal: mat(0x9aa4b5), cloud: mat(0xffffff),
   screen: new THREE.MeshBasicMaterial({ color: 0x19d3e6 }), warn: new THREE.MeshBasicMaterial({ color: 0xff3b4a }),
@@ -78,7 +79,7 @@ export const WIN_Y = 1.3;
 const rowZ = (r) => ROW_Z0 + r * ROW_PITCH;
 const WIN_Z = []; for (let r = 0; r < ROWS; r++) WIN_Z.push(rowZ(r) - 0.12);
 
-export function buildPlane() {
+export function buildPlane({ quality = 'high' } = {}) {
   const plane = new THREE.Group();
   plane.name = 'plane';
   const colliders = [];
@@ -150,16 +151,32 @@ export function buildPlane() {
   ext.add(loft([{ z: -4.5, cy: -0.75, rx: 1.2, ry: 0.4 }, { z: -3.2, cy: -0.95, rx: 2.55, ry: 0.8 }, { z: 3.8, cy: -0.95, rx: 2.65, ry: 0.82 }, { z: 6.0, cy: -0.7, rx: 1.4, ry: 0.4 }], 20, -Math.PI / 2 - 0.1, Math.PI + 0.2), C.panel2);
   // window decals (outside), aligned with the cabin windows; cockpit side windows
   const winX = Math.sqrt(R * R - (WIN_Y - CY) ** 2) + 0.012;
+  const winGlow = new Batch();
   for (const side of [-1, 1]) for (const z of WIN_Z) {
-    const g = new THREE.CircleGeometry(0.2, 14); g.scale(0.85, 1.25, 1);
+    const g = new THREE.CircleGeometry(0.2, 12); g.scale(0.85, 1.25, 1);
     ext.add(g, C.glassOut, [side * winX, WIN_Y, z], [0, side * Math.PI / 2, 0]);
+    const frame = new THREE.TorusGeometry(0.2, 0.028, 5, 12); frame.scale(0.9, 1.28, 1);
+    ext.add(frame, C.navy, [side * (winX + 0.012), WIN_Y, z], [0, side * Math.PI / 2, 0]);
+    const glowC = new THREE.CircleGeometry(0.15, 10); glowC.scale(0.9, 1.28, 1);
+    winGlow.add(glowC, 0xffe3b0, [side * (winX + 0.028), WIN_Y, z], [0, side * Math.PI / 2, 0]);
   }
+  // radome lip, dorsal antenna and the little APU cone on the tail cone
+  ext.add(new THREE.TorusGeometry(0.55, 0.04, 6, 16), C.navy, [0, CY - 0.15, Z_NOSE - 1.15], [Math.PI / 2, 0, 0]);
+  ext.add(new THREE.CylinderGeometry(0.02, 0.02, 0.65, 6), C.steel, [0, CY + R + 0.28, -1.2]);
+  ext.add(new THREE.SphereGeometry(0.055, 8, 6), C.teal, [0, CY + R + 0.62, -1.2]);
+  ext.add(new THREE.ConeGeometry(0.16, 0.5, 8), C.dark, [0.42, 2.2, Z_TAIL + 6.2], [Math.PI / 2, 0, 0.5]);
   // cargo door seams
   { const span = thetaSpan(-0.1, 2.08, 1); for (const zz of [CARGO_DOOR.z0 - 0.04, CARGO_DOOR.z1 + 0.04]) ext.add(loft([ring(zz - 0.03, 1.005), ring(zz + 0.03, 1.005)], 6, span[0], span[1] - span[0]), C.grey); }
   for (const side of [-1, 1]) {
     const name = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.0), new THREE.MeshStandardMaterial({ map: textTexture('BATLAS AIR'), transparent: true }));
     const y = 2.45, x = Math.sqrt(R * R - (y - CY) ** 2) + 0.02;
     name.position.set(side * x, y, -1); name.rotation.y = side * Math.PI / 2; plane.add(name);
+  }
+  {
+    const reg = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.32), new THREE.MeshStandardMaterial({ map: textTexture('BA-1', { w: 512, h: 128, font: 'bold 92px -apple-system, Segoe UI, sans-serif', color: '#0a1f5c' }), transparent: true, roughness: 0.5, metalness: 0.05 }));
+    stylize(reg.material);
+    const y = 1.15, x = Math.sqrt(Math.max(0.05, R * R - (y - CY) ** 2)) + 0.03;
+    reg.position.set(x, y, 6.5); reg.rotation.y = Math.PI / 2; plane.add(reg);
   }
   // wings + winglets + engines + stabilisers
   for (const side of [-1, 1]) {
@@ -313,6 +330,11 @@ export function buildPlane() {
   B(int, HALF_W * 2, 0.12, 0.1, C.dark, 0, 2.44, Z_NOSE - 0.05);
   const wsGlass = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, 1.4), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.12, depthWrite: false }));
   wsGlass.position.set(0, 1.75, Z_NOSE - 0.07); plane.add(wsGlass);
+  B(int, 0.07, 1.22, 0.08, 0x141820, -1.62, 1.72, Z_NOSE + 0.28);
+  B(int, 0.07, 1.22, 0.08, 0x141820, 1.62, 1.72, Z_NOSE + 0.28);
+  B(int, 0.05, 1.12, 0.07, 0x141820, 0, 1.82, Z_NOSE + 0.18);
+  B(int, 3.35, 0.07, 0.08, 0x141820, 0, 2.4, Z_NOSE + 0.14);
+  B(int, 3.05, 0.055, 0.1, 0x141820, 0, 1.14, Z_NOSE + 0.4);
   // rear wall (inside face) with the door opening
   {
     const sh = new THREE.Shape(); sh.moveTo(-HALF_W, 0); sh.lineTo(HALF_W, 0); sh.lineTo(HALF_W, CEIL); sh.lineTo(-HALF_W, CEIL); sh.closePath();
@@ -452,6 +474,9 @@ export function buildPlane() {
   RB(int, 0.45, 0.7, GZ1 - GZ0, 0.03, C.galley, HALF_W - 0.23, 1.95, (GZ0 + GZ1) / 2);
   for (let i = 0; i < 4; i++) B(int, 0.02, 0.6, 0.46, 0xe4e9f1, HALF_W - 0.46, 1.95, GZ0 + 0.27 + i * 0.49);
   RB(int, 0.3, 0.35, 0.3, 0.04, 0x2b2f3a, HALF_W - 0.25, 1.22, GZ1 - 0.25); glow.box(0.02, 0.06, 0.1, 0xff8a3d, HALF_W - 0.41, 1.3, GZ1 - 0.25); // coffee maker
+  RB(int, 0.42, 0.58, 0.68, 0.04, 0xf7f4ee, HALF_W - 0.5, 0.34, GZ0 + 0.5);
+  RB(int, 0.44, 0.07, 0.7, 0.02, 0x1e6bff, HALF_W - 0.5, 0.66, GZ0 + 0.5);
+  for (const dz of [-0.2, 0.2]) for (const dx of [-0.12, 0.12]) CYL(int, 0.055, 0.055, 0.04, 0x222831, [HALF_W - 0.5 + dx, 0.05, GZ0 + 0.5 + dz], [0, 0, Math.PI / 2], 8);
   colliders.push(aabb(HALF_W - 0.75, 0, GZ0, HALF_W, 1.05, GZ1));
   const items = [['water', 0x4cc3ff, GZ0 + 0.3, 'Grab a bottle of water'], ['snack', 0xf5a623, GZ0 + 0.85, 'Grab a snack box'], ['blanket', 0x7c5cff, GZ0 + 1.4, 'Grab a blanket']];
   for (const [kind, color, z, label] of items) {
@@ -478,6 +503,8 @@ export function buildPlane() {
     glow.box(0.02, 0.06, 0.14, s < 0 ? 0xff3b4a : 0x3ddc84, xi - s * 0.07, 2.2, LZ0 + 0.55);
     glow.box(0.02, 0.1, 0.1, 0x7fd3ff, xi - s * 0.07, 2.38, LZ0 + 0.55); // lavatory symbol light
     colliders.push(aabb(Math.min(xi, xo), 0, LZ0 - 0.05, Math.max(xi, xo), CEIL, zBack));
+    const lav = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.16), new THREE.MeshBasicMaterial({ map: textTexture('LAV', { w: 256, h: 128, font: 'bold 78px -apple-system, Segoe UI, sans-serif', color: '#12306e', bg: '#f4f7fb' }) }));
+    lav.position.set(s * 1.35, 1.72, LZ0 - 0.02); lav.rotation.y = Math.PI; plane.add(lav);
   }
   // ---- door controls: rear door panel on the lavatory wall by the door (inside) + outside handle; cargo door switch in the hold
   interact.push({ id: 'door_rear', kind: 'door', door: 'rear', label: 'rear door', pos: new THREE.Vector3(-0.66, 1.2, Z_TAIL - 0.45) });
@@ -535,6 +562,31 @@ export function buildPlane() {
   const mb = new Batch();
   for (const s of seats) { mb.box(0.12, 0.12, 0.08, 0xffd84a, s.x, 1.5, s.z - 0.15); mb.box(0.01, 0.3, 0.01, 0xdddddd, s.x, 1.7, s.z - 0.15); }
   const masks = mb.mesh({ shadows: false }); masks.visible = false; plane.add(masks);
+  const winGlowMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false });
+  const winGlowMesh = new THREE.Mesh(winGlow.geometry(), winGlowMat); plane.add(winGlowMesh);
+  if (quality !== 'low') {
+    const shafts = new Batch();
+    for (const side of [-1, 1]) for (const z of WIN_Z) shafts.add(new THREE.PlaneGeometry(1.05, 0.62), 0xfff6df, [side * 1.2, 1.2, z], [0.45, side * Math.PI / 2, 0]);
+    const shaftMesh = shafts.mesh({ basic: true, transparent: true, opacity: 0.035, depthWrite: false, shadows: false, side: THREE.DoubleSide });
+    plane.add(shaftMesh);
+  }
+  const lamps = [];
+  function beacon(color, x, y, z, kind) {
+    const lampMat = new THREE.MeshBasicMaterial({ color, toneMapped: false });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(kind === 'strobe' ? 0.09 : 0.11, 10, 8), lampMat);
+    mesh.position.set(x, y, z); plane.add(mesh);
+    let light = null;
+    if (quality === 'high') {
+      light = new THREE.PointLight(color, kind === 'land' ? 1.2 : 0.45, 9, 2);
+      light.position.copy(mesh.position); plane.add(light);
+    }
+    lamps.push({ mesh, mat: lampMat, light, kind });
+  }
+  beacon(0xff3344, -16.35, -0.82, 4.55, 'nav');
+  beacon(0x3dff7a, 16.35, -0.82, 4.55, 'nav');
+  beacon(0xfff4ea, 0, CY + R + 0.08, -2.2, 'beacon');
+  beacon(0xffffff, 0, TOP - 0.15, Z_TAIL + 6.8, 'strobe');
+  beacon(0xfff1c8, 0, -1.55, Z_NOSE + 0.4, 'land');
   // ---- lighting: warm fills, a cockpit light, a red warning light and an overhead cabin KEY light with soft shadows
   const cabinLight = new THREE.PointLight(0xfff1dc, 10, 16, 1.5); cabinLight.position.set(0, 2.3, -2); plane.add(cabinLight);
   const cabinLight2 = new THREE.PointLight(0xfff1dc, 8, 14, 1.5); cabinLight2.position.set(0, 2.3, 8); plane.add(cabinLight2);
@@ -553,7 +605,7 @@ export function buildPlane() {
   const glowMesh = glow.mesh({ basic: true, shadows: false }); plane.add(glowMesh);
   const cabin = {
     lights: [cabinLight, cabinLight2], strip: stripMat, sign: signMat, key,
-    setLights(on) { cabinLight.intensity = on ? 10 : 2; cabinLight2.intensity = on ? 8 : 1.5; key.intensity = on ? 1.1 : 0.25; stripMat.color.setHex(on ? 0xfff4e0 : 0x5a6aa8); coveMat.color.setHex(on ? 0x9fd8ff : 0x4a3cff); },
+    setLights(on) { cabinLight.intensity = on ? 12 : 2.2; cabinLight2.intensity = on ? 9 : 1.6; key.intensity = on ? 1.15 : 0.28; stripMat.color.setHex(on ? 0xfff4e0 : 0x5a6aa8); coveMat.color.setHex(on ? 0x9fd8ff : 0x4a3cff); winGlowMat.opacity = on ? 0.9 : 0.16; },
     setSeatbelt(on) { signMat.color.setHex(on ? 0xffb020 : 0x333a48); },
   };
   const yokeVis = { p: 0, r: 0 };
@@ -569,8 +621,16 @@ export function buildPlane() {
     const lever = throttleLever;
     lever.rotation.x += (((lever.userData.target ?? -0.45) - lever.rotation.x) * Math.min(1, dt * 8));
     if (rampSteps) rampSteps.visible = (doors.ramp?.t || 0) > 0.35;
+    const now = performance.now();
+    const strobe = Math.sin(now / 80) > 0.86;
+    const blink = Math.sin(now / 210) > 0;
+    for (const l of lamps) {
+      if (l.kind === 'strobe') { l.mesh.visible = strobe; if (l.light) l.light.intensity = strobe ? 2.4 : 0; }
+      else if (l.kind === 'beacon') { l.mat.color.setHex(blink ? 0xff4455 : 0x3a1218); if (l.light) l.light.intensity = blink ? 1.5 : 0; }
+    }
   };
   const yokeTarget = { p: 0, r: 0 };
+  plane.traverse((o) => { if (o.isMesh && o.material && !Array.isArray(o.material)) stylize(o.material); });
   return { plane, colliders, interact, seats, doors, stairFront, stairRear: stairFront, stairCargo, gear, masks, panelLight, throttleLever, warnLight, cabin, exterior: extMesh, interior: intMesh, bins, update, key, yokes, yokeHits: yokes.map((y) => y.userData.hit), yokeTarget, rampSteps };
 }
 const glassMat = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
@@ -641,7 +701,7 @@ function addGauges(parent) {
     g.fillStyle = col; g.font = 'bold 18px sans-serif'; g.textAlign = 'center'; g.fillText(label, 64, 112);
   }));
   for (const sx of [-0.6, 0.6]) kinds.forEach((_, i) => {
-    const m = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), new THREE.MeshStandardMaterial({ map: tex[i], emissive: 0x123048, emissiveMap: tex[i], emissiveIntensity: 0.85, roughness: 0.35, metalness: 0.1 }));
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), new THREE.MeshStandardMaterial({ map: tex[i], emissive: 0x1a5070, emissiveMap: tex[i], emissiveIntensity: 1.35, roughness: 0.32, metalness: 0.08 }));
     m.position.set(sx - 0.16 + i * 0.16, 1.04, Z_NOSE + 0.5);
     parent.add(m);
     const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.01, 6, 16), metalMat());
@@ -655,7 +715,7 @@ function addGauges(parent) {
     g.font = '16px sans-serif'; g.fillStyle = '#d5dde4'; g.fillText('PFD', 18, 58);
   });
   for (const sx of [-0.62, 0.62]) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.18), new THREE.MeshStandardMaterial({ map: screen, emissive: 0x063040, emissiveMap: screen, emissiveIntensity: 0.7, roughness: 0.25, metalness: 0.05 }));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.18), new THREE.MeshStandardMaterial({ map: screen, emissive: 0x0a4860, emissiveMap: screen, emissiveIntensity: 1.15, roughness: 0.22, metalness: 0.05 }));
     m.position.set(sx, 0.78, Z_NOSE + 0.48);
     parent.add(m);
   }
@@ -811,7 +871,7 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
   sun.shadow.camera.left = -38; sun.shadow.camera.right = 38; sun.shadow.camera.top = 38; sun.shadow.camera.bottom = -38;
   sun.shadow.camera.near = 50; sun.shadow.camera.far = 1500; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.04;
 
-  const seaMat = new THREE.MeshStandardMaterial({ color: 0x1769b0, roughness: 0.18, metalness: 0.62, envMapIntensity: 0.8, polygonOffset: true, polygonOffsetFactor: 6, polygonOffsetUnits: 6 }); // keeps islands from z-fighting the sea at altitude
+  const seaMat = waveSea(new THREE.MeshStandardMaterial({ color: 0x1769b0, roughness: 0.18, metalness: 0.55, envMapIntensity: 0.8, polygonOffset: true, polygonOffsetFactor: 6, polygonOffsetUnits: 6 })); // keeps islands from z-fighting the sea at altitude
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(90000, 90000), seaMat); sea.rotation.x = -Math.PI / 2; sea.position.y = -0.6; scene.add(sea);
   const land = new Batch(), deco = new Batch(), lights = new Batch();
   function disc(cx, cz, rx, rz, color, y, seg = 28) { const g = new THREE.CircleGeometry(1, seg); g.rotateX(-Math.PI / 2); land.add(g, color, [cx, y, cz], [0, 0, 0], [rx, 1, rz]); }
@@ -870,6 +930,16 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
     deco.add(new THREE.BoxGeometry(3, 2.2, 7), 0xe74c3c, [ap.x + side * 60, 1.4, ap.z - 90]); deco.add(new THREE.CylinderGeometry(1.2, 1.2, 6, 10), 0xdfe5ee, [ap.x + side * 60, 2.2, ap.z - 96], [Math.PI / 2, 0, 0]);
     for (let i = 0; i < 3; i++) deco.add(new THREE.BoxGeometry(2, 1.2, 3), 0xf5a623, [ap.x + side * (45 + i * 4), 0.8, ap.z + 40]);
     deco.add(new THREE.CylinderGeometry(0.15, 0.15, 8, 5), 0xdddddd, [ap.x - side * 60, 4, ap.z - 200]); deco.add(new THREE.ConeGeometry(0.8, 3, 8), 0xff7a1a, [ap.x - side * 58.5, 7.5, ap.z - 200], [0, 0, Math.PI / 2]); // windsock
+    // cargo waiting on the apron: crates, a tug and a cart. Original Batlas colours.
+    const crateCol = [0xc9843a, 0x1e6bff, 0x19d3c5, 0xf4f6fb, 0xe07a3d, 0x0a1f5c];
+    for (let i = 0; i < 6; i++) {
+      const s = 0.7 + (i % 3) * 0.18;
+      deco.add(new THREE.BoxGeometry(s, s, s), crateCol[i], [ap.x + side * (22 + (i % 3) * 1.15), s / 2 + 0.05, ap.z + 22 + Math.floor(i / 3) * 1.2]);
+    }
+    deco.add(new THREE.BoxGeometry(1.5, 0.9, 2.3), 0x12306e, [ap.x + side * 18, 0.7, ap.z + 16]);
+    deco.add(new THREE.BoxGeometry(1.15, 0.45, 1.6), 0xf6f1e4, [ap.x + side * 18, 1.35, ap.z + 15.6]);
+    deco.add(new THREE.BoxGeometry(1.15, 0.45, 2.6), 0xf5a623, [ap.x + side * 26, 0.55, ap.z + 16]);
+    for (let i = 0; i < 2; i++) deco.add(new THREE.BoxGeometry(0.9, 0.7, 0.9), crateCol[i + 2], [ap.x + side * 26, 1.15, ap.z + 15.4 + i * 1.05]);
     const label = new THREE.Mesh(new THREE.PlaneGeometry(30, 8), new THREE.MeshBasicMaterial({ map: textTexture(ap.code, { color: '#ffffff' }), transparent: true }));
     label.rotation.x = -Math.PI / 2; label.position.set(ap.x, 0.08, ap.z - 30); scene.add(label);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(60, 9), new THREE.MeshBasicMaterial({ map: textTexture(ap.name.toUpperCase(), { color: '#ffffff', bg: '#0a1f5c' }) }));
@@ -910,7 +980,15 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
   const landMesh = land.mesh({ shadows: false, roughness: 0.94, metalness: 0.02 }); landMesh.receiveShadow = true; scene.add(landMesh);
   const decoMesh = deco.mesh({ roughness: 0.62, metalness: 0.08 }); decoMesh.castShadow = false; decoMesh.receiveShadow = true; scene.add(decoMesh);
   paveAirports(scene, quality);
-  const lightMesh = lights.mesh({ basic: true, shadows: false }); scene.add(lightMesh);
+  const lightMesh = lights.mesh({ basic: true, shadows: false }); lightMesh.material.toneMapped = false; scene.add(lightMesh);
+  const floods = [];
+  if (quality !== 'low') {
+    const ports = quality === 'high' ? [ORIGIN, ...Object.values(ROUTES)] : [ORIGIN];
+    for (const ap of ports) {
+      const L = new THREE.PointLight(0xffe2b8, 4, 48, 2);
+      L.position.set(ap.x - 16, 9, ap.z + 6); scene.add(L); floods.push(L);
+    }
+  }
   // clouds: one merged mesh, flat shaded puffs with greyish undersides
   const cb = new Batch();
   const nClouds = quality === 'low' ? 28 : quality === 'high' ? 130 : 72;
@@ -925,7 +1003,8 @@ export function buildWorld(scene, { quality = 'medium' } = {}) {
   for (let i = 0; i < N.count; i++) { const shade = 0.78 + 0.22 * Math.max(0, N.getY(i)); Cc.setXYZ(i, shade, shade, Math.min(1, shade + 0.03)); }
   const clouds = new THREE.Mesh(cg, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0, emissive: 0x6a7380, emissiveIntensity: 0.35 }));
   scene.add(clouds);
-  return { sky, hemi, sun, fill, clouds, sea };
+  scene.traverse((o) => { if (o.isMesh && o.material && !Array.isArray(o.material)) stylize(o.material); });
+  return { sky, hemi, sun, fill, clouds, sea, floods };
 }
 
 /** Textured runway, apron and grass strips. Drawn here, not copied from anywhere. */
