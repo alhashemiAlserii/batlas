@@ -28,7 +28,7 @@ interface Client {
   user: { userId: number; username: string; displayName: string; role: string } | null;
   room: Room | null;
   slot: number;
-  look: { c: number; h: number; s: number };
+  look: Record<string, number>;
   lastState: unknown;
   msgCount: number;
   alive: boolean;
@@ -54,7 +54,9 @@ const num = (v: unknown, lim = 1e5) => typeof v === 'number' && Number.isFinite(
 const vec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((x) => num(x, 2000));
 const round = (v: number) => Math.round(v * 100) / 100;
 const smallInt = (v: unknown, max: number) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : 0);
-const validLook = (l: any) => ({ c: smallInt(l?.c, 9), h: smallInt(l?.h, 5), s: smallInt(l?.s, 5) });
+// Outfit pieces and how many options each has (must match the game's wardrobe).
+const LOOK_LIMITS: Record<string, number> = { s: 11, f: 3, h: 15, t: 7, c: 9, b: 4, bc: 9, sh: 3, a: 8 };
+const validLook = (l: any) => Object.fromEntries(Object.entries(LOOK_LIMITS).map(([k, max]) => [k, smallInt(l?.[k], max)]));
 
 export function attachHighcragServer(
   httpServer: http.Server,
@@ -243,7 +245,7 @@ export function attachHighcragServer(
   }
 
   wss.on('connection', (ws: WebSocket) => {
-    const c: Client = { cid: nextCid++, ws, user: null, room: null, slot: 0, look: { c: 0, h: 0, s: 1 }, lastState: null, msgCount: 0, alive: true };
+    const c: Client = { cid: nextCid++, ws, user: null, room: null, slot: 0, look: validLook({ s: 1, h: 1, t: 2, b: 1, bc: 1 }), lastState: null, msgCount: 0, alive: true };
     clients.add(c);
     const authTimer = setTimeout(() => { if (!c.user) ws.close(4001, 'Sign in first.'); }, 10000);
     ws.on('pong', () => { c.alive = true; });
