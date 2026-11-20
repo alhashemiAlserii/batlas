@@ -4,7 +4,7 @@ import * as THREE from '../../vendor/three.module.js';
 import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST } from './terrain.js';
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
-import { pickQuality, QUALITY, makeSky, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
+import { pickQuality, QUALITY, makeSky, makeEnvironment, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
 import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, OUTFIT_NAMES, HATS, SKINS, DEFAULT_LOOK, validLook } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
@@ -55,6 +55,9 @@ const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 26
 scene.fog = new THREE.Fog(0xbfe6f5, 80, 700);
 const sky = makeSky();
 scene.add(sky.mesh);
+// Image-based lighting from the sky (Medium/High): realistic ambient light and reflections.
+const env = Q.standard ? makeEnvironment(renderer, sky) : null;
+let envKey = '';
 const { sun } = makeLights(scene, Q);
 const water = makeWater(Q);
 scene.add(water);
@@ -1328,6 +1331,11 @@ function updateSkyFor(y, indoor) {
   sky.uniforms.top.value.copy(c.sky);
   sky.uniforms.horizon.value.copy(c.fog);
   scene.fog.color.copy(c.fog);
+  if (env) {
+    // Re-bake the environment when the sky noticeably changes (zone change, storm, indoors).
+    const key = `${c.sky.getHexString()}${c.fog.getHexString()}`.replace(/(.)./g, '$1');
+    if (key !== envKey) { envKey = key; scene.environment = env.update(); }
+  }
   scene.fog.near = indoor ? 120 : 80 - storm * 74;
   scene.fog.far = indoor ? 900 : 900 - storm * 840;
   sky.mesh.position.copy(camera.position);
@@ -1568,8 +1576,11 @@ function openWardrobe() {
   $('#wardrobe').classList.remove('hidden');
   document.exitPointerLock?.();
   keys.clear();
-  camYaw = P.facing + Math.PI;
-  camPitch = 0.1;
+  // Stand in front of the mirror, facing the camera, so you can see the outfit.
+  if (state === 'lobby') { P.pos.set(lobby.wardrobe.x, LOBBY_FLOOR, lobby.wardrobe.z + 2.2); P.render.copy(P.pos); }
+  P.facing = 0;
+  camYaw = -0.35;
+  camPitch = 0.08;
 }
 function closeWardrobe() {
   if (!overlayOpen()) return;

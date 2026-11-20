@@ -13,10 +13,10 @@ export const HMAX = 300;
 export const SEA = 0;
 
 export const BANDS = [
-  { id: 'shore', name: 'Saltwind Shore', y0: -40, y1: 36, T: 0, ground: 0xf0d9a0, rock: 0xa58b68, fog: 0xbfe6f5, sky: 0x4fa8e8 },
-  { id: 'moss', name: 'Tanglewood Jungle', y0: 36, y1: 126, T: 15, ground: 0x4f9a35, rock: 0x6f6553, fog: 0xa6dcc0, sky: 0x3f9fd6 },
-  { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xf2f7ff, rock: 0x7e8ea6, fog: 0xdbe6f2, sky: 0x6d9fd4 },
-  { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x3f3433, rock: 0x2c2626, fog: 0xe4a585, sky: 0x8a5a9c },
+  { id: 'shore', name: 'Saltwind Shore', y0: -40, y1: 36, T: 0, ground: 0xe6d3a3, rock: 0x9c8a70, fog: 0xc6dbe6, sky: 0x3a76c4 },
+  { id: 'moss', name: 'Tanglewood Jungle', y0: 36, y1: 126, T: 15, ground: 0x4a7f2e, rock: 0x6e6658, fog: 0xbfd6d0, sky: 0x3a74bd },
+  { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xeef3f8, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
+  { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x3b3230, rock: 0x2e2826, fog: 0xc9ab97, sky: 0x5c5a86 },
 ];
 /** Display name for where you are (the lowlands share the shore band's rules). */
 export const zoneName = (y) => (y < 3.5 ? 'Saltwind Shore' : y < 36 ? 'Palm Lowlands' : bandAt(y).name);
@@ -183,10 +183,10 @@ export class Terrain {
         if (band.id === 'shore' && y >= 2.6) {
           // Lowland meadows: lush green with dry golden patches and darker forest floor.
           const dry = smooth(0.15, 0.5, fbm(x * 0.02, z * 0.02, this.seed + 61, 3));
-          cg.setHex(0x5fae3e).lerp(new THREE.Color(0xb7b45a), dry * 0.7).offsetHSL(0, 0, n * 0.05);
+          cg.setHex(0x4f8f33).lerp(new THREE.Color(0xa3a058), dry * 0.65).offsetHSL(0, 0, n * 0.05);
           cr.setHex(0x8a7a5e);
         }
-        if (y < 2.6) cg.setHex(0xf3dfa6).lerp(new THREE.Color(0x5fae3e), smooth(1.8, 2.6, y));
+        if (y < 2.6) cg.setHex(0xe8d7ac).lerp(new THREE.Color(0x4f8f33), smooth(1.8, 2.6, y));
         if (y < 0.35) cg.setHex(0xfffbf0); // surf foam along the waterline
         if (y < -0.6) cg.setHex(0x9fd8d0);
         if (y < -3) cg.setHex(0x4fa3b6);
