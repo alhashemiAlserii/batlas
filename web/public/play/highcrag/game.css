@@ -8,6 +8,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:#1b1206;color:#fff;-webkit-user-select:none;user-select:none;touch-action:none;overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 #view,#view canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#vignette{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,transparent 58%,rgba(20,10,0,.28) 100%)}
 .hidden{display:none!important}
 /* iOS Safari ignores user-scalable=no: stop double-tap zoom on everything you can tap. */
 button,a,input,select,label,summary,details,.swatch,.slot,.card,.chip,.overlay *{touch-action:manipulation}
