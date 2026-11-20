@@ -1,5 +1,13 @@
 # Sky Crew — design notes
 
+## Art direction (Harbor cartoon)
+
+Public pages for Dear Passengers (Steam app 4534960, the FLEXUS media pages, and write-ups of the announcement) describe a bright stylized indie cartoon: a readable cabin, chunky expressive people, warm saturated colour, soft light, exaggerated night storms, and slapstick effects (birds on the glass, fire, spilled food, loose cargo). Sky Crew aims at that genre. Nothing is traced from it. Every mesh, texture and name below is drawn in this repo.
+
+The picture is one palette. Hull ivory, Batlas navy `#0a1f5c` and teal `#19d3c5`, warm cabin bulbs, and seat blocks of blue, coral, teal, gold and violet. Lit surfaces share a soft three-step shade plus a warm rim so silhouettes stay readable without a second outline mesh. Shadows are percentage-closer filtered. This three.js build removed the old PCF soft map (it warns and falls back), so the blur is the shadow radius: 2 on Medium, 4 on High, a touch wider on the cabin key light. A contact blob sits under the parked Tidewing. Tone mapping is Neutral, a little warm. High on a desktop adds a quarter-resolution bloom on gauges, windows and nav lamps. If that extra color target cannot be created, bloom turns off and the emissive lamps stay. Medium (the automatic choice on iPhone and iPad) keeps the soft shadows and the particles and leaves bloom off, so a recent iPad can hold 60fps. Low drops shadows, bloom and the heavy particle pools.
+
+The BA-1 Tidewing keeps the same walkable measurements (doors, seats, hold, ramp). The shell is the lofted tube, now with window frames and warm glass, a dorsal antenna, an APU cone, wingtip and beacon lamps, and `BA-1` on the rear fuselage. Inside: mullions on the windscreen, light through the windows, a galley cart, and lavatory signs. Passengers are the same ragdoll people, drawn chunkier, with more hair, bows, flowers and scarves. Harbor Field's apron holds original cargo crates, a tug and a cart. The sea has a slow chop, clouds drift, and a storm at night flashes and streaks the windscreen. A bird strike is only a visual (feathers and a crack, no score change). Galley flares throw smoke, a cargo spill shows a slick, an engine warning throws sparks, and a butter or good landing pops confetti in Batlas colours.
+
 ## v1 service shift (this round)
 
 Researched from the public Steam page for Dear Passengers (FLEXUS, app 4534960), the 2 Oct 2026 Steam Q&A, and secondary write-ups of that material (the game is not out; there are no user reviews). What is actually confirmed:
