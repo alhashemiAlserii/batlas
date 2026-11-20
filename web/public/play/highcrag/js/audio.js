@@ -116,6 +116,7 @@ export class Sfx {
   }
   crash() { this.burst(2.5, 400, 0.9); this.burst(1.2, 2500, 0.4); this.tone(90, 2, 'sawtooth', 0.25, -60); }
   rope() { this.burst(0.25, 1200, 0.15); this.tone(320, 0.2, 'triangle', 0.06, -120); }
+  horn() { this.tone(220, 1.1, 'sawtooth', 0.12, 8); setTimeout(() => this.tone(330, 1.3, 'sawtooth', 0.12, 6), 500); }
   flare() { this.burst(1.2, 3500, 0.25); this.tone(900, 0.6, 'sawtooth', 0.04, 600); }
   ding() { this.tone(988, 0.35, 'sine', 0.12); setTimeout(() => this.tone(784, 0.5, 'sine', 0.12), 260); }
   whoosh() { this.burst(0.5, 900, 0.25); }

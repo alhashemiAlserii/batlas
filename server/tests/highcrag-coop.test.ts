@@ -245,6 +245,43 @@ describe('Highcrag co-op server', () => {
     for (const x of [a, b, c]) x.c.close();
   });
 
+  it('shares pings, the horn and bean vines; relays gifts and carrying to one teammate', async () => {
+    const a = await signedIn();
+    const b = await signedIn();
+    const c = await signedIn();
+    a.c.send({ t: 'create' });
+    const room = await a.c.wait((m) => m.t === 'room');
+    for (const x of [b, c]) { x.c.send({ t: 'join', code: room.code }); await x.c.wait((m) => m.t === 'room'); }
+
+    a.c.send({ t: 'ping', p: [1, 2, 3], k: 'horn' });
+    expect(await b.c.wait((m) => m.t === 'ping')).toMatchObject({ p: [1, 2, 3], k: 'horn', by: a.you.cid });
+    expect((await c.c.wait((m) => m.t === 'ping')).k).toBe('horn');
+    a.c.send({ t: 'ping', p: [1, 2, 3], k: 'nuke' }); // unknown kind: ignored
+
+    a.c.send({ t: 'vine', p: [10, 40, 10], d: [0.6, -0.8] });
+    expect(await b.c.wait((m) => m.t === 'vine')).toMatchObject({ p: [10, 40, 10], d: [0.6, -0.8] });
+    a.c.send({ t: 'vine', p: [10, 40, 10], d: [9, 9] }); // bad direction: ignored
+
+    a.c.send({ t: 'give', to: b.you.cid, type: 'lantern' });
+    expect(await b.c.wait((m) => m.t === 'give')).toMatchObject({ from: a.you.cid, type: 'lantern' });
+    a.c.send({ t: 'give', to: b.you.cid, type: 'gold' }); // unknown item: ignored
+
+    b.c.send({ t: 'carry', to: c.you.cid });
+    expect((await c.c.wait((m) => m.t === 'carry')).from).toBe(b.you.cid);
+    b.c.send({ t: 'uncarry', to: c.you.cid });
+    expect((await c.c.wait((m) => m.t === 'uncarry')).from).toBe(b.you.cid);
+
+    // Gifts and carrying go to the target only; vines are kept for late joiners.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(c.c.msgs.some((m) => m.t === 'give')).toBe(false);
+    expect(a.c.msgs.some((m) => m.t === 'carry')).toBe(false);
+    expect(b.c.msgs.some((m) => m.k === 'nuke' || (m.t === 'give' && m.type === 'gold'))).toBe(false);
+    const d = await signedIn();
+    d.c.send({ t: 'join', code: room.code });
+    expect((await d.c.wait((m) => m.t === 'room')).vines).toEqual([[10, 40, 10, 0.6, -0.8]]);
+    for (const x of [a, b, c, d]) x.c.close();
+  });
+
   it('closes clients that flood messages', async () => {
     const a = await signedIn();
     for (let i = 0; i < 200; i++) a.c.send({ t: 'st', p: [0, 0, 0], f: 0, m: 'ground' });

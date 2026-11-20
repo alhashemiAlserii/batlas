@@ -2,10 +2,10 @@
 // Left thumb: a floating joystick that appears where you touch (push to the edge to run).
 // Right thumb: drag anywhere to look; big Jump and Grab (toggle) buttons plus smaller action buttons.
 export class TouchControls {
-  constructor({ onLook, onAct, onUse, onDrop, onEmote, onJump, onGrabToggle }) {
+  constructor({ onLook, onAct, onUse, onDrop, onEmote, onJump, onGrabToggle, onPing }) {
     this.move = { x: 0, y: 0 };
     this.grab = false;
-    this.cb = { onLook, onAct, onUse, onDrop, onEmote, onJump, onGrabToggle };
+    this.cb = { onLook, onAct, onUse, onDrop, onEmote, onJump, onGrabToggle, onPing };
     this.el = document.getElementById('touch');
     this.base = document.getElementById('joyBase');
     this.knob = document.getElementById('joyKnob');
@@ -60,6 +60,7 @@ export class TouchControls {
     tap('bAct', () => this.cb.onAct?.());
     tap('bUse', () => this.cb.onUse?.());
     tap('bDrop', () => this.cb.onDrop?.());
+    tap('bPing', () => this.cb.onPing?.());
     tap('bEmote', () => this.cb.onEmote?.());
     // iOS: stop page scroll / zoom gestures on the game surface.
     // Stop one-finger page scrolling outside the menus (pinch and double-tap zoom are blocked in main.js).
@@ -99,6 +100,12 @@ export class TouchControls {
     this.grab = on;
     document.getElementById('bGrab').classList.toggle('on', on);
     if (fromUser) this.cb.onGrabToggle?.(on);
+  }
+  setDrop(label) {
+    const b = document.getElementById('bDrop');
+    const txt = label || 'Drop';
+    if (b.dataset.label !== txt) { b.dataset.label = txt; b.querySelector('small').textContent = txt; }
+    b.classList.toggle('lit', !!label);
   }
   setAct(label) {
     const b = document.getElementById('bAct');
