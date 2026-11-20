@@ -9,6 +9,8 @@
 html,body{margin:0;height:100%;overflow:hidden;background:#1b1206;color:#fff;-webkit-user-select:none;user-select:none;touch-action:none;overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 #view,#view canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .hidden{display:none!important}
+/* iOS Safari ignores user-scalable=no: stop double-tap zoom on everything you can tap. */
+button,a,input,select,label,summary,details,.swatch,.slot,.card,.chip,.overlay *{touch-action:manipulation}
 a{color:var(--accent);font-weight:800}
 .small{font-size:.85rem}.muted{color:var(--ink2)}
 
