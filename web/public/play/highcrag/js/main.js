@@ -15,6 +15,20 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const isTouch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && /iPad|iPhone|Android|Mobile|Macintosh/i.test(navigator.userAgent) && 'ontouchend' in document);
 if (isTouch) document.body.classList.add('touch');
 
+// iOS Safari ignores user-scalable=no, so block its zoom gestures ourselves:
+// pinch (gesture* events, and two-finger touchmove), double-tap (a second tap within 320 ms) and dblclick.
+{
+  const stop = (e) => e.preventDefault();
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend', 'dblclick']) document.addEventListener(ev, stop, { passive: false });
+  document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  let lastTap = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = performance.now();
+    if (now - lastTap < 320 && !e.target.closest?.('input, select, textarea')) e.preventDefault();
+    lastTap = now;
+  }, { passive: false });
+}
+
 const store = {
   get(k, d) { try { const v = localStorage.getItem('highcrag.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('highcrag.' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
