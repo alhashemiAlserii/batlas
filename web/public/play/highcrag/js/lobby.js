@@ -350,17 +350,18 @@ export function buildLobby() {
   }
   for (const x of [-6, 6]) box(0.8, H, 0.8, lam(0xe6d6b8), x, F + H / 2, -5.2);
 
-  // Wardrobe kiosk.
-  const wardrobe = new THREE.Vector3(O.x - 13, F, O.z - 3);
-  box(2.4, 2.6, 1, lam(0x8a6bff), -13, F + 1.3, -4);
-  const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshLambertMaterial({ color: 0xcfe9ff, emissive: 0x5a7a99, emissiveIntensity: 0.4 }));
-  mirror.position.set(-13, F + 1.6, -3.48);
-  const wsign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), new THREE.MeshBasicMaterial({ map: canvasTex(256, 64, (x) => {
-    x.fillStyle = '#ffd23f'; x.fillRect(0, 0, 256, 64);
-    x.fillStyle = '#2a1a05'; x.font = `800 34px ${FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('WARDROBE', 128, 34);
+  // Passport control: a booth with a glass screen and a sign (scenery).
+  const passportDesk = new THREE.Vector3(O.x - 13, F, O.z - 3);
+  box(2.6, 1.15, 0.9, lam(0x2a4f9a), -13, F + 0.58, -4);
+  box(2.8, 0.08, 1.1, lam(0xf2e4c9), -13, F + 1.19, -4);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshLambertMaterial({ color: 0xcfe9ff, transparent: true, opacity: 0.35 }));
+  glass.position.set(-13, F + 1.7, -3.6);
+  const psign = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.6), new THREE.MeshBasicMaterial({ map: canvasTex(320, 70, (x) => {
+    x.fillStyle = '#1f3c88'; x.fillRect(0, 0, 320, 70);
+    x.fillStyle = '#ffe9a8'; x.font = `800 30px ${FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('PASSPORT CONTROL', 160, 37);
   }) }));
-  wsign.position.set(-13, F + 2.9, -3.48);
-  g.add(mirror, wsign);
+  psign.position.set(-13, F + 2.75, -3.55);
+  g.add(glass, psign);
 
   // Gate 7: a doorway in the glass wall that leads to the parked plane.
   const gate = new THREE.Vector3(O.x + 11, F, O.z + D / 2 - 1);
@@ -409,7 +410,7 @@ export function buildLobby() {
     bounds: { minX: O.x - W / 2 + 0.6, maxX: O.x + W / 2 - 0.6, minZ: O.z - D / 2 + 0.6, maxZ: O.z + D / 2 - 0.6 },
     spawn: new THREE.Vector3(O.x - 4, F, O.z + 4.5),
     gate,
-    wardrobe,
+    passportDesk,
     planeWorld: () => plane.getWorldPosition(new THREE.Vector3()),
     floor: F,
     height: H,

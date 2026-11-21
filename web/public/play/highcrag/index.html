@@ -103,7 +103,7 @@
         <div class="card">
           <button id="btnPlay" class="btn primary big" type="button">▶ Play</button>
           <div class="row">
-            <button id="btnWardrobeTitle" class="btn" type="button">👕 Wardrobe</button>
+            <button id="btnPassportTitle" class="btn" type="button">📘 Passport</button>
             <button id="btnSettings" class="btn" type="button">⚙ Settings</button>
           </div>
           <div class="meta"><span id="seedRow"></span><span><button id="btnDaily" class="link" type="button">Daily mountain</button> · <button id="btnNew" class="link" type="button">New mountain</button></span></div>
@@ -125,7 +125,7 @@
       <details class="howto">
         <summary>How to play</summary>
         <ul>
-          <li>Start at the airport, board at <b>Gate 7</b>, and survive the crash on the island's beach. Grab a <b>compass</b>, <b>rope</b> and <b>flares</b> from the wreck.</li>
+          <li>Start at the airport holding your <b>passport</b>: use it (F, or ● Use on touch) to change your look. Board at <b>Gate 7</b>, and survive the crash on the island's beach. Grab a <b>compass</b>, <b>rope</b> and <b>flares</b> from the wreck.</li>
           <li><b>Climb</b>: hold left mouse (or R) facing a rock wall; W/S up and down, A/D sideways, Space to lunge. On touch, turn on <b>✋ Grab</b>.</li>
           <li><b>Stamina</b> (yellow) drains while you climb. <b>Hunger</b>, <b>cold</b> and <b>injury</b> fill the bar from the right and shrink it. Fill it completely and you black out.</li>
           <li><b>E</b> picks up items and lights campfires (team checkpoints). <b>F</b> uses the selected item, <b>1–3</b> select, <b>Q</b> drops. <b>T / G / Y</b> wave, cheer, point.</li>
@@ -141,14 +141,32 @@
     </div>
   </div>
 
-  <div id="wardrobe" class="hidden" role="dialog" aria-label="Wardrobe">
-    <div class="card">
-      <h2>Wardrobe</h2>
-      <div id="wSections"></div>
-      <div class="row wbtns">
-        <button id="wRandom" class="btn" type="button">🎲 Randomize</button>
-        <button id="wDone" class="btn primary" type="button">Looking good!</button>
-      </div>
+  <div id="passport" class="hidden" role="dialog" aria-label="Passport">
+    <div class="pp-book">
+      <section class="pp-page pp-id">
+        <div class="pp-head"><span class="pp-crest">⛰</span><div><b>HIGHCRAG</b><small>Expedition passport · Passeport</small></div></div>
+        <div class="pp-idrow">
+          <div class="pp-photo"><canvas id="ppCanvas" width="280" height="356"></canvas></div>
+          <dl class="pp-fields">
+            <dt>Name</dt><dd id="ppName">Climber</dd>
+            <dt>Nationality</dt><dd>Island-bound</dd>
+            <dt>Passport no.</dt><dd id="ppNo"></dd>
+            <dt>Date of issue</dt><dd id="ppDate"></dd>
+            <dt>Flight</dt><dd>HC 207 · Gate 7</dd>
+          </dl>
+        </div>
+        <div class="pp-signrow"><small>Signature</small><div id="ppSign" class="pp-sign">Climber</div></div>
+        <pre id="ppMrz" class="pp-mrz"></pre>
+        <div class="pp-stamp" aria-hidden="true">CLEARED<small>FOR TAKEOFF</small></div>
+      </section>
+      <section class="pp-page pp-opts">
+        <div id="ppTabs" class="pp-tabs" role="tablist" aria-label="Look options"></div>
+        <div id="ppGrid" class="pp-grid"></div>
+        <div class="row pp-btns">
+          <button id="ppRandom" class="btn" type="button">🎲 Randomize</button>
+          <button id="ppDone" class="btn primary" type="button">Done ✓</button>
+        </div>
+      </section>
     </div>
   </div>
 

@@ -9,6 +9,7 @@ import { pickQuality, QUALITY, makeSky, makeEnvironment, makeGrassField, makeWat
 import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, WARDROBE, DEFAULT_LOOK, validLook, randomLook } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
+import { Passport } from './passport.js';
 
 const $ = (s) => document.querySelector(s);
 const V3 = THREE.Vector3;
@@ -108,6 +109,7 @@ const ITEMS = {
   rope: { name: 'Rope coil', icon: '🪢', color: 0xb8864b, w: 0.06, hint: 'Use at a ledge edge to hang a rope' },
   bean: { name: 'Magic bean', icon: '🫘', color: 0x6a8a2a, w: 0.01, hint: 'Use facing a rock wall to grow a climbable vine' },
   flare: { name: 'Flare', icon: '🎇', color: 0xff2a3d, w: 0.02, hint: 'Plant a bright signal everyone can see' },
+  passport: { name: 'Passport', icon: '📘', color: 0x1f3c88, w: 0, hint: 'Use it to change your look. It stays at the airport.' },
 };
 const LOOT = {
   shore: ['berry', 'berry', 'ration', 'bandage', 'piton', 'marshmallow', 'bean'],
@@ -437,6 +439,10 @@ function teleport(p) {
   P.peakY = P.pos.y;
 }
 function toLobby() {
+  inv.fill(null);
+  inv[0] = 'passport';
+  sel = 0;
+  renderInv();
   P.pos.copy(lobby.spawn);
   P.vel.set(0, 0, 0);
   P.mode = 'ground';
@@ -452,14 +458,14 @@ const keys = new Set();
 let mouseGrab = false, jumpPressed = false;
 let camYaw = 0, camPitch = 0.25;
 let touch = null;
-const overlayOpen = () => !$('#wardrobe').classList.contains('hidden');
+const overlayOpen = () => !$('#passport').classList.contains('hidden');
 
 addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, select')) return;
   if (e.code === 'Tab') e.preventDefault();
   if (state === 'flight' && (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape')) { skipFlight(); return; }
   if (state !== 'play' && state !== 'lobby') return;
-  if (overlayOpen()) { if (e.code === 'Escape' || e.code === 'KeyE') closeWardrobe(); return; }
+  if (overlayOpen()) { if (e.code === 'Escape' || e.code === 'KeyE' || e.code === 'KeyF') closePassport(); return; }
   if (e.repeat) return;
   keys.add(e.code);
   if (e.code === 'Space') { jumpPressed = true; e.preventDefault(); }
@@ -504,7 +510,7 @@ document.addEventListener('pointerlockchange', () => {
 if (isTouch) {
   touch = new TouchControls({
     onLook: (dx, dy) => { if (state === 'play' || state === 'lobby') lookBy(dx, dy, 0.0065); },
-    onAct: () => (P.isDown ? giveUp() : overlayOpen() ? closeWardrobe() : interact()),
+    onAct: () => (P.isDown ? giveUp() : overlayOpen() ? closePassport() : interact()),
     onUse: () => useItem(),
     onDrop: () => (coop.carrying || (coop.on && [...coop.remotes.values()].some((r) => r.st?.m === 'down' && r.pos.distanceTo(P.pos) < 2.8)) ? carryToggle() : dropItem()),
     onPing: () => ping(),
@@ -572,7 +578,6 @@ const myPos = () => (P.mode === 'climb' ? climberWorldPos() : P.pos);
 function interact() {
   if (P.isDown || overlayOpen()) return;
   if (state === 'lobby') {
-    if (P.pos.distanceTo(lobby.wardrobe) < 3) { openWardrobe(); return; }
     if (P.pos.distanceTo(lobby.gate) < 3.5) { board(); return; }
     return;
   }
@@ -700,6 +705,7 @@ function findRopeEdge() {
 }
 
 function useItem() {
+  if (state === 'lobby' && inv[sel] === 'passport') { if (overlayOpen()) closePassport(); else openPassport(); return; }
   if (state !== 'play' || P.isDown || P.wakeT > 0) return;
   const t = inv[sel];
   if (!t) return;
@@ -1564,7 +1570,10 @@ function board() {
 let flight = null;
 function startFlight() {
   if (state !== 'lobby') return;
-  closeWardrobe();
+  closePassport();
+  // The passport stays at the airport.
+  for (let i = 0; i < inv.length; i++) if (inv[i] === 'passport') inv[i] = null;
+  renderInv();
   state = 'flight';
   document.exitPointerLock?.();
   $('#hud').classList.add('hidden');
@@ -1804,6 +1813,7 @@ function updateScene(dt, now) {
     climber.position.copy(P.render);
     const mode = P.isDown || P.wakeT > 0 ? 'down' : P.mode;
     poseClimber(climber, mode, P.facing, P.anim, dt, P.moveAmt);
+    syncHeldItem();
     if (P.tumble && P.mode === 'air') {
       // Head over heels around the body's middle.
       P.spin += dt * 7;
@@ -1850,8 +1860,7 @@ function updateHud(dt) {
     $('#goalArrow').style.display = '';
     $('#goalArrow').style.transform = `rotate(${Math.atan2(dx, -dz) + camYaw}rad)`;
     $('#compass').classList.add('hidden');
-    if (P.pos.distanceTo(lobby.wardrobe) < 3) { prompt = `${key}Change your outfit`; act = 'Outfit'; }
-    else if (P.pos.distanceTo(lobby.gate) < 3.5) { prompt = coop.on ? `${key}Board flight HC 207 (the whole room flies)` : `${key}Board flight HC 207`; act = 'Board'; }
+    if (P.pos.distanceTo(lobby.gate) < 3.5) { prompt = coop.on ? `${key}Board flight HC 207 (the whole room flies)` : `${key}Board flight HC 207`; act = 'Board'; }
   } else if (world && onIsland()) {
     const T = world.T;
     const y = P.mode === 'climb' ? T.height(P.cx, P.cz) : P.pos.y;
@@ -1954,70 +1963,71 @@ function updateHud(dt) {
   }
 }
 
-// ---------------- wardrobe ----------------
-function buildWardrobeUi() {
-  const wrap = $('#wSections');
-  wrap.replaceChildren();
-  for (const sec of WARDROBE) {
-    const label = document.createElement('div');
-    label.className = 'wlabel';
-    label.textContent = sec.label;
-    const row = document.createElement('div');
-    row.className = 'swatches';
-    sec.items.forEach((v, i) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'swatch';
-      if (sec.type === 'color') {
-        b.style.background = `#${v.toString(16).padStart(6, '0')}`;
-        const name = sec.names ? sec.names[i] : `${sec.label} ${i + 1}`;
-        b.title = name;
-        b.setAttribute('aria-label', name);
-      } else {
-        b.classList.add('wide');
-        b.textContent = v;
-      }
-      b.classList.toggle('on', look[sec.key] === i);
-      b.addEventListener('click', () => { look = { ...look, [sec.key]: i }; applyLook(); markWardrobe(); sfx.click(); });
-      row.appendChild(b);
-    });
-    wrap.append(label, row);
+// ---------------- passport (look editor) ----------------
+let myName = 'Climber';
+const passport = new Passport({
+  getLook: () => look,
+  setLook: (l) => { look = validLook(l); applyLook(); },
+  randomLook: () => randomLook(),
+  sfx,
+  store,
+});
+passport.onDone = () => passport.stampAndClose(afterPassport);
+// The booklet the climber holds while the passport is selected at the airport.
+const heldBook = (() => {
+  const g = new THREE.Group();
+  const cover = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.18, 0.024), new THREE.MeshLambertMaterial({ color: 0x1f3c88 }));
+  const crest = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), new THREE.MeshBasicMaterial({ color: 0xe8c25a }));
+  crest.position.set(0, 0.02, 0.0125);
+  const pages = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.17, 0.02), new THREE.MeshLambertMaterial({ color: 0xfbf4e2 }));
+  pages.position.x = 0.006;
+  g.add(pages, cover, crest);
+  cover.position.z = 0.003;
+  g.position.set(0, -0.25, 0.05);
+  g.rotation.set(-0.5, 0, 0);
+  return g;
+})();
+function syncHeldItem() {
+  const atAirport = state === 'lobby' || ((state === 'paused') && pausedFrom === 'lobby');
+  const hand = climber.userData.armR?.el;
+  const want = atAirport && inv[sel] === 'passport' && hand;
+  if (want && heldBook.parent !== hand) hand.add(heldBook);
+  else if (!want && heldBook.parent) heldBook.removeFromParent();
+  if (want && overlayOpen()) {
+    // Hold it up as if reading it.
+    climber.userData.armR.sh.rotation.set(-1.25, 0, 0.12);
+    climber.userData.armR.el.rotation.set(-0.95, 0, 0);
   }
-}
-function markWardrobe() {
-  const rows = $('#wSections').querySelectorAll('.swatches');
-  WARDROBE.forEach((sec, k) => rows[k]?.querySelectorAll('.swatch').forEach((b, i) => b.classList.toggle('on', look[sec.key] === i)));
 }
 function applyLook() {
   store.set('look', look);
   const pos = climber.position.clone();
+  heldBook.removeFromParent();
   scene.remove(climber);
   disposeClimber(climber);
   climber = makeClimber(look, { shadows: Q.shadows, outline: Q.outline });
   climber.position.copy(pos);
   scene.add(climber);
   if (coop.on) net.send({ t: 'look', look });
+  passport.refresh();
 }
-function openWardrobe() {
-  buildWardrobeUi();
-  $('#wardrobe').classList.remove('hidden');
+function openPassport() {
+  if (overlayOpen()) return;
+  passport.open(myName);
   if (touch) $('#touch').classList.add('hidden');
   document.exitPointerLock?.();
   keys.clear();
-  // Stand in front of the mirror, facing the camera, so you can see the outfit.
-  if (state === 'lobby') { P.pos.set(lobby.wardrobe.x, LOBBY_FLOOR, lobby.wardrobe.z + 2.2); P.render.copy(P.pos); }
-  P.facing = 0;
-  camYaw = -0.35;
-  camPitch = 0.08;
+  sfx.pickup();
 }
-function closeWardrobe() {
-  if (!overlayOpen()) return;
-  $('#wardrobe').classList.add('hidden');
+function afterPassport() {
   if (touch && (state === 'lobby' || state === 'play')) $('#touch').classList.remove('hidden');
   if (!isTouch && (state === 'lobby' || state === 'play')) canvas.requestPointerLock?.();
 }
-$('#wDone').addEventListener('click', closeWardrobe);
-$('#wRandom').addEventListener('click', () => { look = validLook(randomLook()); applyLook(); markWardrobe(); sfx.click(); });
+function closePassport() {
+  if (!overlayOpen()) return;
+  passport.close();
+  afterPassport();
+}
 
 // ---------------- co-op ----------------
 const net = new HNet();
@@ -2311,7 +2321,7 @@ function showTitle() {
   $('#hud').classList.add('hidden');
   $('#flightui').classList.add('hidden');
   $('#downbox').classList.add('hidden');
-  $('#wardrobe').classList.add('hidden');
+  passport.close();
   if (touch) $('#touch').classList.add('hidden');
   const best = store.get('best', null);
   $('#bestRow').textContent = best === null ? 'No summit yet' : `Best summit time ${fmtTime(best)}`;
@@ -2327,7 +2337,7 @@ function startSolo() {
   showHud();
   if (touch) $('#touch').classList.remove('hidden');
   if (!isTouch) canvas.requestPointerLock?.();
-  toastOnce('lobbyintro', 'Welcome to the airport! Walk to Gate 7 to board. Change your outfit at the Wardrobe.', 999);
+  toastOnce('lobbyintro', `Welcome to the airport! ${isTouch ? 'Tap ● Use' : 'Press F'} to open your passport and change your look, then walk to Gate 7 to board.`, 999);
 }
 function resume() {
   sfx.unlock();
@@ -2354,7 +2364,7 @@ $('#btnDaily').addEventListener('click', () => {
   sfx.unlock(); sfx.click();
 });
 $('#btnNew').addEventListener('click', () => { resetRun(false); $('#seedRow').textContent = `Mountain #${world.seed}`; sfx.unlock(); sfx.click(); });
-$('#btnWardrobeTitle').addEventListener('click', () => { startSolo(); setTimeout(openWardrobe, 50); });
+$('#btnPassportTitle').addEventListener('click', () => { startSolo(); setTimeout(openPassport, 50); });
 $('#btnSettings').addEventListener('click', () => { $('#settings').classList.remove('hidden'); syncSettings(); });
 $('#btnSettings2').addEventListener('click', () => { $('#settings').classList.remove('hidden'); syncSettings(); });
 $('#btnSetClose').addEventListener('click', () => $('#settings').classList.add('hidden'));
@@ -2399,6 +2409,7 @@ checkRotate();
   const roomParam = new URLSearchParams(location.search).get('room');
   if (roomParam) $('#roomCode').value = roomParam.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
   HNet.me().then((u) => {
+    if (u) myName = u.displayName || u.handle || myName;
     $('#coopSignedOut').classList.toggle('hidden', !!u);
     $('#coopSignedIn').classList.toggle('hidden', !u);
     if (!u && roomParam) $('#coopMsg').textContent = `Sign in to join room ${$('#roomCode').value}.`;
@@ -2440,6 +2451,7 @@ function frame(now) {
   }
   updateRemotes(dt);
   updatePings(dt);
+  passport.update(dt);
   dust.update(dt);
   updateRocks(dt);
   if (state !== 'flight') updateCamera(dt);
@@ -2471,6 +2483,8 @@ window.__highcrag = {
   get wake() { return P.wakeT; },
   get extra() { return { rain: rain.k, rocks: rocks.length, running: P.running, fov: camera.fov, tumble: P.tumble, hv: Math.hypot(P.hv.x, P.hv.z), pings: pings.length, zoom: zoomed, weight: packWeight(), maxSt: maxSt(), carriedBy: P.carriedBy || null, carrying: coop.carrying, vines: world?.vines.length ?? 0, seed: world?.seed }; },
   select: (i) => { sel = i; renderInv(); },
+  openPassport: () => openPassport(),
+  get passportOpen() { return overlayOpen(); },
   spawnRock: () => spawnRock(),
   forceRain: () => { rain.on = true; rain.t = 60; },
   drop: (h) => { P.mode = 'air'; P.pos.y += h; P.peakY = P.pos.y; P.vel.set(0, 0, 0); },

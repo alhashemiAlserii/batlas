@@ -65,7 +65,7 @@ export class TouchControls {
     tap('bEmote', () => this.cb.onEmote?.());
     // iOS: stop page scroll / zoom gestures on the game surface.
     // Stop one-finger page scrolling outside the menus (pinch and double-tap zoom are blocked in main.js).
-    document.addEventListener('touchmove', (e) => { if (!e.target.closest?.('.overlay')) e.preventDefault(); }, { passive: false });
+    document.addEventListener('touchmove', (e) => { if (!e.target.closest?.('.overlay, #passport')) e.preventDefault(); }, { passive: false });
   }
 
   stickStart(e) {
