@@ -276,7 +276,32 @@ function buildExtra(a, head) {
 }
 
 /** Build a climber. The origin is at the feet; +z is forward. */
-export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
+export function makeClimber(look = DEFAULT_LOOK, { shadows = false, outline = false } = {}) {
+  const model = buildClimber(look, shadows);
+  if (outline) addOutlines(model);
+  return model;
+}
+
+/** Cartoon ink outline: a slightly bigger, back-face-only dark copy behind each body part. */
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x1c140e, side: THREE.BackSide });
+function addOutlines(model) {
+  const meshes = [];
+  model.traverse((o) => { if (o.isMesh && !o.material.transparent) meshes.push(o); });
+  for (const m of meshes) {
+    if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+    const r = m.geometry.boundingSphere.radius * Math.max(m.scale.x, m.scale.y, m.scale.z);
+    if (r < 0.035) continue;
+    const o = new THREE.Mesh(m.geometry, OUTLINE_MAT);
+    o.position.copy(m.geometry.boundingSphere.center).multiplyScalar(-0.02 / r);
+    o.scale.setScalar(1 + 0.022 / r);
+    o.castShadow = false;
+    o.receiveShadow = false;
+    o.userData.outline = true;
+    m.add(o);
+  }
+}
+
+function buildClimber(look, shadows) {
   const L = validLook(look);
   const skinHex = SKINS[L.s];
   const topCol = COLORS[L.c];
@@ -464,7 +489,7 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
 
 export function disposeClimber(model) {
   // Shared canvas textures stay alive for the next climber.
-  model.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+  model.traverse((o) => { if (o.isMesh && !o.userData.outline) { o.geometry.dispose(); o.material.dispose(); } });
 }
 
 /** Animate a climber. mode: ground | air | climb | rope | down. phase advances with movement. */

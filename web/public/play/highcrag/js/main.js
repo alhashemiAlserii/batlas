@@ -4,7 +4,8 @@ import * as THREE from '../../vendor/three.module.js';
 import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST } from './terrain.js';
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
-import { pickQuality, QUALITY, makeSky, makeEnvironment, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
+import { Post } from './post.js';
+import { pickQuality, QUALITY, makeSky, makeEnvironment, makeGrassField, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
 import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, WARDROBE, DEFAULT_LOOK, validLook, randomLook } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
@@ -50,6 +51,9 @@ renderer.shadowMap.enabled = Q.shadows;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 $('#view').appendChild(renderer.domElement);
 const canvas = renderer.domElement;
+// Medium/High: render through the post pipeline (bloom + filmic grade); Low draws straight to screen.
+const post = Q.post ? new Post(renderer, { samples: Q.aa ? 4 : 0, bloomScale: Q.aa ? 0.5 : 0.35 }) : null;
+if (post) { renderer.toneMapping = THREE.NoToneMapping; document.getElementById('vignette')?.classList.add('hidden'); }
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 2600);
 scene.fog = new THREE.Fog(0xbfe6f5, 80, 700);
@@ -59,6 +63,11 @@ scene.add(sky.mesh);
 const env = Q.standard ? makeEnvironment(renderer, sky) : null;
 let envKey = '';
 const { sun } = makeLights(scene, Q);
+const SUN_OFFSET = new V3(120, 62, 72);
+sun.color.setHex(0xffd8a8);
+sun.intensity = Q.standard ? 3.6 : 2.9;
+sky.uniforms.sunDir.value.copy(SUN_OFFSET).normalize();
+sky.uniforms.sunColor.value.setHex(0xffdcae);
 const water = makeWater(Q);
 scene.add(water);
 const clouds = makeClouds(Q, makeRng(77));
@@ -67,6 +76,7 @@ const fireLight = new THREE.PointLight(0xff8a3d, 0, 18, 1.6);
 scene.add(fireLight);
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
+  post?.setSize();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   checkRotate();
@@ -291,6 +301,8 @@ function buildWorld(seed) {
   const marks = buildLandmarks(root, T, rng, Q, spawn, T.summit);
   trees.push(...marks.colliders);
   root.add(makeShoreWater(T, Q));
+  const grass = makeGrassField(T, Q);
+  if (grass) root.add(grass.mesh);
   const gulls = new Gulls(root, spawn.clone().add(new V3(-20, 0, 10)), Q.decor > 0.5 ? 12 : 7);
 
   const thorns = [];
@@ -359,11 +371,11 @@ function buildWorld(seed) {
   const pitonGroup = new THREE.Group();
   root.add(pitonGroup);
   scene.add(root);
-  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], smokes, gulls, marks: marks.anim };
+  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], smokes, gulls, grass, marks: marks.anim };
 }
 
 // ---------------- player & game state ----------------
-let climber = makeClimber(look, { shadows: Q.shadows });
+let climber = makeClimber(look, { shadows: Q.shadows, outline: Q.outline });
 scene.add(climber);
 const P = {
   pos: new V3(), vel: new V3(), render: new V3(), mode: 'ground', cx: 0, cz: 0, facing: Math.PI,
@@ -1557,7 +1569,7 @@ function updateScene(dt, now) {
   water.position.x = Math.round(camera.position.x / 40) * 40;
   water.position.z = Math.round(camera.position.z / 40) * 40;
   const focus = state === 'title' ? new V3(0, 60, 0) : state === 'flight' ? flightPlane.position : P.render;
-  sun.position.copy(focus).add(new V3(70, 110, 45));
+  sun.position.copy(focus).add(SUN_OFFSET);
   sun.target.position.copy(focus);
 
   if (world) {
@@ -1604,6 +1616,7 @@ function updateScene(dt, now) {
     }
     for (const f of world.flares) f.glow.material.opacity = 0.75 + Math.sin(now * 23 + f.p.x) * 0.25;
     world.gulls.update(now);
+    if (world.grass) { world.grass.mesh.visible = onIsland(); if (onIsland()) world.grass.update(P.render.x, P.render.z); }
     if (world.marks.beam) world.marks.beam.rotation.y = now * 0.6;
     if (nearest && nd < 40 && onIsland()) {
       fireLight.position.copy(nearest.pos).add(new V3(0, nearest.isBeacon ? 4.5 : 1, 0));
@@ -1807,7 +1820,7 @@ function applyLook() {
   const pos = climber.position.clone();
   scene.remove(climber);
   disposeClimber(climber);
-  climber = makeClimber(look, { shadows: Q.shadows });
+  climber = makeClimber(look, { shadows: Q.shadows, outline: Q.outline });
   climber.position.copy(pos);
   scene.add(climber);
   if (coop.on) net.send({ t: 'look', look });
@@ -1840,7 +1853,7 @@ const coop = { on: false, code: null, remotes: new Map(), pending: new Set(), se
 function addRemote(p) {
   if (coop.remotes.has(p.cid) || p.cid === net.you?.cid) return;
   const lk = validLook(p.look);
-  const model = makeClimber(lk, { shadows: Q.shadows });
+  const model = makeClimber(lk, { shadows: Q.shadows, outline: Q.outline });
   model.visible = false;
   scene.add(model);
   const tag = makeTag(p.name);
@@ -1855,7 +1868,7 @@ function setRemoteLook(cid, lk) {
   r.look = validLook(lk);
   scene.remove(r.model);
   disposeClimber(r.model);
-  r.model = makeClimber(r.look, { shadows: Q.shadows });
+  r.model = makeClimber(r.look, { shadows: Q.shadows, outline: Q.outline });
   r.model.visible = false;
   scene.add(r.model);
 }
@@ -2256,7 +2269,7 @@ function frame(now) {
   updatePings(dt);
   if (state !== 'flight') updateCamera(dt);
   updateScene(dt, now / 1000);
-  renderer.render(scene, camera);
+  if (post) post.render(scene, camera, now / 1000); else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 
