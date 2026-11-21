@@ -2478,7 +2478,7 @@ window.__highcrag = {
   get player() { return { mode: P.mode, x: P.pos.x, y: P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y, z: P.pos.z }; },
   get vitals() { return { ...S }; },
   get inv() { return [...inv]; },
-  get coop() { return { on: coop.on, code: coop.code, down: !!P.isDown, remotes: [...coop.remotes.values()].map((r) => ({ cid: r.cid, name: r.name, m: r.st?.m ?? null, x: r.pos.x, y: r.pos.y, z: r.pos.z })) }; },
+  get coop() { return { on: coop.on, code: coop.code, down: !!P.isDown, remotes: [...coop.remotes.values()].map((r) => ({ cid: r.cid, name: r.name, look: r.look, m: r.st?.m ?? null, x: r.pos.x, y: r.pos.y, z: r.pos.z })) }; },
   get quality() { return qName; },
   get wake() { return P.wakeT; },
   get extra() { return { rain: rain.k, rocks: rocks.length, running: P.running, fov: camera.fov, tumble: P.tumble, hv: Math.hypot(P.hv.x, P.hv.z), pings: pings.length, zoom: zoomed, weight: packWeight(), maxSt: maxSt(), carriedBy: P.carriedBy || null, carrying: coop.carrying, vines: world?.vines.length ?? 0, seed: world?.seed }; },

@@ -183,10 +183,11 @@ export class Passport {
     const hips = U.hips.getWorldPosition(new THREE.Vector3());
     const foot = U.legL.foot.getWorldPosition(new THREE.Vector3()).add(U.legR.foot.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
     let target, dist, az = 0.55, el = 0.12, fov = 30;
-    if (frame === 'photo') { target = head.clone().add(new THREE.Vector3(0, -0.13, 0)); dist = 1.55; az = 0.22; el = 0.06; fov = 26; }
-    else if (frame === 'head' || frame === 'face') { target = head.clone().add(new THREE.Vector3(0, 0.02, 0)); dist = 1.0; az = frame === 'face' ? 0.3 : 0.5; }
-    else if (frame === 'hat') { target = head.clone().add(new THREE.Vector3(0, 0.12, 0)); dist = 1.25; el = 0.22; }
-    else if (frame === 'neck') { target = head.clone().add(new THREE.Vector3(0, -0.06, 0)); dist = 1.15; az = 0.45; }
+    // The head group sits at the base of the head: the face is ~0.2 m above it, tall hats reach ~0.75 m.
+    if (frame === 'photo') { target = head.clone().add(new THREE.Vector3(0, 0.16, 0)); dist = 2.15; az = 0.22; el = 0.06; fov = 26; }
+    else if (frame === 'head' || frame === 'face') { target = head.clone().add(new THREE.Vector3(0, 0.2, 0)); dist = 1.15; az = frame === 'face' ? 0.3 : 0.5; }
+    else if (frame === 'hat') { target = head.clone().add(new THREE.Vector3(0, 0.3, 0)); dist = 1.75; el = 0.18; }
+    else if (frame === 'neck') { target = head.clone().add(new THREE.Vector3(0, 0.12, 0)); dist = 1.45; az = 0.45; }
     else if (frame === 'top') { target = hips.clone().lerp(head, 0.45); dist = 1.75; }
     else if (frame === 'legs') { target = hips.clone().lerp(foot, 0.45); dist = 1.75; el = 0.05; }
     else { target = foot.clone().add(new THREE.Vector3(0, 0.08, 0.04)); dist = 1.0; el = 0.3; az = 0.7; }
