@@ -367,7 +367,7 @@ function buildWorld(seed) {
   const pp = new Float32Array(PN * 3);
   for (let i = 0; i < PN; i++) { pp[i * 3] = (Math.random() - 0.5) * 50; pp[i * 3 + 1] = Math.random() * 30; pp[i * 3 + 2] = (Math.random() - 0.5) * 50; }
   pg.setAttribute('position', new THREE.BufferAttribute(pp, 3));
-  const particles = new THREE.Points(pg, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0, depthWrite: false }));
+  const particles = new THREE.Points(pg, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, map: softDot(), transparent: true, opacity: 0, depthWrite: false }));
   particles.frustumCulled = false;
   root.add(particles);
 
@@ -437,6 +437,23 @@ function teleport(p) {
   P.rope = null;
   P.render.copy(P.pos);
   P.peakY = P.pos.y;
+}
+// Soft round sprite for snow, rain and embers (plain points draw as hard squares).
+let softDotTex = null;
+function softDot() {
+  if (softDotTex) return softDotTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.75)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 32, 32);
+  softDotTex = new THREE.CanvasTexture(c);
+  softDotTex.colorSpace = THREE.SRGBColorSpace;
+  return softDotTex;
 }
 function toLobby() {
   inv.fill(null);
@@ -522,7 +539,7 @@ if (isTouch) {
   document.querySelectorAll('#inv .slot').forEach((el) => el.addEventListener('pointerdown', (e) => { e.stopPropagation(); sel = Number(el.dataset.i); renderInv(); }));
 }
 
-function inputVec() {
+function inputVec(onFoot = false) {
   let x = 0, y = 0;
   if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) y -= 1;
@@ -530,7 +547,8 @@ function inputVec() {
   if (keys.has('KeyA') || keys.has('ArrowLeft')) x -= 1;
   if (touch) { x += touch.move.x; y -= touch.move.y; }
   const l = Math.hypot(x, y);
-  if (l > 1) { x /= l; y /= l; }
+  // With the touch Sprint toggle on, any clear push of the stick runs at full sprint.
+  if (l > 1 || (onFoot && touch?.sprint && l > 0.2)) { x /= l; y /= l; }
   return { x, y };
 }
 const grabHeld = () => mouseGrab || keys.has('KeyR') || !!touch?.grab;
@@ -1126,7 +1144,7 @@ function land(impact) {
 }
 
 function updateLobbyPlayer(dt) {
-  const inp = overlayOpen() ? { x: 0, y: 0 } : inputVec();
+  const inp = overlayOpen() ? { x: 0, y: 0 } : inputVec(true);
   const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
   const right = new V3(Math.cos(camYaw), 0, -Math.sin(camYaw));
   const move = fwd.multiplyScalar(inp.y).addScaledVector(right, inp.x);
@@ -1159,7 +1177,7 @@ function updatePlayer(dt) {
   const T = world.T;
   if (P.isDown && (P.mode === 'climb' || P.mode === 'rope')) release();
   if ((P.isDown || P.wakeT > 0) && P.mode === 'ground') { if (!P.carriedBy) P.pos.y = gy(P.pos.x, P.pos.z); P.moveAmt = 0; return; }
-  const inp = inputVec();
+  const inp = inputVec(P.mode === 'ground');
   const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
   const right = new V3(Math.cos(camYaw), 0, -Math.sin(camYaw));
   const move = fwd.clone().multiplyScalar(inp.y).addScaledVector(right, inp.x);

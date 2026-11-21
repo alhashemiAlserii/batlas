@@ -566,6 +566,13 @@ const foliage = (map, tint = 0xffffff, extra = {}) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
       #ifdef USE_MAP
         diffuseColor.rgb /= max(sampledDiffuseColor.a, 0.08);
+      #endif`)
+      // Double-sided cards normally flip the normal on their back face, which points it at the ground and
+      // turns half the blades and leaves nearly black. Keep the (upward-leaning) normal on both faces.
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+      #ifndef FLAT_SHADED
+        normal = normalize(vNormal);
+        nonPerturbedNormal = normal;
       #endif`);
   };
   m.customProgramCacheKey = () => 'foliage';
