@@ -303,7 +303,11 @@ export function makeShoreWater(T, q) {
 
 /** Gentle wind sway for instanced plants. k scales with height above the plant's base. */
 export function sway(mat, k) {
-  mat.onBeforeCompile = (sh) => {
+  const prev = mat.onBeforeCompile;
+  // Each sway strength is baked into the shader text, so give each its own program cache key.
+  mat.customProgramCacheKey = () => `sway:${k.toFixed(4)}:${mat.userData.unpremul ? 1 : 0}`;
+  mat.onBeforeCompile = (sh, r) => {
+    prev.call(mat, sh, r);
     sh.uniforms.uTime = shared.time;
     sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
@@ -553,7 +557,20 @@ export function instanced(root, geo, mat, list, place, shadows) {
   return im;
 }
 
-const foliage = (map, tint = 0xffffff, extra = {}) => pbr(tint, { map, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, ...extra });
+// Canvas cut-outs store black in their transparent pixels; mipmaps blend that black into every blade and leaf edge,
+// which turns distant grass and tree crowns almost black. Dividing by the filtered alpha restores the true colour.
+const foliage = (map, tint = 0xffffff, extra = {}) => {
+  const m = pbr(tint, { map, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, ...extra });
+  m.userData.unpremul = true;
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      #ifdef USE_MAP
+        diffuseColor.rgb /= max(sampledDiffuseColor.a, 0.08);
+      #endif`);
+  };
+  m.customProgramCacheKey = () => 'foliage';
+  return m;
+};
 const barkMat = (key, base) => pbr(0xffffff, { map: barkTex(key, base), roughness: 0.95 });
 
 /** Scatter vegetation and props over the island. Returns tree colliders. */

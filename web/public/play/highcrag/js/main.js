@@ -64,6 +64,7 @@ const env = Q.standard ? makeEnvironment(renderer, sky) : null;
 let envKey = '';
 const { sun } = makeLights(scene, Q);
 const SUN_OFFSET = new V3(120, 62, 72);
+const SUN_DIR = SUN_OFFSET.clone().normalize();
 sun.color.setHex(0xffd8a8);
 sun.intensity = Q.standard ? 3.6 : 2.9;
 sky.uniforms.sunDir.value.copy(SUN_OFFSET).normalize();
@@ -380,6 +381,7 @@ scene.add(climber);
 const P = {
   pos: new V3(), vel: new V3(), render: new V3(), mode: 'ground', cx: 0, cz: 0, facing: Math.PI,
   lungeT: 0, regrabLock: 0, peakY: 0, stepAcc: 0, regenDelay: 0, anim: 0, swimming: false,
+  hv: new V3(), jumpBuf: 0, coyote: 0, jumped: false, tumble: false, spin: 0, running: false,
   isDown: false, downT: 0, wakeT: 0, rope: null, ropeY: 0, moveAmt: 0,
 };
 const S = { stamina: 1, hunger: 0, cold: 0, injury: 0, poison: 0, boostT: 0, chalkT: 0 };
@@ -410,6 +412,9 @@ function resetRun(sameSeed, forceSeed) {
   stats = { falls: 0, blackouts: 0, eaten: 0, pitons: 0, ropes: 0, maxAlt: 0 };
   checkpoint = world.spawn.clone();
   blizzard = { t: 45, on: false, k: 0 };
+  rain = { t: 40, on: false, k: 0 };
+  rockT = 25;
+  clearRocks();
   gust = { t: 8, on: false, k: 0, dir: new V3(1, 0, 0) };
   lastBand = null;
   P.isDown = false;
@@ -419,6 +424,10 @@ function resetRun(sameSeed, forceSeed) {
 }
 
 function teleport(p) {
+  P.hv.set(0, 0, 0);
+  P.tumble = false;
+  P.jumped = false;
+  P.coyote = 0;
   P.pos.copy(p);
   P.pos.y = gy(p.x, p.z);
   P.vel.set(0, 0, 0);
@@ -769,6 +778,108 @@ function useItem() {
   renderInv();
 }
 
+// ---- dust puffs (landing, running) ----
+const dust = (() => {
+  const map = glowSprite(0xffffff, 1).material.map;
+  const pool = [];
+  for (let i = 0; i < 48; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map, color: 0xd9cbb0, transparent: true, depthWrite: false, opacity: 0 }));
+    s.visible = false;
+    scene.add(s);
+    pool.push({ s, t: 0, life: 0, v: new V3() });
+  }
+  let next = 0;
+  return {
+    puff(p, n) {
+      const snowy = p.y > 126 && p.y < 216;
+      const col = snowy ? 0xf4f8ff : p.y > 216 ? 0x6a5f58 : p.y < 3 ? 0xe8d9b0 : 0xb9a888;
+      for (let k = 0; k < n; k++) {
+        const d = pool[next++ % pool.length];
+        d.s.visible = true;
+        d.s.material.color.setHex(col);
+        d.s.position.set(p.x + (Math.random() - 0.5) * 0.6, p.y + 0.15, p.z + (Math.random() - 0.5) * 0.6);
+        const a = Math.random() * Math.PI * 2;
+        d.v.set(Math.cos(a) * (0.6 + Math.random()), 0.3 + Math.random() * 0.5, Math.sin(a) * (0.6 + Math.random()));
+        d.t = 0;
+        d.life = 0.6 + Math.random() * 0.6;
+      }
+    },
+    update(dt) {
+      for (const d of pool) {
+        if (!d.s.visible) continue;
+        d.t += dt;
+        if (d.t >= d.life) { d.s.visible = false; continue; }
+        const k = d.t / d.life;
+        d.s.position.addScaledVector(d.v, dt);
+        d.v.multiplyScalar(1 - dt * 2.5);
+        d.s.scale.setScalar(0.35 + k * 1.3);
+        d.s.material.opacity = 0.55 * (1 - k);
+      }
+    },
+  };
+})();
+
+// ---- rockfall ----
+let rain = { t: 40, on: false, k: 0 };
+let rockT = 25;
+const rocks = [];
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x5f554c, roughness: 0.92, flatShading: true });
+function clearRocks() {
+  for (const r of rocks) { scene.remove(r.mesh); r.mesh.geometry.dispose(); }
+  rocks.length = 0;
+}
+function spawnRock() {
+  const T = world.T;
+  const bx = P.mode === 'climb' ? P.cx : P.pos.x, bz = P.mode === 'climb' ? P.cz : P.pos.z;
+  const n = T.normal(bx, bz, new V3());
+  const side = new V3(n.z, 0, -n.x).normalize();
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  const p = new V3(bx, T.height(bx, bz) + 16, bz).addScaledVector(n, 1.0).addScaledVector(side, (Math.random() - 0.5) * 2.4);
+  const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + Math.random() * 0.25, 1), rockMat);
+  mesh.position.copy(p);
+  mesh.castShadow = Q.shadows;
+  scene.add(mesh);
+  rocks.push({ mesh, v: new V3(n.x * 0.5, -2, n.z * 0.5), t: 0, armed: true, bounces: 0 });
+  sfx.crack();
+  toast('⚠ Rockfall! Shift sideways!');
+}
+function updateRocks(dt) {
+  if (!world) return;
+  const T = world.T;
+  for (let i = rocks.length - 1; i >= 0; i--) {
+    const r = rocks[i];
+    r.t += dt;
+    r.v.y -= 22 * dt;
+    r.mesh.position.addScaledVector(r.v, dt);
+    r.mesh.rotation.x += dt * 5;
+    r.mesh.rotation.z += dt * 3;
+    const p = r.mesh.position;
+    const ground = T.height(p.x, p.z);
+    if (p.y < ground + 0.45) {
+      const nn = T.normal(p.x, p.z, new V3());
+      p.y = ground + 0.45;
+      r.v.y = Math.abs(r.v.y) * 0.35;
+      r.v.x += nn.x * 3;
+      r.v.z += nn.z * 3;
+      r.bounces++;
+      if (p.distanceTo(P.render) < 25) sfx.land(true);
+      dust.puff(p, 4);
+    }
+    if (r.armed && state === 'play' && !P.isDown) {
+      const me = myPos().clone().add(new V3(0, 0.9, 0));
+      if (p.distanceTo(me) < 1.1) {
+        r.armed = false;
+        S.injury = Math.min(1, S.injury + 0.15);
+        shake = 0.8;
+        sfx.hurt();
+        if (P.mode === 'climb') release('A falling rock knocks you off the wall!');
+        else toast('Ouch! Hit by a falling rock.');
+      }
+    }
+    if (r.t > 7 || r.bounces > 4) { scene.remove(r.mesh); r.mesh.geometry.dispose(); rocks.splice(i, 1); }
+  }
+}
+
 // ---- binoculars ----
 let zoomed = false;
 function setZoom(on) {
@@ -988,9 +1099,17 @@ function release(msg) {
 function land(impact) {
   P.mode = 'ground';
   P.vel.y = 0;
-  if (impact > 32) { sfx.land(true); stats.falls++; if (!P.isDown) blackout('You fell too far…'); return; }
-  if (impact > 12) {
-    const dmg = (impact - 12) * 0.028;
+  P.hv.set(P.vel.x * 0.5, 0, P.vel.z * 0.5);
+  const tumbled = P.tumble;
+  P.tumble = false;
+  P.spin = 0;
+  P.jumped = false;
+  if (impact > 4) dust.puff(P.pos, Math.min(12, 3 + impact * 0.35));
+  if (impact > 36) { sfx.land(true); stats.falls++; if (!P.isDown) blackout('You fell too far…'); return; }
+  if (impact > 13.5) {
+    const dmg = (impact - 13.5) * 0.028;
+    // A long tumble or a very hard landing knocks you flat for a moment.
+    if (tumbled || impact > 22) { P.wakeT = Math.max(P.wakeT, 1.3); P.hv.set(0, 0, 0); }
     S.injury = Math.min(1, S.injury + dmg);
     stats.falls++;
     sfx.land(true);
@@ -1007,6 +1126,7 @@ function updateLobbyPlayer(dt) {
   const move = fwd.multiplyScalar(inp.y).addScaledVector(right, inp.x);
   const mlen = move.length();
   const speed = sprintHeld() ? SPRINT : WALK;
+  P.running = sprintHeld() && mlen > 0.05;
   const B = lobby.bounds;
   const blocked = (x, z) => lobby.colliders.some((c) => x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ);
   if (mlen > 0.05) {
@@ -1044,8 +1164,13 @@ function updatePlayer(dt) {
   P.lungeT = Math.max(0, P.lungeT - dt);
   S.boostT = Math.max(0, S.boostT - dt);
   const drain = (r) => { if (S.boostT <= 0) S.stamina = Math.max(0, S.stamina - r * dt); };
-  const jump = jumpPressed;
+  // Jump buffering: a press shortly before landing still counts.
+  if (jumpPressed) P.jumpBuf = 0.15; else P.jumpBuf = Math.max(0, P.jumpBuf - dt);
   jumpPressed = false;
+  const jump = P.jumpBuf > 0;
+  const jumpHeld = keys.has('Space') || !!touch;
+  P.running = false;
+  if (P.mode !== 'air') P.tumble = false;
   let moving = false;
 
   if (P.mode === 'ground') {
@@ -1055,31 +1180,40 @@ function updatePlayer(dt) {
     let speed = running ? SPRINT : WALK;
     if (P.swimming) speed *= 0.55;
     if (coop.carrying) speed *= 0.7;
+    P.running = running;
     if (n.y < 0.6 && !P.swimming) {
       const d = new V3(n.x, 0, n.z).normalize();
       P.pos.x += d.x * 6 * dt;
       P.pos.z += d.z * 6 * dt;
       P.pos.y = gy(P.pos.x, P.pos.z);
+      P.hv.set(d.x * 6, 0, d.z * 6);
       if (grabHeld() && P.regrabLock <= 0) tryGrab(-n.x, -n.z, P.pos.y + HAND);
-    } else if (mlen > 0.05) {
-      moving = true;
-      const sx = move.x * speed * dt, sz = move.z * speed * dt;
-      let blocked = false;
-      const tryStep = (dx, dz) => {
-        const nx = clamp(P.pos.x + dx, -HALF + 2, HALF - 2), nz = clamp(P.pos.z + dz, -HALF + 2, HALF - 2);
-        const g = gy(nx, nz);
-        const len = Math.hypot(dx, dz);
-        if (g - P.pos.y > Math.max(0.3, len * 1.4)) return false;
-        P.pos.x = nx; P.pos.z = nz;
-        if (g >= P.pos.y - 0.45) P.pos.y = g;
-        else { P.mode = 'air'; P.vel.set(move.x * speed, 0, move.z * speed); P.peakY = P.pos.y; }
-        return true;
-      };
-      if (!tryStep(sx, sz)) { blocked = true; if (!tryStep(sx, 0)) tryStep(0, sz); }
-      P.facing = lerpAngle(P.facing, Math.atan2(move.x, move.z), 1 - Math.exp(-12 * dt));
-      P.stepAcc += speed * dt;
-      if (P.stepAcc > (running ? 1.9 : 1.5)) { P.stepAcc = 0; sfx.step(); }
-      if (blocked && grabHeld() && P.regrabLock <= 0) tryGrab(move.x, move.z, P.pos.y + HAND);
+    } else {
+      // Momentum: speed eases toward the stick/keys instead of snapping, and carries a little when you stop.
+      const k = 1 - Math.exp(-(mlen > 0.05 ? 11 : 13) * dt);
+      P.hv.x += (move.x * speed - P.hv.x) * k;
+      P.hv.z += (move.z * speed - P.hv.z) * k;
+      const hsp = Math.hypot(P.hv.x, P.hv.z);
+      if (hsp > 0.05) {
+        moving = mlen > 0.05;
+        const sx = P.hv.x * dt, sz = P.hv.z * dt;
+        let blocked = false;
+        const tryStep = (dx, dz) => {
+          const nx = clamp(P.pos.x + dx, -HALF + 2, HALF - 2), nz = clamp(P.pos.z + dz, -HALF + 2, HALF - 2);
+          const g = gy(nx, nz);
+          const len = Math.hypot(dx, dz);
+          if (g - P.pos.y > Math.max(0.3, len * 1.4)) return false;
+          P.pos.x = nx; P.pos.z = nz;
+          if (g >= P.pos.y - 0.45) P.pos.y = g;
+          else { P.mode = 'air'; P.vel.set(P.hv.x, 0, P.hv.z); P.peakY = P.pos.y; P.coyote = 0.12; P.jumped = false; }
+          return true;
+        };
+        if (!tryStep(sx, sz)) { blocked = true; P.hv.multiplyScalar(0.3); if (!tryStep(sx, 0)) tryStep(0, sz); }
+        if (moving) P.facing = lerpAngle(P.facing, Math.atan2(move.x, move.z), 1 - Math.exp(-12 * dt));
+        P.stepAcc += hsp * dt;
+        if (P.stepAcc > (running ? 1.9 : 1.5)) { P.stepAcc = 0; sfx.step(); if (running) dust.puff(P.pos, 1); }
+        if (blocked && moving && grabHeld() && P.regrabLock <= 0) tryGrab(move.x, move.z, P.pos.y + HAND);
+      } else P.hv.set(0, 0, 0);
     }
     if (P.mode === 'ground' && grabHeld() && P.regrabLock <= 0) {
       tryRope() || tryGrab(Math.sin(P.facing), Math.cos(P.facing), P.pos.y + HAND) || tryGrab(fwd.x, fwd.z, P.pos.y + HAND);
@@ -1087,7 +1221,10 @@ function updatePlayer(dt) {
     if (P.mode === 'ground') {
       if (jump && S.stamina >= 0.06 && !P.swimming) {
         P.mode = 'air';
-        P.vel.set(move.x * speed, JUMP, move.z * speed);
+        P.vel.set(P.hv.x, JUMP, P.hv.z);
+        P.jumped = true;
+        P.jumpBuf = 0;
+        P.coyote = 0;
         P.peakY = P.pos.y;
         S.stamina -= 0.06;
         P.regenDelay = 0.7;
@@ -1105,7 +1242,15 @@ function updatePlayer(dt) {
       pushOutOfTrees();
     }
   } else if (P.mode === 'air') {
-    P.vel.y -= G * dt;
+    P.coyote = Math.max(0, P.coyote - dt);
+    if (jump && P.coyote > 0 && S.stamina >= 0.06 && !P.isDown) {
+      // Coyote time: a jump just after running off a ledge still works.
+      P.vel.y = JUMP; P.coyote = 0; P.jumpBuf = 0; P.jumped = true; S.stamina -= 0.06; P.peakY = P.pos.y;
+    }
+    // Falling pulls harder than rising; letting go of jump early cuts the jump short.
+    const gScale = P.vel.y < 0 ? 1.3 : P.jumped && !jumpHeld ? 2.2 : 1;
+    P.vel.y = Math.max(-40, P.vel.y - G * gScale * dt);
+    if (!P.tumble && P.peakY - P.pos.y > 7) P.tumble = true;
     P.vel.x += move.x * 5 * dt;
     P.vel.z += move.z * 5 * dt;
     const hs = Math.hypot(P.vel.x, P.vel.z);
@@ -1119,7 +1264,7 @@ function updatePlayer(dt) {
       P.pos.y = g;
       const wet = T.height(P.pos.x, P.pos.z) < -0.8;
       land(wet ? 0 : -P.vel.y);
-    } else if (!P.isDown && grabHeld() && P.regrabLock <= 0 && S.stamina > 0.03 && -P.vel.y < 16) {
+    } else if (!P.isDown && grabHeld() && P.regrabLock <= 0 && S.stamina > 0.03 && -P.vel.y < 18) {
       const hy = P.pos.y + HAND;
       const toPeak = new V3(world.T.summit.x - P.pos.x, 0, world.T.summit.z - P.pos.z);
       if (tryRope() || tryGrab(Math.sin(P.facing), Math.cos(P.facing), hy) || tryGrab(fwd.x, fwd.z, hy) || tryGrab(toPeak.x, toPeak.z, hy)) {
@@ -1131,7 +1276,7 @@ function updatePlayer(dt) {
     const r = P.rope;
     if (!grabHeld()) { release(); return; }
     if (S.stamina <= 0) { release('Your hands slip off the rope!'); return; }
-    if (jump) { release(); P.vel.y = 4; return; }
+    if (jump) { release(); P.jumpBuf = 0; P.vel.y = 4; return; }
     const iy = inp.y;
     moving = Math.abs(iy) > 0.1;
     P.ropeY += iy * 2.4 * dt;
@@ -1166,7 +1311,7 @@ function updatePlayer(dt) {
     const u = new V3(-n.x * n.y, 1 - n.y * n.y, -n.z * n.y).normalize();
     const r = new V3(n.z, 0, -n.x).normalize();
     let iy = inp.y, ix = inp.x;
-    if (jump && S.stamina >= 0.12 && P.lungeT <= 0) { P.lungeT = 0.28; S.stamina -= 0.12; sfx.whoosh(); }
+    if (jump && S.stamina >= 0.12 && P.lungeT <= 0) { P.lungeT = 0.28; P.jumpBuf = 0; S.stamina -= 0.12; sfx.whoosh(); }
     let spd = CLIMB * (onVine(new V3(P.cx, T.height(P.cx, P.cz), P.cz)) ? 1.5 : 1);
     if (P.lungeT > 0) { iy = 1; spd = 6; }
     moving = Math.abs(iy) + Math.abs(ix) > 0.1;
@@ -1194,6 +1339,7 @@ function updatePlayer(dt) {
       if (onVine(here)) { rate *= 0.25; showStatus.vine = true; }
       if (gust.on && thin) rate += 0.08 * gust.k;
       if (band.id === 'frost' && S.cold > 0.3) rate *= 1.15;
+      if (band.id === 'moss' && rain.k > 0.3) rate *= 1.3;
       drain(rate);
     }
     P.regenDelay = 0.6;
@@ -1288,6 +1434,18 @@ function updateSurvival(dt) {
     }
   }
   gust.k += ((gust.on ? 1 : 0) - gust.k) * Math.min(1, dt * 4);
+  rain.t -= dt;
+  if (rain.t <= 0) {
+    rain.on = !rain.on;
+    rain.t = rain.on ? 26 : 60 + Math.random() * 50;
+    if (rain.on && band.id === 'moss') { toast('🌧 A rainstorm sweeps in. Wet rock is slippery!'); sfx.gust(); }
+  }
+  rain.k += ((rain.on && band.id === 'moss' ? 1 : 0) - rain.k) * Math.min(1, dt * 0.7);
+  // Rockfall: high up, loose rocks sometimes come down the wall you are on.
+  if (P.mode === 'climb' && (band.id === 'frost' || band.id === 'crown')) {
+    rockT -= dt;
+    if (rockT <= 0) { rockT = 22 + Math.random() * 25; spawnRock(); }
+  }
   if (S.hunger > 0.5) toastOnce('hungry', 'Your stomach growls. Eat something.', 30);
   if (S.cold > 0.4) toastOnce('cold', 'You are freezing. Get warm.', 25);
   if (afflicted() >= 1) blackout('Everything goes dark…');
@@ -1540,14 +1698,20 @@ function updateCamera(dt) {
   }
   camera.lookAt(camTarget);
   climber.visible = camera.position.distanceTo(camTarget) > 0.9;
+  const fovT = zoomed ? 24 : P.running ? 75 : 68;
+  if (Math.abs(camera.fov - fovT) > 0.05) { camera.fov += (fovT - camera.fov) * (1 - Math.exp(-6 * dt)); camera.updateProjectionMatrix(); }
 }
 
 // ---------------- scene update ----------------
 const stormFog = new THREE.Color(0xe8eef5);
+const rainFog = new THREE.Color(0x8d98a3);
 function updateSkyFor(y, indoor) {
   const c = bandSkyColors(y);
   const storm = indoor ? 0 : blizzard.k;
+  const wet = indoor ? 0 : rain.k * 0.55;
   c.fog.lerp(stormFog, storm);
+  c.fog.lerp(rainFog, wet);
+  c.sky.lerp(rainFog, wet * 0.8);
   sky.uniforms.top.value.copy(c.sky);
   sky.uniforms.horizon.value.copy(c.fog);
   scene.fog.color.copy(c.fog);
@@ -1557,7 +1721,7 @@ function updateSkyFor(y, indoor) {
     if (key !== envKey) { envKey = key; scene.environment = env.update(); }
   }
   scene.fog.near = indoor ? 120 : 80 - storm * 74;
-  scene.fog.far = indoor ? 900 : 900 - storm * 840;
+  scene.fog.far = indoor ? 900 : 900 - storm * 840 - wet * 480;
   sky.mesh.position.copy(camera.position);
 }
 
@@ -1576,14 +1740,15 @@ function updateScene(dt, now) {
     const band = bandAt(camera.position.y);
     const pm = world.particles.material;
     const embers = band.id === 'crown' && onIsland();
-    const want = !onIsland() ? 0 : band.id === 'frost' ? 0.35 + blizzard.k * 0.6 : embers ? 0.6 : 0;
+    const raining = band.id === 'moss' && rain.k > 0.05 && onIsland();
+    const want = !onIsland() ? 0 : band.id === 'frost' ? 0.35 + blizzard.k * 0.6 : embers ? 0.6 : raining ? 0.65 * rain.k : 0;
     pm.opacity += (want - pm.opacity) * Math.min(1, dt * 2);
-    pm.color.setHex(embers ? 0xff9a4a : 0xffffff);
-    pm.size = embers ? 0.12 : 0.18;
+    pm.color.setHex(embers ? 0xff9a4a : raining ? 0xa9c2d8 : 0xffffff);
+    pm.size = embers ? 0.12 : raining ? 0.09 : 0.18;
     world.particles.visible = pm.opacity > 0.02;
     if (world.particles.visible) {
       const arr = world.particles.geometry.attributes.position.array;
-      const fall = embers ? -1.2 : 3 + blizzard.k * 5;
+      const fall = embers ? -1.2 : raining ? 22 : 3 + blizzard.k * 5;
       const wx = (embers ? gust.dir.x * 4 * gust.k : 2 + blizzard.k * 9) * dt, wz = (embers ? gust.dir.z * 4 * gust.k : 0.5) * dt;
       for (let i = 0; i < arr.length; i += 3) {
         arr[i] += wx; arr[i + 2] += wz; arr[i + 1] -= fall * dt;
@@ -1626,7 +1791,7 @@ function updateScene(dt, now) {
     if (onIsland()) {
       const y = P.render.y;
       sfx.zone({ surf: clamp(1 - y / 30, 0, 1), birds: y > 36 && y < 126 ? 1 : 0, rumble: y > 210 ? 1 : 0 }, dt);
-      sfx.ambience(clamp((y - 20) / 260, 0.05, 0.4) + blizzard.k * 0.3 + gust.k * (y > 216 ? 0.3 : 0), nearest && nd < 12 ? 0.25 * (1 - nd / 12) : 0);
+      sfx.ambience(clamp((y - 20) / 260, 0.05, 0.4) + blizzard.k * 0.3 + rain.k * 0.35 + gust.k * (y > 216 ? 0.3 : 0), nearest && nd < 12 ? 0.25 * (1 - nd / 12) : 0);
     }
   }
   if (inLobby) { sfx.zone({ hum: 1 }, dt); sfx.ambience(0, 0); }
@@ -1639,6 +1804,13 @@ function updateScene(dt, now) {
     climber.position.copy(P.render);
     const mode = P.isDown || P.wakeT > 0 ? 'down' : P.mode;
     poseClimber(climber, mode, P.facing, P.anim, dt, P.moveAmt);
+    if (P.tumble && P.mode === 'air') {
+      // Head over heels around the body's middle.
+      P.spin += dt * 7;
+      climber.position.y += 0.8;
+      climber.rotateX(P.spin);
+      climber.translateY(-0.8);
+    }
   } else climber.visible = false;
 }
 
@@ -1710,6 +1882,7 @@ function updateHud(dt) {
     st.replaceChildren();
     const tag = (txt, cls) => { const s = document.createElement('span'); s.textContent = txt; s.className = cls; st.appendChild(s); };
     if (blizzard.k > 0.3) tag('❄ Blizzard', 'warn');
+    if (rain.k > 0.3 && bandAt(y).id === 'moss') tag('🌧 Slippery rock', 'warn');
     if (gust.on && bandAt(y).id === 'crown') tag('💨 Gust', 'hot');
     if (showStatus.fire) tag('🔥 Warming up', 'good');
     if (showStatus.piton) tag('📌 Resting', 'good');
@@ -2267,9 +2440,23 @@ function frame(now) {
   }
   updateRemotes(dt);
   updatePings(dt);
+  dust.update(dt);
+  updateRocks(dt);
   if (state !== 'flight') updateCamera(dt);
   updateScene(dt, now / 1000);
-  if (post) post.render(scene, camera, now / 1000); else renderer.render(scene, camera);
+  if (post) {
+    const inside = state === 'lobby' || (state === 'paused' && pausedFrom === 'lobby');
+    const camDir = camera.getWorldDirection(new V3());
+    const facing = camDir.dot(SUN_DIR);
+    const ndc = camera.position.clone().addScaledVector(SUN_DIR, 1000).project(camera);
+    let rays = 0;
+    if (!inside && facing > 0) {
+      const off = Math.max(Math.abs(ndc.x), Math.abs(ndc.y));
+      rays = clamp(facing / 0.6, 0, 1) * clamp(1 - (off - 1) / 0.8, 0, 1) * (1 - blizzard.k) * (1 - rain.k * 0.8);
+    }
+    post.setSun((ndc.x + 1) / 2, (ndc.y + 1) / 2, rays);
+    post.render(scene, camera, now / 1000);
+  } else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 
@@ -2282,8 +2469,12 @@ window.__highcrag = {
   get coop() { return { on: coop.on, code: coop.code, down: !!P.isDown, remotes: [...coop.remotes.values()].map((r) => ({ cid: r.cid, name: r.name, m: r.st?.m ?? null, x: r.pos.x, y: r.pos.y, z: r.pos.z })) }; },
   get quality() { return qName; },
   get wake() { return P.wakeT; },
-  get extra() { return { pings: pings.length, zoom: zoomed, weight: packWeight(), maxSt: maxSt(), carriedBy: P.carriedBy || null, carrying: coop.carrying, vines: world?.vines.length ?? 0, seed: world?.seed }; },
+  get extra() { return { rain: rain.k, rocks: rocks.length, running: P.running, fov: camera.fov, tumble: P.tumble, hv: Math.hypot(P.hv.x, P.hv.z), pings: pings.length, zoom: zoomed, weight: packWeight(), maxSt: maxSt(), carriedBy: P.carriedBy || null, carrying: coop.carrying, vines: world?.vines.length ?? 0, seed: world?.seed }; },
   select: (i) => { sel = i; renderInv(); },
+  spawnRock: () => spawnRock(),
+  forceRain: () => { rain.on = true; rain.t = 60; },
+  drop: (h) => { P.mode = 'air'; P.pos.y += h; P.peakY = P.pos.y; P.vel.set(0, 0, 0); },
+  get rays() { return post ? post.final.uniforms.rays.value : -1; },
   world: () => world,
   lobby: () => lobby,
   blackout: () => blackout('test'),

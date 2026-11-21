@@ -252,3 +252,9 @@ body.tablet #wardrobe .card{width:min(420px,46vw)}
 #bPing{right:200px;bottom:40px}
 body.phone #bPing{right:190px;bottom:30px}
 #bDrop.lit{background:linear-gradient(180deg,#ffe98a,var(--st));box-shadow:0 0 0 3px rgba(255,210,63,.5),0 5px 0 rgba(107,82,51,.45)}
+
+/* Sprint toggle for touch players, above the joystick. */
+#bRun{left:calc(28px + env(safe-area-inset-left));bottom:calc(215px + env(safe-area-inset-bottom));width:60px;height:60px}
+#bRun.on{background:linear-gradient(180deg,#ffe98a,var(--st));box-shadow:0 0 0 4px rgba(255,210,63,.5),0 5px 0 rgba(107,82,51,.45)}
+body.phone #bRun{left:calc(20px + env(safe-area-inset-left));bottom:calc(170px + env(safe-area-inset-bottom));width:52px;height:52px}
+body.tablet #bRun{left:calc(40px + env(safe-area-inset-left));bottom:calc(265px + env(safe-area-inset-bottom));width:66px;height:66px}

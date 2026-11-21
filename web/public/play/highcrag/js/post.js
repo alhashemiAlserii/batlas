@@ -59,17 +59,27 @@ export class Post {
         tScene: { value: null }, tBloom1: { value: null }, tBloom2: { value: null },
         exposure: { value: 1.05 }, bloom: { value: 0.55 }, saturation: { value: 1.1 }, contrast: { value: 1.06 },
         warmth: { value: new THREE.Vector3(1.03, 1.0, 0.95) }, vignette: { value: 0.32 }, time: { value: 0 }, grain: { value: 0.025 },
+        sunUv: { value: new THREE.Vector2(0.5, 0.5) }, rays: { value: 0 },
       },
       vertexShader: VERT,
       fragmentShader: `uniform sampler2D tScene; uniform sampler2D tBloom1; uniform sampler2D tBloom2;
         uniform float exposure; uniform float bloom; uniform float saturation; uniform float contrast;
-        uniform vec3 warmth; uniform float vignette; uniform float time; uniform float grain; varying vec2 vUv;
+        uniform vec3 warmth; uniform float vignette; uniform float time; uniform float grain; uniform vec2 sunUv; uniform float rays; varying vec2 vUv;
         vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
         vec3 toSRGB(vec3 c){ return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }
         float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main(){
           vec3 c = texture2D(tScene, vUv).rgb;
           c += (texture2D(tBloom1, vUv).rgb * 0.55 + texture2D(tBloom2, vUv).rgb * 0.9) * bloom;
+          // Sun shafts: march the blurred bright image toward the sun; trees and cliffs cut it into rays.
+          if (rays > 0.001) {
+            vec2 step = (vUv - sunUv) / 28.0;
+            vec2 q = vUv;
+            float decay = 1.0;
+            vec3 acc = vec3(0.0);
+            for (int i = 0; i < 28; i++) { q -= step; acc += texture2D(tBloom2, q).rgb * decay; decay *= 0.95; }
+            c += acc * (rays * 0.045) * vec3(1.0, 0.86, 0.66);
+          }
           c = aces(c * exposure);
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
           c = mix(vec3(l), c, saturation);
@@ -108,6 +118,11 @@ export class Post {
     this.blur.uniforms.tDiffuse.value = tmp.texture;
     this.blur.uniforms.dir.value.set(0, spread / src.height);
     this.pass(this.blur, dst);
+  }
+
+  setSun(u, v, strength) {
+    this.final.uniforms.sunUv.value.set(u, v);
+    this.final.uniforms.rays.value = strength;
   }
 
   render(scene, camera, time) {
