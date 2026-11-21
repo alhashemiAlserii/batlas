@@ -354,14 +354,14 @@ export function buildLobby() {
   const passportDesk = new THREE.Vector3(O.x - 13, F, O.z - 3);
   box(2.6, 1.15, 0.9, lam(0x2a4f9a), -13, F + 0.58, -4);
   box(2.8, 0.08, 1.1, lam(0xf2e4c9), -13, F + 1.19, -4);
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshLambertMaterial({ color: 0xcfe9ff, transparent: true, opacity: 0.35 }));
+  const deskGlass = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshLambertMaterial({ color: 0xcfe9ff, transparent: true, opacity: 0.35 }));
   glass.position.set(-13, F + 1.7, -3.6);
   const psign = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.6), new THREE.MeshBasicMaterial({ map: canvasTex(320, 70, (x) => {
     x.fillStyle = '#1f3c88'; x.fillRect(0, 0, 320, 70);
     x.fillStyle = '#ffe9a8'; x.font = `800 30px ${FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('PASSPORT CONTROL', 160, 37);
   }) }));
   psign.position.set(-13, F + 2.75, -3.55);
-  g.add(glass, psign);
+  g.add(deskGlass, psign);
 
   // Gate 7: a doorway in the glass wall that leads to the parked plane.
   const gate = new THREE.Vector3(O.x + 11, F, O.z + D / 2 - 1);
