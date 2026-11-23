@@ -296,7 +296,7 @@ function spawnItem(root, type, pos) {
 
 // Zone versions: each mountain picks jungle or fungal hollow, and snowy cliffs or red canyon.
 // ?zones=fungal,canyon forces a pair (for testing). ZONE_VARIANTS turns the daily mix on for everyone.
-const ZONE_VARIANTS = false;
+const ZONE_VARIANTS = true;
 function pickZones(seed) {
   const q = new URLSearchParams(location.search).get('zones');
   if (q) { const [mid, high] = q.split(','); return setVariant(seed, { mid, high }); }
