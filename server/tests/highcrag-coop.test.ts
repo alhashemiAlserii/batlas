@@ -102,9 +102,10 @@ describe('Highcrag co-op server', () => {
 
   it('creates and joins rooms, shares the seed and layout, caps at 4', async () => {
     const a = await signedIn();
-    const room = await (a.c.send({ t: 'create', seed: 4242 }), a.c.wait((m) => m.t === 'room'));
+    const room = await (a.c.send({ t: 'create', seed: 4242, diff: 3 }), a.c.wait((m) => m.t === 'room'));
     expect(room.code).toMatch(/^[A-Z]{5}$/);
     expect(room.seed).toBe(4242);
+    expect(room.diff).toBe(3);
     expect(room.layout).toBeNull();
     a.c.send({ t: 'layout', items: [['berry', 1, 2, 3], ['piton', 4, 5, 6], ['bogus', 0, 0, 0], ['ration', 1e9, 0, 0]], camps: [[10, 36, 10], [20, 126, 20]] });
     const lay = await a.c.wait((m) => m.t === 'layout');
@@ -153,8 +154,9 @@ describe('Highcrag co-op server', () => {
   it('first claim wins an item; drops, campfires, pitons and the beacon are shared once', async () => {
     const a = await signedIn();
     const b = await signedIn();
-    a.c.send({ t: 'create' });
+    a.c.send({ t: 'create', diff: 9 });
     const room = await a.c.wait((m) => m.t === 'room');
+    expect(room.diff).toBe(1); // unknown difficulty: the normal one
     a.c.send({ t: 'layout', items: [['berry', 1, 2, 3]], camps: [[0, 40, 0]] });
     await a.c.wait((m) => m.t === 'layout');
     b.c.send({ t: 'join', code: room.code });
@@ -262,9 +264,21 @@ describe('Highcrag co-op server', () => {
     expect(await b.c.wait((m) => m.t === 'vine')).toMatchObject({ p: [10, 40, 10], d: [0.6, -0.8] });
     a.c.send({ t: 'vine', p: [10, 40, 10], d: [9, 9] }); // bad direction: ignored
 
+    a.c.send({ t: 'zip', a: [0, 50, 0], b: [20, 40, 5] });
+    expect(await b.c.wait((m) => m.t === 'zip')).toMatchObject({ a: [0, 50, 0], b: [20, 40, 5] });
+    a.c.send({ t: 'zip', a: [0, 50, 0], b: [10, 60, 0] }); // uphill: ignored
+    a.c.send({ t: 'zip', a: [0, 50, 0], b: [90, 50, 0] }); // too long: ignored
+    a.c.send({ t: 'shelf', p: [3, 30, 4], n: [0.6, 0.8] });
+    expect(await b.c.wait((m) => m.t === 'shelf')).toMatchObject({ p: [3, 30, 4], n: [0.6, 0.8] });
+    a.c.send({ t: 'shelf', p: [3, 30, 4], n: [7, 7] }); // bad direction: ignored
+
     a.c.send({ t: 'give', to: b.you.cid, type: 'lantern' });
     expect(await b.c.wait((m) => m.t === 'give')).toMatchObject({ from: a.you.cid, type: 'lantern' });
     a.c.send({ t: 'give', to: b.you.cid, type: 'gold' }); // unknown item: ignored
+    a.c.send({ t: 'give', to: b.you.cid, type: 'honey@1' }); // honeycomb can't be roasted: ignored
+    a.c.send({ t: 'give', to: b.you.cid, type: 'berry@4' }); // no such roast level: ignored
+    a.c.send({ t: 'give', to: b.you.cid, type: 'berry@1' }); // roasted food is fine
+    expect(await b.c.wait((m) => m.t === 'give' && m.type !== 'lantern')).toMatchObject({ from: a.you.cid, type: 'berry@1' });
 
     b.c.send({ t: 'carry', to: c.you.cid });
     expect((await c.c.wait((m) => m.t === 'carry')).from).toBe(b.you.cid);
@@ -278,7 +292,9 @@ describe('Highcrag co-op server', () => {
     expect(b.c.msgs.some((m) => m.k === 'nuke' || (m.t === 'give' && m.type === 'gold'))).toBe(false);
     const d = await signedIn();
     d.c.send({ t: 'join', code: room.code });
-    expect((await d.c.wait((m) => m.t === 'room')).vines).toEqual([[10, 40, 10, 0.6, -0.8]]);
+    const snap = await d.c.wait((m) => m.t === 'room');
+    expect(snap.vines).toEqual([[10, 40, 10, 0.6, -0.8]]);
+    expect(snap.zips).toEqual([[0, 50, 0, 20, 40, 5]]);
     for (const x of [a, b, c, d]) x.c.close();
   });
 

@@ -114,11 +114,12 @@
 
     <div id="vitals">
       <div id="legend">
-        <span class="lg st">Stamina</span><span class="lg hun">Hunger</span><span class="lg cold">Cold</span><span class="lg inj">Injury</span><span class="lg pois">Poison</span><span class="lg wt">Pack weight</span>
+        <span class="lg st">Stamina</span><span class="lg hun">Hunger</span><span class="lg cold">Cold</span><span class="lg heat">Heat</span><span class="lg inj">Injury</span><span class="lg pois">Poison</span><span class="lg drw">Drowsy</span><span class="lg wt">Pack weight</span><span class="lg bon">Bonus</span>
       </div>
       <div id="bar">
         <i id="bSt"></i>
-        <i id="bAff"><b id="bWeight"></b><b id="bHun"></b><b id="bCold"></b><b id="bInj"></b><b id="bPois"></b></i>
+        <i id="bAff"><b id="bWeight"></b><b id="bHun"></b><b id="bCold"></b><b id="bHeat"></b><b id="bInj"></b><b id="bPois"></b><b id="bDrowsy"></b></i>
+        <i id="bBonus"></i>
         <span class="ticks"></span>
       </div>
     </div>
@@ -148,6 +149,7 @@
     <div id="tRight"></div>
     <div id="joyBase"><div id="joyKnob"></div></div>
     <button id="bRun" class="tb sm" type="button" aria-label="Sprint">🏃<small>Sprint</small></button>
+    <button id="bCrouch" class="tb sm" type="button" aria-label="Crouch">🧎<small>Crouch</small></button>
     <div id="tbtns">
       <button id="bEmote" class="tb sm" type="button" aria-label="Emote">👋</button>
       <button id="bDrop" class="tb sm" type="button" aria-label="Drop item">⤓<small>Drop</small></button>
@@ -178,6 +180,11 @@
           <div class="row">
             <button id="btnPassportTitle" class="btn" type="button">📘 Passport</button>
             <button id="btnSettings" class="btn" type="button">⚙ Settings</button>
+          </div>
+          <div class="diffrow" role="group" aria-label="Difficulty">
+            <button id="diffPrev" class="dbtn" type="button" aria-label="Easier">◀</button>
+            <div><b id="diffName">Expedition</b><small id="diffNote"></small></div>
+            <button id="diffNext" class="dbtn" type="button" aria-label="Harder">▶</button>
           </div>
           <div class="meta"><span id="seedRow"></span><span><button id="btnDaily" class="link" type="button">Daily mountain</button> · <button id="btnNew" class="link" type="button">New mountain</button></span></div>
           <div id="bestRow" class="meta"></div>

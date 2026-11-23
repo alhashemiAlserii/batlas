@@ -495,6 +495,38 @@ function broadleafTree(rng) {
   const crown = cardCluster(22, new THREE.Vector3(0.3, 5.2, 0), 1.9, 2.2, rng, 0.75);
   return { wood, crown };
 }
+/** Giant mushroom for the Fungal Hollow: a leaning stalk and a wide domed cap. */
+function mushroomGeometry(rng) {
+  const lean = (rng() - 0.5) * 0.5;
+  const stalk = trunkGeometry(3.2 + rng() * 1.6, 0.36, 0.26, lean, 7);
+  const h = 3.6 + rng() * 1.2;
+  const cap = new THREE.SphereGeometry(2.0 + rng() * 0.7, 18, 8, 0, Math.PI * 2, 0, Math.PI * 0.42);
+  cap.scale(1, 0.55, 1);
+  cap.translate(lean * 1.4, h, 0);
+  const gills = new THREE.CircleGeometry(1.95, 18);
+  gills.rotateX(Math.PI / 2);
+  gills.translate(lean * 1.4, h + 0.02, 0);
+  return { stalk, cap, gills };
+}
+/** Desert cactus: a ribbed column with one or two raised arms. */
+function cactusGeometry(rng) {
+  const parts = [];
+  const H = 2.2 + rng() * 1.6;
+  const col = new THREE.CapsuleGeometry(0.32, H, 4, 10);
+  col.translate(0, H / 2 + 0.3, 0);
+  parts.push(col);
+  const arms = 1 + (rng() < 0.6 ? 1 : 0);
+  for (let i = 0; i < arms; i++) {
+    const side = i === 0 ? 1 : -1, y = H * (0.35 + rng() * 0.25), up = 0.7 + rng() * 0.7;
+    const out = new THREE.CapsuleGeometry(0.2, 0.45, 4, 8);
+    out.rotateZ(Math.PI / 2);
+    out.translate(side * 0.55, y, 0);
+    const rise = new THREE.CapsuleGeometry(0.2, up, 4, 8);
+    rise.translate(side * 0.85, y + up / 2 + 0.05, 0);
+    parts.push(out, rise);
+  }
+  return mergeGeometries(parts.map((g) => g.toNonIndexed()));
+}
 function palmGeometry() {
   const trunk = trunkGeometry(5.2, 0.2, 0.13, 1.0, 8);
   const fronds = [];
@@ -599,7 +631,8 @@ const foliage = (map, tint = 0xffffff, extra = {}) => {
 const barkMat = (key, base) => pbr(0xffffff, { map: barkTex(key, base), roughness: 0.95 });
 
 /** Scatter vegetation and props over the island. Returns tree colliders. */
-export function dressMountain(root, T, rng, q, avoid) {
+export function dressMountain(root, T, rng, q, avoid, zones = { mid: 'moss', high: 'frost' }) {
+  const fungal = zones.mid === 'fungal', canyon = zones.high === 'canyon';
   USE_STD = !!q.standard;
   const trees = [];
   const ok = (p, r) => avoid.every((a) => a.p.distanceTo(p) > a.r + r);
@@ -631,7 +664,7 @@ export function dressMountain(root, T, rng, q, avoid) {
   const bl = broadleafTree(rng);
   const bl2 = broadleafTree(rng);
   const woods = scatter(620, 4, 34, 0.9).filter(patch);
-  const jungle = scatter(360, 37, 124, 0.88);
+  const jungle = fungal ? [] : scatter(360, 37, 124, 0.88);
   const allBroad = [...woods, ...jungle];
   const wood = barkMat('bark', '#5e4632');
   instanced(root, bl.wood, wood, allBroad.filter((_, i) => i % 2 === 0), place(), sh);
@@ -644,27 +677,61 @@ export function dressMountain(root, T, rng, q, avoid) {
   instanced(root, bl.crown, leafC, jungle.filter((_, i) => i % 2 === 0), place(), sh);
   instanced(root, bl2.crown, leafA, jungle.filter((_, i) => i % 2 === 1), place(), sh);
 
+  // Fungal Hollow: giant glowing mushrooms instead of jungle trees, and little glowcaps instead of bushes.
+  const shrooms = fungal ? scatter(300, 37, 124, 0.86) : [];
+  if (fungal) {
+    const capCols = [0x8a5cd6, 0x2fb5a8, 0xe0703a];
+    for (let k = 0; k < 3; k++) {
+      const g = mushroomGeometry(rng);
+      const list = shrooms.filter((_, i) => i % 3 === k);
+      instanced(root, g.stalk, pbr(0xe8dcc6, { roughness: 0.8 }), list, place(), sh);
+      instanced(root, g.cap, pbr(capCols[k], { roughness: 0.55, emissive: capCols[k], emissiveIntensity: 0.18 }), list, place(), sh);
+      instanced(root, g.gills, pbr(0xf6e7ff, { roughness: 0.9, side: THREE.DoubleSide, emissive: 0xb8a0ff, emissiveIntensity: 0.25 }), list, place(), false);
+    }
+    const small = new THREE.SphereGeometry(0.22, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    small.scale(1, 0.6, 1);
+    small.translate(0, 0.32, 0);
+    const smallStalk = new THREE.CylinderGeometry(0.05, 0.07, 0.34, 6);
+    smallStalk.translate(0, 0.17, 0);
+    const glows = scatter(700, 37, 124, 0.8, 0.4);
+    instanced(root, smallStalk, pbr(0xf1e6cf), glows, place(), false);
+    instanced(root, small, pbr(0x7ff7e8, { emissive: 0x3fe0d0, emissiveIntensity: 0.9, roughness: 0.4 }), glows.filter((_, i) => i % 2), place(), false);
+    instanced(root, small, pbr(0xd59bff, { emissive: 0xb070ff, emissiveIntensity: 0.9, roughness: 0.4 }), glows.filter((_, i) => !(i % 2)), place(), false);
+  }
+
   // Bushes, flowers and grass.
   const bushGeo = cardCluster(9, new THREE.Vector3(0, 0.55, 0), 0.6, 1.0, rng, 0.7);
-  const bushes = [...scatter(420, 37, 124, 0.85, 1), ...scatter(460, 3, 34, 0.88, 1)];
+  const bushes = [...(fungal ? [] : scatter(420, 37, 124, 0.85, 1)), ...scatter(460, 3, 34, 0.88, 1)];
   instanced(root, bushGeo, sway(foliage(leafTex('leafBush', 100, 42, 28)), 0.08), bushes, place(), sh);
-  const flowers = scatter(620, 3, 124, 0.9, 1);
+  const flowers = scatter(620, 3, fungal ? 34 : 124, 0.9, 1);
   const flowerGeo = crossedCards(0.6, 0.45, 2);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flPink', 330)), 0.25), flowers.filter((_, i) => i % 3 === 0), place(), false);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flYel', 48)), 0.25), flowers.filter((_, i) => i % 3 === 1), place(), false);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flWht', 220)), 0.25), flowers.filter((_, i) => i % 3 === 2), place(), false);
   const grass = scatter(4200, 2.2, 124, 0.88, 0.5);
   const grassGeo = crossedCards(0.9, 0.55, 3);
-  instanced(root, grassGeo, sway(foliage(grassTex('grassG', 100, 32)), 0.3), grass.filter((p) => p.y > 3), place(), false);
+  instanced(root, grassGeo, sway(foliage(grassTex('grassG', 100, 32)), 0.3), grass.filter((p) => p.y > 3 && !(fungal && p.y > 36)), place(), false);
+  if (fungal) instanced(root, grassGeo, sway(foliage(grassTex('grassF', 255, 34)), 0.3), grass.filter((p) => p.y > 36), place(), false);
   instanced(root, grassGeo, sway(foliage(grassTex('grassD', 62, 48)), 0.3), grass.filter((p) => p.y <= 3), place(), false);
 
   // Conifers higher up, some dusted with snow.
-  const pine = pineGeometry(rng);
-  const pines = scatter(260, 127, 212, 0.88);
-  instanced(root, pine.trunk, barkMat('barkPine', '#4a3526'), pines, place(), sh);
-  instanced(root, pine.top, sway(foliage(needleTex('needle', false)), 0.003), pines.filter((_, i) => i % 3 === 0), place(), sh);
-  instanced(root, pine.top, sway(foliage(needleTex('needleSnow', true)), 0.003), pines.filter((_, i) => i % 3 !== 0), place(), sh);
-  const crystals = scatter(160, 127, 214, 0.85, 1);
+  const pines = canyon ? [] : scatter(260, 127, 212, 0.88);
+  if (!canyon) {
+    const pine = pineGeometry(rng);
+    instanced(root, pine.trunk, barkMat('barkPine', '#4a3526'), pines, place(), sh);
+    instanced(root, pine.top, sway(foliage(needleTex('needle', false)), 0.003), pines.filter((_, i) => i % 3 === 0), place(), sh);
+    instanced(root, pine.top, sway(foliage(needleTex('needleSnow', true)), 0.003), pines.filter((_, i) => i % 3 !== 0), place(), sh);
+  }
+  // Red Canyon: cacti, dry scrub and dusty grass instead of pines and ice.
+  const cacti = canyon ? scatter(220, 127, 212, 0.85) : [];
+  if (canyon) {
+    const cg = [cactusGeometry(rng), cactusGeometry(rng)];
+    cg.forEach((g, k) => instanced(root, g, pbr(k ? 0x4f8a3e : 0x3f7a4a, { roughness: 0.7 }), cacti.filter((_, i) => i % 2 === k), place(), sh));
+    const scrub = scatter(520, 127, 214, 0.85, 0.6);
+    instanced(root, cardCluster(7, new THREE.Vector3(0, 0.35, 0), 0.45, 0.7, rng, 0.6), sway(foliage(leafTex('scrub', 42, 35, 42)), 0.06), scrub.filter((_, i) => i % 2), place(), false);
+    instanced(root, crossedCards(0.9, 0.5, 3), sway(foliage(grassTex('grassDry', 40, 52)), 0.3), scrub.filter((_, i) => !(i % 2)), place(), false);
+  }
+  const crystals = canyon ? [] : scatter(160, 127, 214, 0.85, 1);
   const crystalGeo = new THREE.OctahedronGeometry(0.5, 0);
   crystalGeo.scale(0.6, 1.6, 0.6);
   crystalGeo.translate(0, 0.6, 0);
@@ -676,14 +743,18 @@ export function dressMountain(root, T, rng, q, avoid) {
   // Boulders.
   const rocks = scatter(380, 2, 280, 0.75, 1);
   const rockMat = pbr(0x9a9284, { map: rockTex(), roughness: 0.92 });
+  const redRock = pbr(0xb86a46, { map: rockTex(), roughness: 0.92 });
   const darkRock = pbr(0x4a403c, { map: rockTex(), roughness: 0.9 });
   const rg = [rockGeometry(1), rockGeometry(2.7), rockGeometry(5.3)];
   rg.forEach((g, k) => {
-    instanced(root, g, rockMat, rocks.filter((p, i) => p.y < 216 && i % 3 === k), place(0.05), sh);
+    instanced(root, g, rockMat, rocks.filter((p, i) => p.y < 216 && !(canyon && p.y > 126) && i % 3 === k), place(0.05), sh);
+    if (canyon) instanced(root, g, redRock, rocks.filter((p, i) => p.y > 126 && p.y < 216 && i % 3 === k), place(0.05), sh);
     instanced(root, g, darkRock, rocks.filter((p, i) => p.y >= 216 && i % 3 === k), place(0.05), sh);
   });
 
   for (const p of [...palms, ...woods, ...jungle, ...pines, ...dead]) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.35 * p.userData.s });
+  for (const p of shrooms) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.45 * p.userData.s });
+  for (const p of cacti) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.4 * p.userData.s, cactus: true });
 
   // Vines hanging down jungle cliff faces.
   const vines = [];
@@ -699,7 +770,7 @@ export function dressMountain(root, T, rng, q, avoid) {
   }
   const vineGeo = new THREE.PlaneGeometry(0.8, 1);
   vineGeo.translate(0, -0.5, 0);
-  instanced(root, vineGeo, foliage(leafTex('vine', 110, 45, 26)), vines, (d, v) => { d.position.set(v.x, v.y, v.z); d.scale.set(1, v.len, 1); d.rotation.set(0, v.r, 0); }, false);
+  instanced(root, vineGeo, foliage(fungal ? leafTex('vineF', 275, 40, 40) : leafTex('vine', 110, 45, 26)), vines, (d, v) => { d.position.set(v.x, v.y, v.z); d.scale.set(1, v.len, 1); d.rotation.set(0, v.r, 0); }, false);
 
   return trees;
 }

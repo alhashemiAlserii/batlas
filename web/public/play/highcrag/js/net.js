@@ -87,7 +87,7 @@ export class HNet extends EventTarget {
       this.send(msg);
     });
   }
-  create(seed) { return this.request({ t: 'create', seed }); }
+  create(seed, diff = 1) { return this.request({ t: 'create', seed, diff }); }
   join(code) { return this.request({ t: 'join', code }); }
   leave() {
     this.send({ t: 'leave' });

@@ -18,6 +18,25 @@ export const BANDS = [
   { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xeef3f8, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
   { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x3b3230, rock: 0x2e2826, fog: 0xc9ab97, sky: 0x5c5a86 },
 ];
+// Each mountain picks one of two versions of the middle zones (it changes with the seed, so every
+// daily mountain can differ): jungle or a fungal hollow, then snowy cliffs or a red desert canyon.
+export const VARIANTS = {
+  moss: { id: 'moss', name: 'Tanglewood Jungle', ground: 0x4a7f2e, rock: 0x6e6658, fog: 0xbfd6d0, sky: 0x3a74bd },
+  fungal: { id: 'fungal', name: 'Fungal Hollow', ground: 0x4b4a6e, rock: 0x5b5068, fog: 0x9d94bd, sky: 0x3f4583 },
+  frost: { id: 'frost', name: 'Frostline Cliffs', ground: 0xeef3f8, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
+  canyon: { id: 'canyon', name: 'Red Canyon', ground: 0xd49a5e, rock: 0xa9533a, fog: 0xf1cfa6, sky: 0x4f8ad0 },
+};
+/** Set the zone versions for this seed. `force` (e.g. from ?zones=fungal,canyon) overrides. */
+export function setVariant(seed, force = null) {
+  const r = makeRng((seed ^ 0x2545f491) >>> 0);
+  let mid = r() < 0.5 ? 'moss' : 'fungal';
+  let high = r() < 0.5 ? 'frost' : 'canyon';
+  if (force?.mid && VARIANTS[force.mid]) mid = force.mid;
+  if (force?.high && VARIANTS[force.high]) high = force.high;
+  Object.assign(BANDS[1], VARIANTS[mid]);
+  Object.assign(BANDS[2], VARIANTS[high]);
+  return { mid, high };
+}
 /** Display name for where you are (the lowlands share the shore band's rules). */
 export const zoneName = (y) => (y < 3.5 ? 'Saltwind Shore' : y < 36 ? 'Palm Lowlands' : bandAt(y).name);
 export const bandAt = (y) => (y < BANDS[1].y0 ? BANDS[0] : y < BANDS[2].y0 ? BANDS[1] : y < BANDS[3].y0 ? BANDS[2] : BANDS[3]);
@@ -180,6 +199,8 @@ export class Terrain {
         cr.offsetHSL(0, 0, Math.sin(y * 1.7 + n * 3) * 0.035);
         if (band.id === 'moss') cg.offsetHSL(n * 0.03, 0, n * 0.06); // patchy jungle floor
         if (band.id === 'frost') cg.offsetHSL(0, 0, -Math.max(0, -n) * 0.06);
+        if (band.id === 'fungal') { cg.offsetHSL(n * 0.06, 0.04, n * 0.07); cr.offsetHSL(n * 0.04, 0, 0); } // mossy violet floor
+        if (band.id === 'canyon') { cg.offsetHSL(n * 0.015, 0, n * 0.05); cr.offsetHSL(0, 0.05, Math.sin(y * 0.9 + n * 2) * 0.05); } // banded sandstone
         if (band.id === 'shore' && y >= 2.6) {
           // Lowland meadows: lush green with dry golden patches and darker forest floor.
           const dry = smooth(0.15, 0.5, fbm(x * 0.02, z * 0.02, this.seed + 61, 3));

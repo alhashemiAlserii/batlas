@@ -2,6 +2,7 @@
 // on the left page and the look options (tabs with 3D thumbnails and colour swatches) on the right page.
 import * as THREE from '../../vendor/three.module.js';
 import { WARDROBE, makeClimber, poseClimber, disposeClimber } from './characters.js';
+import { BADGES } from './badges.js';
 
 const SEC = Object.fromEntries(WARDROBE.map((s) => [s.key, s]));
 // Each tab: which look keys it edits, and how the 3D thumbnails are framed.
@@ -14,19 +15,22 @@ const TABS = [
   { id: 'bottoms', icon: '👖', label: 'Bottoms', parts: ['b', 'bc'], frame: 'legs' },
   { id: 'shoes', icon: '🥾', label: 'Shoes', parts: ['sh'], frame: 'feet' },
   { id: 'extra', icon: '👓', label: 'Extras', parts: ['a'], frame: 'neck' },
+  { id: 'badges', icon: '🏅', label: 'Badges', parts: [], badges: true },
 ];
 const hex = (v) => `#${v.toString(16).padStart(6, '0')}`;
 const GL_SIZE = 320;
 
 export class Passport {
-  constructor({ getLook, setLook, randomLook, sfx, store }) {
+  constructor({ getLook, setLook, randomLook, sfx, store, badges = null, toast = null }) {
+    this.badges = badges;
+    this.toast = toast;
     this.getLook = getLook;
     this.setLook = setLook;
     this.randomLook = randomLook;
     this.sfx = sfx;
     this.store = store;
     this.el = document.getElementById('passport');
-    this.tab = TABS[2];
+    this.tab = TABS.find((t) => t.id === 'hat');
     this.open_ = false;
     this.queue = [];
     this.cache = new Map();
@@ -110,6 +114,7 @@ export class Passport {
     const grid = document.getElementById('ppGrid');
     grid.replaceChildren();
     this.queue.length = 0;
+    if (this.tab.badges) { this.renderBadges(grid); return; }
     for (const key of this.tab.parts) {
       const sec = SEC[key];
       const label = document.createElement('div');
@@ -135,6 +140,19 @@ export class Passport {
           const s = document.createElement('span');
           s.textContent = v;
           b.append(c, s);
+          const lock = key === 'h' && this.badges ? this.badges.lockFor(i) : null;
+          if (lock) {
+            b.classList.add('locked');
+            b.title = `${v}: earn the “${lock.name}” badge`;
+            const l = document.createElement('i');
+            l.className = 'pp-lock';
+            l.textContent = '🔒';
+            b.appendChild(l);
+            b.addEventListener('click', () => { this.sfx.click(); this.toast?.(`🔒 ${v}: earn the “${lock.name}” badge (${lock.desc})`); });
+            row.appendChild(b);
+            this.queue.push({ canvas: c, look: { ...look, [key]: i }, frame: this.tab.frame });
+            return;
+          }
           this.queue.push({ canvas: c, look: { ...look, [key]: i }, frame: this.tab.frame });
         }
         b.setAttribute('aria-pressed', String(on));
@@ -149,6 +167,33 @@ export class Passport {
     }
     // Draw cached thumbnails straight away; the rest render a couple per frame.
     this.queue = this.queue.filter((j) => !this.drawCached(j));
+  }
+
+  /** The badge page: what you have earned, and what is still to do. */
+  renderBadges(grid) {
+    const have = BADGES.filter((b) => this.badges?.has(b.id)).length;
+    const label = document.createElement('div');
+    label.className = 'pp-label';
+    label.textContent = `Badges · ${have} of ${BADGES.length}`;
+    const row = document.createElement('div');
+    row.className = 'pp-badges';
+    for (const b of BADGES) {
+      const got = !!this.badges?.has(b.id);
+      const el = document.createElement('div');
+      el.className = 'pp-badge' + (got ? ' got' : '');
+      const ic = document.createElement('span');
+      ic.className = 'pp-bicon';
+      ic.textContent = got ? b.icon : '❔';
+      const tx = document.createElement('div');
+      const n = document.createElement('b');
+      n.textContent = b.name;
+      const d = document.createElement('small');
+      d.textContent = b.desc + (b.hat !== undefined ? ' Unlocks a hat.' : '');
+      tx.append(n, d);
+      el.append(ic, tx);
+      row.appendChild(el);
+    }
+    grid.append(label, row);
   }
 
   ensureGl() {

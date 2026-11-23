@@ -1,7 +1,7 @@
 // Highcrag — an original survival climbing game for the Batlas site (1–4 players).
 // Flow: title → airport terminal → flight → crash on the beach → climb → summit beacon.
 import * as THREE from '../../vendor/three.module.js';
-import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST } from './terrain.js';
+import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST, setVariant } from './terrain.js';
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
 import { Post } from './post.js';
@@ -10,6 +10,7 @@ import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, 
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
 import { Passport } from './passport.js';
+import { Badges } from './badges.js';
 
 const $ = (s) => document.querySelector(s);
 const V3 = THREE.Vector3;
@@ -100,7 +101,7 @@ const ITEMS = {
   medkit: { name: 'First-aid kit', icon: '🧰', color: 0xff3b4a, w: 0.04, hint: 'Heal a lot of injury, cure poison' },
   warmer: { name: 'Hand warmer', icon: '🧤', color: 0xff8a2a, w: 0.01, hint: 'Warm up' },
   piton: { name: 'Piton', icon: '📌', color: 0xb7c0cc, w: 0.02, hint: 'Use while climbing to make a rest spot' },
-  tonic: { name: 'Fizz tonic', icon: '🧃', color: 0x5cff9a, w: 0.02, hint: 'Full stamina, no drain for 9 s' },
+  tonic: { name: 'Fizz tonic', icon: '🧃', color: 0x5cff9a, w: 0.02, hint: '11 s of free stamina and speed, then drowsy' },
   chalk: { name: 'Climbing chalk', icon: '👝', color: 0xf4f4f4, w: 0.01, hint: 'Climbing costs less stamina for 45 s' },
   compass: { name: 'Compass', icon: '🧭', color: 0xd4a017, w: 0.02, hint: 'Carry it to see directions' },
   binoculars: { name: 'Binoculars', icon: '🔭', color: 0x2b2c33, w: 0.03, hint: 'Use to zoom in and out' },
@@ -110,18 +111,42 @@ const ITEMS = {
   bean: { name: 'Magic bean', icon: '🫘', color: 0x6a8a2a, w: 0.01, hint: 'Use facing a rock wall to grow a climbable vine' },
   flare: { name: 'Flare', icon: '🎇', color: 0xff2a3d, w: 0.02, hint: 'Plant a bright signal everyone can see' },
   passport: { name: 'Passport', icon: '📘', color: 0x1f3c88, w: 0, hint: 'Use it to change your look. It stays at the airport.' },
+  honey: { name: 'Wild honeycomb', icon: '🍯', color: 0xf2b134, food: true, noCook: true, feed: 0.06, w: 0.01, hint: 'Eat: a burst of bonus stamina' },
+  coconut: { name: 'Coconut', icon: '🥥', color: 0x7a5232, food: true, feed: 0.22, w: 0.03, hint: 'Eat: less hungry. Roast it first for more' },
+  floatrope: { name: 'Float rope', icon: '🪁', color: 0xe0453a, w: 0.05, hint: 'Use on open ground: a rope rises into the air on balloons' },
+  launcher: { name: 'Line launcher', icon: '🏹', color: 0x3b6fd6, w: 0.06, hint: 'Aim at a spot below you and use: slide down a zipline' },
+  shelf: { name: 'Shelf fungus', icon: '🍄‍🟫', color: 0xc98a4a, w: 0.01, hint: 'Use facing a wall (or climbing): grows a ledge to stand on' },
+  umbrella: { name: 'Umbrella', icon: '☂️', color: 0x8a55b8, w: 0.03, hint: 'Hold it while falling to float down gently' },
+  balloons: { name: 'Balloon bunch', icon: '🎈', color: 0xff6f91, w: 0.01, hint: 'Hold it: higher jumps and slow falls, until they pop' },
 };
+// Cooking: E at a lit campfire roasts the food in your hand one step at a time.
+// Roasted once is worth two-thirds more; roasted twice is back to ordinary; a third time burns it (and it will make you sick).
+const COOK_NAMES = ['', 'Roasted', 'Twice-roasted', 'Burnt'];
+const COOK_HINTS = ['', 'Eat: worth much more than raw', 'Eat: overdone, ordinary again', 'Eat: it will make you sick'];
+const baseOf = (t) => (t ? t.split('@')[0] : t);
+const cookOf = (t) => (t && t.includes('@') ? Number(t.split('@')[1]) : 0);
+for (const k of Object.keys(ITEMS)) {
+  const it = ITEMS[k];
+  if (!it.food || it.noCook) continue;
+  for (let lv = 1; lv <= 3; lv++) {
+    const col = new THREE.Color(it.color).lerp(new THREE.Color(lv === 3 ? 0x1a1410 : 0x8a4a1a), [0, 0.35, 0.55, 0.85][lv]).getHex();
+    ITEMS[`${k}@${lv}`] = { ...it, name: `${COOK_NAMES[lv]} ${it.name.charAt(0).toLowerCase()}${it.name.slice(1)}`, base: k, cook: lv, color: col, hint: COOK_HINTS[lv] };
+  }
+}
 const LOOT = {
-  shore: ['berry', 'berry', 'ration', 'bandage', 'piton', 'marshmallow', 'bean'],
-  moss: ['berry', 'berry', 'mushroom', 'mushroom', 'bandage', 'piton', 'piton', 'ration', 'rope', 'bean', 'binoculars', 'chalk'],
-  frost: ['warmer', 'warmer', 'warmer', 'ration', 'piton', 'bandage', 'tonic', 'berry', 'rope', 'lantern', 'chalk', 'marshmallow'],
-  crown: ['warmer', 'tonic', 'tonic', 'piton', 'bandage', 'ration', 'warmer', 'medkit', 'chalk', 'horn', 'bean'],
+  shore: ['berry', 'berry', 'ration', 'bandage', 'piton', 'marshmallow', 'bean', 'coconut', 'coconut', 'umbrella', 'balloons'],
+  moss: ['berry', 'berry', 'mushroom', 'mushroom', 'bandage', 'piton', 'piton', 'ration', 'rope', 'bean', 'binoculars', 'chalk', 'honey', 'honey', 'shelf', 'shelf', 'floatrope', 'balloons'],
+  frost: ['warmer', 'warmer', 'warmer', 'ration', 'piton', 'bandage', 'tonic', 'berry', 'rope', 'lantern', 'chalk', 'marshmallow', 'honey', 'shelf', 'launcher', 'floatrope', 'umbrella'],
+  crown: ['warmer', 'tonic', 'tonic', 'piton', 'bandage', 'ration', 'warmer', 'medkit', 'chalk', 'horn', 'bean', 'shelf', 'launcher', 'umbrella'],
+  fungal: ['mushroom', 'mushroom', 'mushroom', 'berry', 'bandage', 'piton', 'piton', 'ration', 'rope', 'shelf', 'shelf', 'shelf', 'binoculars', 'chalk', 'honey', 'floatrope', 'tonic'],
+  canyon: ['coconut', 'coconut', 'coconut', 'umbrella', 'umbrella', 'ration', 'piton', 'bandage', 'tonic', 'rope', 'launcher', 'launcher', 'chalk', 'shelf', 'honey', 'medkit'],
 };
-const CRASH_LOOT = ['compass', 'compass', 'rope', 'rope', 'rope', 'flare', 'flare', 'medkit', 'ration', 'ration', 'tonic', 'bandage', 'bandage', 'berry', 'piton', 'warmer', 'binoculars', 'horn', 'lantern', 'marshmallow', 'marshmallow', 'chalk', 'bean'];
+const CRASH_LOOT = ['compass', 'compass', 'rope', 'rope', 'rope', 'flare', 'flare', 'medkit', 'ration', 'ration', 'tonic', 'coconut', 'umbrella', 'shelf', 'launcher', 'bandage', 'bandage', 'berry', 'piton', 'warmer', 'binoculars', 'horn', 'lantern', 'marshmallow', 'marshmallow', 'chalk', 'bean'];
 
 function itemMesh(type) {
   const g = new THREE.Group();
   const c = ITEMS[type].color;
+  type = baseOf(type);
   const m = new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.22 });
   const add = (geo, mat = m, x = 0, y = 0, z = 0, rx = 0, rz = 0) => { const k = new THREE.Mesh(geo, mat); k.position.set(x, y, z); k.rotation.set(rx, 0, rz); g.add(k); return k; };
   if (type === 'berry') {
@@ -269,8 +294,17 @@ function spawnItem(root, type, pos) {
   return { id: null, type, mesh, pos: pos.clone(), taken: false, phase: Math.random() * 6 };
 }
 
+// Zone versions: each mountain picks jungle or fungal hollow, and snowy cliffs or red canyon.
+// ?zones=fungal,canyon forces a pair (for testing). ZONE_VARIANTS turns the daily mix on for everyone.
+const ZONE_VARIANTS = false;
+function pickZones(seed) {
+  const q = new URLSearchParams(location.search).get('zones');
+  if (q) { const [mid, high] = q.split(','); return setVariant(seed, { mid, high }); }
+  return ZONE_VARIANTS ? setVariant(seed) : setVariant(seed, { mid: 'moss', high: 'frost' });
+}
 function buildWorld(seed) {
   disposeWorld();
+  const zones = pickZones(seed);
   const T = new Terrain(seed);
   const rng = makeRng(seed ^ 0x9e3779b9);
   const root = new THREE.Group();
@@ -299,7 +333,7 @@ function buildWorld(seed) {
   for (const c of [...camps, beacon]) root.add(c.group);
 
   const avoid = [{ p: spawn, r: 4 }, { p: wreckOrigin, r: 16 }, ...camps.map((c) => ({ p: c.pos, r: 5 })), { p: beacon.pos, r: 6 }];
-  const trees = dressMountain(root, T, rng, Q, avoid);
+  const trees = dressMountain(root, T, rng, Q, avoid, zones);
   trees.push(...wreck.colliders);
   const marks = buildLandmarks(root, T, rng, Q, spawn, T.summit);
   trees.push(...marks.colliders);
@@ -309,8 +343,9 @@ function buildWorld(seed) {
   const gulls = new Gulls(root, spawn.clone().add(new V3(-20, 0, 10)), Q.decor > 0.5 ? 12 : 7);
 
   const thorns = [];
-  const thornMat = new THREE.MeshLambertMaterial({ color: 0x7a2f4a, flatShading: true });
-  const spikeMat = new THREE.MeshLambertMaterial({ color: 0xd9c38f, flatShading: true });
+  const spores = zones.mid === 'fungal';
+  const thornMat = spores ? new THREE.MeshLambertMaterial({ color: 0x9a7fd6, emissive: 0x4a2f8a, emissiveIntensity: 0.4 }) : new THREE.MeshLambertMaterial({ color: 0x7a2f4a, flatShading: true });
+  const spikeMat = spores ? new THREE.MeshLambertMaterial({ color: 0xf0e6ff, emissive: 0xb8a0ff, emissiveIntensity: 0.6 }) : new THREE.MeshLambertMaterial({ color: 0xd9c38f, flatShading: true });
   for (let i = 0; i < 18; i++) {
     const p = T.flatSpot(rng, 38, 124, 0.9, 80);
     if (!p || camps.some((c) => c.pos.distanceTo(p) < 8)) continue;
@@ -319,7 +354,7 @@ function buildWorld(seed) {
     for (let k = 0; k < 6; k++) {
       const a = rng() * 6.28, d = rng() * r;
       const x = p.x + Math.cos(a) * d, z = p.z + Math.sin(a) * d;
-      const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45 + rng() * 0.3, 0), thornMat);
+      const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45 + rng() * 0.3, spores ? 2 : 0), thornMat);
       m.position.set(x, T.height(x, z) + 0.25, z);
       m.scale.y = 0.7;
       root.add(m);
@@ -374,7 +409,7 @@ function buildWorld(seed) {
   const pitonGroup = new THREE.Group();
   root.add(pitonGroup);
   scene.add(root);
-  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], smokes, gulls, grass, marks: marks.anim };
+  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], zones, cacti: trees.filter((t) => t.cactus), smokes, gulls, grass, marks: marks.anim };
 }
 
 // ---------------- player & game state ----------------
@@ -386,7 +421,7 @@ const P = {
   hv: new V3(), jumpBuf: 0, coyote: 0, jumped: false, tumble: false, spin: 0, running: false,
   isDown: false, downT: 0, wakeT: 0, rope: null, ropeY: 0, moveAmt: 0,
 };
-const S = { stamina: 1, hunger: 0, cold: 0, injury: 0, poison: 0, boostT: 0, chalkT: 0 };
+const S = { stamina: 1, hunger: 0, cold: 0, heat: 0, injury: 0, poison: 0, drowsy: 0, bonus: 0, boostT: 0, chalkT: 0 };
 const inv = [null, null, null];
 let sel = 0;
 let state = 'title'; // title | lobby | flight | play | paused | dead | won
@@ -394,21 +429,47 @@ let pausedFrom = 'play';
 let elapsed = 0, checkpoint = null, stats = null, lastBand = null;
 let blizzard = { t: 40, on: false, k: 0 };
 let gust = { t: 8, on: false, k: 0, dir: new V3(1, 0, 0) };
-const packWeight = () => inv.reduce((sum, t) => sum + (t ? ITEMS[t].w || 0 : 0), 0);
-const maxSt = () => Math.max(0, 1 - S.hunger - S.cold - S.injury - S.poison - packWeight());
-const afflicted = () => S.hunger + S.cold + S.injury + S.poison;
+// ---------------- difficulty ----------------
+// Highcrag's own tiers. In co-op, the room creator's choice applies to everyone.
+const DIFFS = [
+  { name: 'Stroll', note: 'Gentle: slower hunger and cold, softer falls, lighter packs.', hunger: 0.6, cold: 0.6, fall: 0.6, weight: 0.8, downT: 35 },
+  { name: 'Expedition', note: 'The normal climb.', hunger: 1, cold: 1, fall: 1, weight: 1, downT: 25 },
+  { name: 'Summit I', note: 'You get hungry faster.', hunger: 1.3, cold: 1, fall: 1, weight: 1, downT: 25 },
+  { name: 'Summit II', note: 'Hungrier, colder, heavier packs, harder falls.', hunger: 1.3, cold: 1.3, fall: 1.15, weight: 1.5, downT: 20 },
+  { name: 'Summit III', note: 'All of that and worse. No ghosts: the fallen wake at the last fire with nothing.', hunger: 1.45, cold: 1.4, fall: 1.3, weight: 1.6, downT: 15, noGhost: true },
+];
+const storedDiff = Number(store.get('difficulty', 1));
+let diff = Number.isInteger(storedDiff) && storedDiff >= 0 && storedDiff <= 4 ? storedDiff : 1;
+const D = () => DIFFS[diff] ?? DIFFS[1];
+const packWeight = () => inv.reduce((sum, t) => sum + (t ? ITEMS[t].w || 0 : 0), 0) * D().weight;
+const maxSt = () => Math.max(0, 1 - S.hunger - S.cold - S.heat - S.injury - S.poison - S.drowsy - packWeight());
+const afflicted = () => S.hunger + S.cold + S.heat + S.injury + S.poison + S.drowsy;
+/** Bonus stamina (gold) is spent before the normal bar. */
+const addBonus = (v) => { S.bonus = Math.min(0.6, S.bonus + v); };
 const onIsland = () => state === 'play' || state === 'dead' || ((state === 'paused' || state === 'won') && pausedFrom !== 'lobby');
 
 const G = 22, WALK = 4.6, SPRINT = 7.4, JUMP = 7.4, CLIMB = 1.75, WALL_NY = 0.72, HAND = 1.05;
 const tmpN = new V3(), tmpN2 = new V3();
 const gy = (x, z) => Math.max(world.T.height(x, z), -0.8);
+/** What you stand on at (x, z) when your feet are at height y: the ground, or a fungus shelf just under you. */
+function floorAt(x, z, y) {
+  let g = gy(x, z);
+  for (const sh of world.shelves) {
+    if (sh.y > g && sh.y <= y + 0.35 && (x - sh.x) ** 2 + (z - sh.z) ** 2 < sh.r * sh.r) g = sh.y;
+  }
+  return g;
+}
 
+// Things a badge needs to know about this climb.
+const runBadges = { roasted: 0, daily: false, liftY: null };
 function resetRun(sameSeed, forceSeed) {
   const seed = forceSeed ?? (sameSeed && world ? world.seed : (Math.random() * 1e9) >>> 0);
   buildWorld(seed);
   inv.fill(null);
   sel = 0;
-  Object.assign(S, { stamina: 1, hunger: 0, cold: 0, injury: 0, poison: 0, boostT: 0, chalkT: 0 });
+  Object.assign(S, { stamina: 1, hunger: 0, cold: 0, heat: 0, injury: 0, poison: 0, drowsy: 0, bonus: 0, boostT: 0, chalkT: 0 });
+  runBadges.roasted = 0;
+  runBadges.daily = false;
   setZoom(false);
   elapsed = 0;
   stats = { falls: 0, blackouts: 0, eaten: 0, pitons: 0, ropes: 0, maxAlt: 0 };
@@ -577,6 +638,8 @@ const ZONE_SUB = {
   moss: 'Watch out for thornbrush.',
   frost: 'Keep warm. Blizzards roll in fast.',
   crown: 'Thin air and fierce gusts. The beacon is close.',
+  fungal: 'Glowing mushrooms everywhere. Puffball spores make you drowsy.',
+  canyon: 'Baking heat. Carry shade, drink coconut, mind the cacti.',
 };
 
 function renderInv() {
@@ -584,6 +647,7 @@ function renderInv() {
     el.classList.toggle('sel', i === sel);
     el.classList.toggle('full', !!inv[i]);
     el.querySelector('.ico').textContent = inv[i] ? ITEMS[inv[i]].icon : '';
+    for (let lv = 1; lv <= 3; lv++) el.classList.toggle(`cook${lv}`, cookOf(inv[i]) === lv);
   });
   const it = inv[sel] ? ITEMS[inv[sel]] : null;
   $('#invName').textContent = it ? `${it.name} · ${it.hint}` : '';
@@ -594,7 +658,7 @@ const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padSt
 const myPos = () => (P.mode === 'climb' ? climberWorldPos() : P.pos);
 
 function interact() {
-  if (P.isDown || overlayOpen()) return;
+  if (P.isDown || P.ghost || overlayOpen()) return;
   if (state === 'lobby') {
     if (P.pos.distanceTo(lobby.gate) < 3.5) { board(); return; }
     return;
@@ -623,6 +687,8 @@ function interact() {
   }
   for (const [i, c] of world.camps.entries()) {
     if (!c.lit && c.pos.distanceTo(me) < 3.6) {
+      const g = gathered(c);
+      if (g.here < g.total) { toast(`🔥 Gather the whole team at the fire to light it (${g.here}/${g.total} here).`); return; }
       if (coop.on) net.send({ t: 'camp', i }); else lightCamp(c);
       return;
     }
@@ -631,6 +697,7 @@ function interact() {
     if (coop.on) net.send({ t: 'beacon' }); else lightBeacon();
     return;
   }
+  if (roastable() && world.camps.some((c) => c.lit && c.pos.distanceTo(me) < 4)) { roast(); return; }
   const mate = coop.on && inv[sel] && P.mode === 'ground' ? giveTarget() : null;
   if (mate) {
     net.send({ t: 'give', to: mate.cid, type: inv[sel] });
@@ -650,6 +717,11 @@ function giveItem(slot, type) {
   if (type === 'compass') toastOnce('compass', '🧭 With a compass in your pack you can see which way to go.', 999);
 }
 
+/** Living climbers near a campfire (you included): all of them must be there to light it. */
+function gathered(c) {
+  const mates = coop.on ? livingMates() : [];
+  return { here: 1 + mates.filter((r) => r.pos.distanceTo(c.pos) < 12).length, total: 1 + mates.length };
+}
 function lightCamp(c, by = null, silent = false) {
   if (c.lit) return;
   c.lit = true;
@@ -658,8 +730,20 @@ function lightCamp(c, by = null, silent = false) {
   const best = world.camps.filter((k) => k.lit).sort((a, b) => b.pos.y - a.pos.y)[0];
   checkpoint = best.pos.clone().add(new V3(1.6, 0, 1.2));
   if (silent) return;
+  badges.earn('firstfire');
   sfx.ignite();
   toast(by ? `🔥 ${by} lit the ${c.band.name} campfire. Checkpoint saved.` : `🔥 Campfire lit: ${c.band.name}. Checkpoint saved.`);
+  // The fire's warmth: everyone gathered round is healed, and fallen friends come back.
+  if (P.ghost) { reviveGhostAt(c); return; }
+  if (state === 'play' && myPos().distanceTo(c.pos) < 20) {
+    if (P.isDown) revived('The campfire');
+    S.cold = 0;
+    S.injury = Math.max(0, S.injury - 0.3);
+    S.poison = Math.max(0, S.poison - 0.3);
+    S.drowsy = 0;
+    S.stamina = maxSt();
+    setTimeout(() => toast('❤️ The fire warms and heals everyone around it.'), 1200);
+  }
 }
 
 function addPiton(at) {
@@ -674,13 +758,28 @@ function addPiton(at) {
 
 function addRope(top, bottom, anchor) {
   const len = Math.max(0.5, top.y - bottom.y);
+  // A float rope is anchored at its own top, held up by balloons.
+  const float = anchor.distanceTo(top) < 0.01;
   const g = new THREE.Group();
-  const ropeMat = new THREE.MeshLambertMaterial({ color: 0xc8955a });
+  const ropeMat = new THREE.MeshLambertMaterial({ color: float ? 0xe0453a : 0xc8955a });
   const line = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, len, 6), ropeMat);
   line.position.set(top.x, (top.y + bottom.y) / 2, top.z);
-  const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.6, 6), new THREE.MeshLambertMaterial({ color: 0x8a8f99 }));
-  stake.position.set(anchor.x, anchor.y + 0.1, anchor.z);
-  g.add(line, stake);
+  g.add(line);
+  if (float) {
+    for (const [dx, dy, dz, c] of [[0, 0.9, 0, 0xff6f91], [0.35, 0.7, 0.1, 0xffd23f], [-0.3, 0.75, -0.15, 0x6fc3ff], [0.05, 1.15, -0.3, 0x7bd13b]]) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), new THREE.MeshStandardMaterial({ color: c, roughness: 0.3 }));
+      b.scale.set(1, 1.15, 1);
+      b.position.set(top.x + dx, top.y + dy, top.z + dz);
+      g.add(b);
+    }
+    const peg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.5, 6), new THREE.MeshLambertMaterial({ color: 0x8a8f99 }));
+    peg.position.set(bottom.x, bottom.y + 0.1, bottom.z);
+    g.add(peg);
+  } else {
+    const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.6, 6), new THREE.MeshLambertMaterial({ color: 0x8a8f99 }));
+    stake.position.set(anchor.x, anchor.y + 0.1, anchor.z);
+    g.add(stake);
+  }
   for (let y = top.y - 1; y > bottom.y; y -= 1.2) {
     const k = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 4), ropeMat);
     k.position.set(top.x, y, top.z);
@@ -688,7 +787,89 @@ function addRope(top, bottom, anchor) {
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = Q.shadows; });
   world.root.add(g);
-  world.ropes.push({ top: top.clone(), bottom: bottom.clone(), anchor: anchor.clone(), mesh: g });
+  world.ropes.push({ top: top.clone(), bottom: bottom.clone(), anchor: anchor.clone(), mesh: g, float });
+}
+
+// ---------------- ziplines and fungus shelves ----------------
+function addZip(a, b) {
+  const g = new THREE.Group();
+  const d = b.clone().sub(a);
+  const line = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, d.length(), 6), new THREE.MeshLambertMaterial({ color: 0x2b2c33 }));
+  line.position.copy(a).addScaledVector(d, 0.5);
+  line.quaternion.setFromUnitVectors(new V3(0, 1, 0), d.clone().normalize());
+  g.add(line);
+  for (const p of [a, b]) {
+    const hook = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 6, 14), new THREE.MeshStandardMaterial({ color: 0x3b6fd6, roughness: 0.4, metalness: 0.5 }));
+    hook.position.copy(p);
+    g.add(hook);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = Q.shadows; });
+  world.root.add(g);
+  world.zips.push({ a: a.clone(), b: b.clone(), mesh: g });
+}
+/** Where the line launcher would land: the first ground hit along the camera's aim. */
+function launcherTarget() {
+  const from = camera.position.clone(), dir = camera.getWorldDirection(new V3());
+  // Start past your own climber, so the line goes where the crosshair points.
+  for (let t = from.distanceTo(P.pos) + 1.5; t < 60; t += 0.4) {
+    const p = from.clone().addScaledVector(dir, t);
+    if (p.y <= world.T.height(p.x, p.z) + 0.05) return new V3(p.x, gy(p.x, p.z) + HAND + 0.6, p.z);
+  }
+  return null;
+}
+function tryZip() {
+  const hand = P.pos.clone(); hand.y += HAND;
+  for (const z of world.zips) {
+    const ab = z.b.clone().sub(z.a), L = ab.length();
+    const t = clamp(hand.clone().sub(z.a).dot(ab) / (L * L), 0, 0.95);
+    const q = z.a.clone().addScaledVector(ab, t);
+    if (q.distanceTo(hand) < 1.4) {
+      P.mode = 'zip'; P.zip = z; P.zipT = t; P.zipV = 2.5; P.vel.set(0, 0, 0);
+      sfx.rope();
+      return true;
+    }
+  }
+  return false;
+}
+function addShelf(p, nx, nz, life = 90) {
+  const g = new THREE.Group();
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xc98a4a, roughness: 0.8 }));
+  cap.scale.set(1, 0.22, 1);
+  const gills = new THREE.Mesh(new THREE.CircleGeometry(0.93, 20), new THREE.MeshStandardMaterial({ color: 0xf1e0c0, roughness: 0.9, side: THREE.DoubleSide }));
+  gills.rotation.x = Math.PI / 2;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.93, 0.05, 6, 24), new THREE.MeshStandardMaterial({ color: 0xf2c33b, roughness: 0.7 }));
+  rim.rotation.x = Math.PI / 2;
+  g.add(cap, gills, rim);
+  g.position.set(p.x, p.y - 0.2, p.z);
+  g.rotation.y = Math.atan2(nx, nz);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = Q.shadows; o.receiveShadow = Q.shadows; } });
+  g.scale.setScalar(0.05);
+  world.root.add(g);
+  world.shelves.push({ x: p.x, y: p.y, z: p.z, r: 0.85, life, mesh: g });
+}
+/** Grow new shelves in, wither old ones away. */
+function updateGear(dt) {
+  for (let i = world.shelves.length - 1; i >= 0; i--) {
+    const sh = world.shelves[i];
+    sh.life -= dt;
+    const grow = Math.min(1, (90 - sh.life) * 3 + 0.05);
+    sh.mesh.scale.setScalar(Math.max(0.01, Math.min(grow, sh.life / 3)));
+    if (sh.life <= 0) { world.root.remove(sh.mesh); world.shelves.splice(i, 1); }
+  }
+}
+/** Where a fungus shelf would grow: on the wall in front of you, or under your feet while climbing. */
+function shelfSpot() {
+  const T = world.T;
+  if (P.mode === 'climb') {
+    const n = T.normal(P.cx, P.cz, new V3());
+    const h = new V3(n.x, 0, n.z).normalize();
+    const feet = climberWorldPos().y - 0.15;
+    return { p: new V3(P.cx + h.x * 0.85, feet, P.cz + h.z * 0.85), n: h };
+  }
+  const v = findVineBase();
+  if (!v) return null;
+  const out = v.dir.clone().negate();
+  return { p: new V3(v.base.x + out.x * 0.75, P.pos.y + 1.05, v.base.z + out.z * 0.75), n: out };
 }
 
 function addFlare(p) {
@@ -722,24 +903,47 @@ function findRopeEdge() {
   return null;
 }
 
+/** The selected item can go over the fire one more step. */
+const roastable = () => { const t = inv[sel]; return !!t && ITEMS[t].food && !ITEMS[t].noCook && cookOf(t) < 3; };
+function roast() {
+  const t = inv[sel], lv = cookOf(t) + 1;
+  inv[sel] = `${baseOf(t)}@${lv}`;
+  renderInv();
+  sfx.whoosh();
+  toast(['', '🔥 Roasted! Worth much more now (F to eat).', 'Roasted again… overdone, back to ordinary.', '🔥 Burnt to a crisp! Eating that would make you sick.'][lv]);
+}
+
 function useItem() {
   if (state === 'lobby' && inv[sel] === 'passport') { if (overlayOpen()) closePassport(); else openPassport(); return; }
-  if (state !== 'play' || P.isDown || P.wakeT > 0) return;
+  if (state !== 'play' || P.isDown || P.ghost || P.wakeT > 0) return;
   const t = inv[sel];
   if (!t) return;
   let used = true;
-  // Food cooked over a lit campfire is worth half as much again.
-  const cooking = ITEMS[t].food && world.camps.some((c) => c.lit && c.pos.distanceTo(myPos()) < 4);
-  const feed = (ITEMS[t].feed || 0) * (cooking ? 1.5 : 1);
-  if (t === 'berry') { S.hunger = Math.max(0, S.hunger - feed); toast(cooking ? 'Warm stewed berries. Lovely.' : 'Tart and juicy. Hunger down.'); }
-  else if (t === 'ration') { S.hunger = Math.max(0, S.hunger - feed); toast(cooking ? 'A hot trail meal. Much better.' : 'Chewy but filling.'); }
-  else if (t === 'marshmallow') {
-    if (cooking) { S.hunger = Math.max(0, S.hunger - 0.3); S.injury = Math.max(0, S.injury - 0.05); S.stamina = maxSt(); toast('🔥 Golden and gooey! Big snack, full stamina.'); }
-    else { S.hunger = Math.max(0, S.hunger - feed); toast('Squishy… better roasted at a campfire.'); }
-  } else if (t === 'mushroom') {
-    if (cooking || Math.random() < 0.7) { S.hunger = Math.max(0, S.hunger - feed); S.stamina = maxSt(); toast(cooking ? 'Fire-roasted glowcap: safe and tasty. Stamina restored!' : 'The glowcap tingles. Stamina restored!'); }
-    else { S.poison = Math.min(0.6, S.poison + 0.22); sfx.hurt(); toast('🤢 Ugh. You feel poisoned… a bandage helps.'); }
-  } else if (t === 'bandage') { S.injury = Math.max(0, S.injury - 0.3); S.poison = Math.max(0, S.poison - 0.15); toast('Patched up.'); }
+  const lv = cookOf(t), b = baseOf(t);
+  const feed = (ITEMS[t].feed || 0) * [1, 1.66, 1, 0.3][lv];
+  if (ITEMS[t].food && lv === 3) {
+    S.hunger = Math.max(0, S.hunger - feed);
+    S.poison = Math.min(0.6, S.poison + 0.18);
+    sfx.hurt();
+    toast('🤢 Burnt to a crisp… and it made you sick.');
+  } else if (b === 'berry') { S.hunger = Math.max(0, S.hunger - feed); toast(lv === 1 ? 'Warm stewed berries. Lovely.' : 'Tart and juicy. Hunger down.'); }
+  else if (b === 'ration') { S.hunger = Math.max(0, S.hunger - feed); toast(lv === 1 ? 'A hot trail meal. Much better.' : 'Chewy but filling.'); }
+  else if (b === 'coconut') { S.hunger = Math.max(0, S.hunger - feed); S.heat = Math.max(0, S.heat - 0.25); S.stamina = Math.min(maxSt(), S.stamina + 0.15); toast(lv === 1 ? 'Toasty coconut. Delicious.' : 'Coconut water! Refreshing.'); }
+  else if (b === 'honey') { S.hunger = Math.max(0, S.hunger - feed); addBonus(0.45); S.stamina = maxSt(); toast('🍯 Sweet! A big burst of bonus stamina (gold).'); }
+  else if (b === 'marshmallow') {
+    if (lv === 1) { S.hunger = Math.max(0, S.hunger - 0.3); S.injury = Math.max(0, S.injury - 0.05); S.stamina = maxSt(); addBonus(0.3); toast('🔥 Golden and gooey! Full stamina plus bonus.'); }
+    else { S.hunger = Math.max(0, S.hunger - feed); toast(lv === 2 ? 'A bit charred, still sweet.' : 'Squishy… better roasted at a campfire.'); }
+  } else if (b === 'mushroom') {
+    const roll = Math.random();
+    if (lv >= 1 || roll < 0.7) { S.hunger = Math.max(0, S.hunger - feed); S.stamina = maxSt(); toast(lv === 1 ? 'Fire-roasted glowcap: safe and tasty. Stamina restored!' : 'The glowcap tingles. Stamina restored!'); }
+    else if (roll < 0.9) { S.poison = Math.min(0.6, S.poison + 0.22); sfx.hurt(); toast('🤢 Ugh. You feel poisoned… a bandage helps.'); }
+    else { S.drowsy = Math.min(0.5, S.drowsy + 0.25); toast('😪 That one makes you sleepy… rest by a fire.'); }
+  }
+  if (ITEMS[t].food && lv === 1 && b !== 'marshmallow' && b !== 'honey') addBonus(0.08);
+  if (ITEMS[t].food && lv === 1 && ++runBadges.roasted >= 3) badges.earn('gourmet');
+  if (ITEMS[t].food && lv === 3) badges.earn('burnt');
+  if (b === 'honey') badges.earn('sweet');
+  if (t === 'bandage') { S.injury = Math.max(0, S.injury - 0.3); S.poison = Math.max(0, S.poison - 0.15); toast('Patched up.'); }
   else if (t === 'medkit') { S.injury = Math.max(0, S.injury - 0.6); S.poison = 0; S.cold = Math.max(0, S.cold - 0.15); toast('Bandaged, splinted and cured.'); }
   else if (t === 'chalk') { S.chalkT = 45; toast('👝 Chalked up! Climbing costs less stamina for 45 s.'); }
   else if (t === 'binoculars') { setZoom(!zoomed); used = false; }
@@ -763,7 +967,7 @@ function useItem() {
     }
   }
   else if (t === 'warmer') { S.cold = Math.max(0, S.cold - 0.4); toast('Toasty fingers.'); }
-  else if (t === 'tonic') { S.stamina = maxSt(); S.boostT = 9; toast('Fizz! No stamina drain for a few seconds.'); }
+  else if (t === 'tonic') { S.stamina = maxSt(); S.boostT = 11; toast('🧃 Fizz! No stamina drain and a faster sprint for 11 s… then a crash.'); }
   else if (t === 'compass') { toast('🧭 The compass shows the way at the top of the screen while you carry it.'); used = false; }
   else if (t === 'piton') {
     if (P.mode !== 'climb') { toast('Pitons go into a rock wall: use one while climbing.'); used = false; }
@@ -783,9 +987,46 @@ function useItem() {
       addRope(edge.top, edge.bottom, edge.anchor);
       if (coop.on) net.send({ t: 'rope', top: edge.top.toArray(), bottom: edge.bottom.toArray(), a: edge.anchor.toArray() });
       stats.ropes++;
+      if (stats.ropes >= 5) badges.earn('ropes');
       sfx.rope();
       toast('🪢 Rope hung! Anyone can climb it for very little stamina.');
     }
+  } else if (t === 'floatrope') {
+    if (P.mode !== 'ground') { toast('Set a float rope down on solid ground.'); used = false; }
+    else {
+      const bottom = new V3(P.pos.x + Math.sin(P.facing) * 0.6, 0, P.pos.z + Math.cos(P.facing) * 0.6);
+      bottom.y = gy(bottom.x, bottom.z);
+      const top = bottom.clone(); top.y += 12;
+      addRope(top, bottom, top);
+      if (coop.on) net.send({ t: 'rope', top: top.toArray(), bottom: bottom.toArray(), a: top.toArray() });
+      stats.ropes++;
+      sfx.rope();
+      toast('🪁 Up it goes! A float rope rises 12 m into the air.');
+    }
+  } else if (t === 'launcher') {
+    const target = P.mode === 'ground' ? launcherTarget() : null;
+    const a = P.pos.clone(); a.y += HAND + 0.25;
+    const ok = target && target.y < a.y + 0.5 && Math.hypot(target.x - a.x, target.z - a.z) > 4;
+    if (!ok) { toast(P.mode !== 'ground' ? 'Stand on solid ground to fire the launcher.' : 'Aim at the ground somewhere below you (4 to 45 m away).'); used = false; }
+    else {
+      addZip(a, target);
+      if (coop.on) net.send({ t: 'zip', a: a.toArray(), b: target.toArray() });
+      sfx.whoosh();
+      toast('🏹 Zipline! Hold on and slide; jump to let go.');
+      tryZip();
+    }
+  } else if (t === 'shelf') {
+    const spot = shelfSpot();
+    if (!spot) { toast('Face a rock wall up close (or use it while climbing).'); used = false; }
+    else {
+      addShelf(spot.p, spot.n.x, spot.n.z);
+      if (coop.on) net.send({ t: 'shelf', p: spot.p.toArray(), n: [spot.n.x, spot.n.z] });
+      sfx.rope();
+      toast('🍄 A shelf fungus sprouts from the rock. It will hold you for a minute and a half.');
+    }
+  } else if (t === 'umbrella' || t === 'balloons') {
+    used = false;
+    toast(t === 'umbrella' ? '☂️ Keep it in your hand: falls become gentle floats.' : '🎈 Keep them in your hand: jump higher and drift down.');
   } else if (t === 'flare') {
     if (P.mode !== 'ground') { toast('Plant a flare on solid ground.'); used = false; }
     else {
@@ -797,7 +1038,7 @@ function useItem() {
     }
   }
   if (!used) return;
-  if (ITEMS[t].food) { stats.eaten++; sfx.eat(); } else if (!['piton', 'rope', 'flare', 'bean'].includes(t)) sfx.pickup();
+  if (ITEMS[t].food) { stats.eaten++; sfx.eat(); } else if (!['piton', 'rope', 'flare', 'bean', 'floatrope', 'launcher', 'shelf'].includes(t)) sfx.pickup();
   inv[sel] = null;
   renderInv();
 }
@@ -1077,7 +1318,7 @@ function tryGrab(dx, dz, handY) {
 function tryRope() {
   for (const r of world.ropes) {
     // Standing by the stake at the top: swing onto the rope and start climbing down.
-    if (P.mode === 'ground' && Math.hypot(P.pos.x - r.anchor.x, P.pos.z - r.anchor.z) < 3 && Math.abs(P.pos.y - r.anchor.y) < 1.2) {
+    if (!r.float && P.mode === 'ground' && Math.hypot(P.pos.x - r.anchor.x, P.pos.z - r.anchor.z) < 3 && Math.abs(P.pos.y - r.anchor.y) < 1.2) {
       P.mode = 'rope';
       P.rope = r;
       P.ropeY = r.top.y;
@@ -1101,7 +1342,11 @@ function tryRope() {
 
 function release(msg) {
   const T = world.T;
-  if (P.mode === 'rope') {
+  if (P.mode === 'zip') {
+    const d = P.zip.b.clone().sub(P.zip.a).normalize();
+    P.vel.copy(d).multiplyScalar(P.zipV * 0.6);
+    P.zip = null;
+  } else if (P.mode === 'rope') {
     P.pos.set(P.rope.top.x - Math.sin(P.facing) * 0.4, P.ropeY - HAND, P.rope.top.z - Math.cos(P.facing) * 0.4);
     P.vel.set(-Math.sin(P.facing) * 1.5, 0, -Math.cos(P.facing) * 1.5);
     P.rope = null;
@@ -1121,6 +1366,9 @@ function release(msg) {
 }
 
 function land(impact) {
+  if (P.floated && (P.fallTop ?? P.pos.y) - P.pos.y >= 20) badges.earn('feather');
+  P.floated = false;
+  P.fallTop = undefined;
   P.mode = 'ground';
   P.vel.y = 0;
   P.hv.set(P.vel.x * 0.5, 0, P.vel.z * 0.5);
@@ -1132,7 +1380,7 @@ function land(impact) {
   if (impact > 3) climber.userData.squash = Math.min(1, impact / 16); // knees soak up the landing
   if (impact > 36) { sfx.land(true); stats.falls++; if (!P.isDown) blackout('You fell too far…'); return; }
   if (impact > 13.5) {
-    const dmg = (impact - 13.5) * 0.028;
+    const dmg = (impact - 13.5) * 0.028 * D().fall;
     // A long tumble or a very hard landing knocks you flat for a moment.
     if (tumbled || impact > 22) { P.wakeT = Math.max(P.wakeT, 1.3); P.hv.set(0, 0, 0); }
     S.injury = Math.min(1, S.injury + dmg);
@@ -1176,8 +1424,14 @@ function updateLobbyPlayer(dt) {
 let shake = 0;
 function updatePlayer(dt) {
   const T = world.T;
+  if (P.ghost) { updateGhost(dt); return; }
+  if (P.mode !== 'ground') {
+    const yNow = P.mode === 'climb' ? T.height(P.cx, P.cz) : P.pos.y;
+    if (runBadges.liftY === null) runBadges.liftY = yNow;
+    else if (yNow - runBadges.liftY >= 50) badges.earn('nohands');
+  }
   if (P.isDown && (P.mode === 'climb' || P.mode === 'rope')) release();
-  if ((P.isDown || P.wakeT > 0) && P.mode === 'ground') { if (!P.carriedBy) P.pos.y = gy(P.pos.x, P.pos.z); P.moveAmt = 0; return; }
+  if ((P.isDown || P.wakeT > 0) && P.mode === 'ground') { if (!P.carriedBy) P.pos.y = floorAt(P.pos.x, P.pos.z, P.pos.y); P.moveAmt = 0; return; }
   const inp = inputVec(P.mode === 'ground');
   const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
   const right = new V3(Math.cos(camYaw), 0, -Math.sin(camYaw));
@@ -1187,7 +1441,11 @@ function updatePlayer(dt) {
   const thin = band.id === 'crown';
   P.regrabLock = Math.max(0, P.regrabLock - dt);
   P.lungeT = Math.max(0, P.lungeT - dt);
-  S.boostT = Math.max(0, S.boostT - dt);
+  const st0 = S.stamina;
+  if (S.boostT > 0) {
+    S.boostT = Math.max(0, S.boostT - dt);
+    if (S.boostT === 0) { S.drowsy = Math.min(0.5, S.drowsy + 0.25); toast('😪 The fizz wears off… you feel drowsy. Rest by a fire.'); }
+  }
   const drain = (r) => { if (S.boostT <= 0) S.stamina = Math.max(0, S.stamina - r * dt); };
   // Jump buffering: a press shortly before landing still counts.
   if (jumpPressed) P.jumpBuf = 0.15; else P.jumpBuf = Math.max(0, P.jumpBuf - dt);
@@ -1195,17 +1453,28 @@ function updatePlayer(dt) {
   const jump = P.jumpBuf > 0;
   const jumpHeld = keys.has('Space') || !!touch;
   P.running = false;
+  if (P.mode !== 'ground') P.crouch = false;
   if (P.mode !== 'air') P.tumble = false;
   let moving = false;
 
   if (P.mode === 'ground') {
-    const n = T.normal(P.pos.x, P.pos.z, tmpN);
-    P.swimming = T.height(P.pos.x, P.pos.z) < -0.8;
+    // A shelf that has withered away (or was never there) leaves you in the air.
+    const under = floorAt(P.pos.x, P.pos.z, P.pos.y);
+    if (P.pos.y - under > 0.45) { P.mode = 'air'; P.vel.set(P.hv.x, 0, P.hv.z); P.peakY = P.pos.y; }
+  }
+  if (P.mode === 'ground') {
+    const onShelf = P.pos.y > gy(P.pos.x, P.pos.z) + 0.2;
+    if (onShelf && world.shelves.length) badges.earn('fungus');
+    runBadges.liftY = null; // back on solid footing
+    const n = onShelf ? tmpN.set(0, 1, 0) : T.normal(P.pos.x, P.pos.z, tmpN);
+    P.swimming = !onShelf && T.height(P.pos.x, P.pos.z) < -0.8;
     const running = sprintHeld() && S.stamina > 0.02 && mlen > 0.1 && !P.swimming;
-    let speed = running ? SPRINT : WALK;
+    let speed = running ? SPRINT * (S.boostT > 0 ? 1.22 : 1) : WALK;
     if (P.swimming) speed *= 0.55;
     if (coop.carrying) speed *= 0.7;
     P.running = running;
+    // Crouch (X, or the touch button) while standing still: a friend can jump off you for a boost.
+    P.crouch = (keys.has('KeyX') || !!touch?.crouch) && mlen < 0.1 && !P.swimming && !onShelf;
     if (n.y < 0.6 && !P.swimming) {
       const d = new V3(n.x, 0, n.z).normalize();
       P.pos.x += d.x * 6 * dt;
@@ -1225,7 +1494,7 @@ function updatePlayer(dt) {
         let blocked = false;
         const tryStep = (dx, dz) => {
           const nx = clamp(P.pos.x + dx, -HALF + 2, HALF - 2), nz = clamp(P.pos.z + dz, -HALF + 2, HALF - 2);
-          const g = gy(nx, nz);
+          const g = floorAt(nx, nz, P.pos.y);
           const len = Math.hypot(dx, dz);
           if (g - P.pos.y > Math.max(0.3, len * 1.4)) return false;
           P.pos.x = nx; P.pos.z = nz;
@@ -1241,12 +1510,15 @@ function updatePlayer(dt) {
       } else P.hv.set(0, 0, 0);
     }
     if (P.mode === 'ground' && grabHeld() && P.regrabLock <= 0) {
-      tryRope() || tryGrab(Math.sin(P.facing), Math.cos(P.facing), P.pos.y + HAND) || tryGrab(fwd.x, fwd.z, P.pos.y + HAND);
+      tryRope() || tryZip() || tryGrab(Math.sin(P.facing), Math.cos(P.facing), P.pos.y + HAND) || tryGrab(fwd.x, fwd.z, P.pos.y + HAND);
     }
     if (P.mode === 'ground') {
       if (jump && S.stamina >= 0.06 && !P.swimming) {
+        // A friend crouching right here gives you a leg-up.
+        const booster = coop.on ? [...coop.remotes.values()].find((r) => r.st?.m === 'crouch' && Math.hypot(r.pos.x - P.pos.x, r.pos.z - P.pos.z) < 1.2 && Math.abs(r.pos.y - P.pos.y) < 0.8) : null;
+        if (booster) { toast(`🦵 ${booster.name} boosts you up!`); sfx.whoosh(); badges.earn('liftoff'); }
         P.mode = 'air';
-        P.vel.set(P.hv.x, JUMP, P.hv.z);
+        P.vel.set(P.hv.x, JUMP * (inv[sel] === 'balloons' ? 1.4 : 1) * (booster ? 1.7 : 1), P.hv.z);
         P.jumped = true;
         P.jumpBuf = 0;
         P.coyote = 0;
@@ -1273,8 +1545,17 @@ function updatePlayer(dt) {
       P.vel.y = JUMP; P.coyote = 0; P.jumpBuf = 0; P.jumped = true; S.stamina -= 0.06; P.peakY = P.pos.y;
     }
     // Falling pulls harder than rising; letting go of jump early cuts the jump short.
-    const gScale = P.vel.y < 0 ? 1.3 : P.jumped && !jumpHeld ? 2.2 : 1;
+    const holding = inv[sel];
+    const gScale = (P.vel.y < 0 ? 1.3 : P.jumped && !jumpHeld ? 2.2 : 1) * (holding === 'balloons' ? 0.55 : 1);
     P.vel.y = Math.max(-40, P.vel.y - G * gScale * dt);
+    // Umbrella and balloons: drift down gently, and a gentle descent never hurts.
+    const slowFall = holding === 'umbrella' ? -3.2 : holding === 'balloons' ? -1.8 : null;
+    P.fallTop = Math.max(P.fallTop ?? P.pos.y, P.pos.y);
+    if (slowFall !== null && P.vel.y < slowFall) { P.vel.y = slowFall; P.peakY = P.pos.y; P.tumble = false; P.floated = true; }
+    if (holding === 'balloons') {
+      P.balloonT = (P.balloonT || 0) + dt;
+      if (P.balloonT > 30) { inv[sel] = null; P.balloonT = 0; renderInv(); sfx.hurt(); toast('💥 Pop! Your balloons burst.'); }
+    }
     if (!P.tumble && P.peakY - P.pos.y > 7) P.tumble = true;
     P.vel.x += move.x * 5 * dt;
     P.vel.z += move.z * 5 * dt;
@@ -1282,9 +1563,10 @@ function updatePlayer(dt) {
     if (hs > SPRINT) { P.vel.x *= SPRINT / hs; P.vel.z *= SPRINT / hs; }
     const nx = clamp(P.pos.x + P.vel.x * dt, -HALF + 2, HALF - 2), nz = clamp(P.pos.z + P.vel.z * dt, -HALF + 2, HALF - 2);
     if (gy(nx, nz) > P.pos.y + 0.6) { P.vel.x = 0; P.vel.z = 0; } else { P.pos.x = nx; P.pos.z = nz; }
+    const yPrev = P.pos.y;
     P.pos.y += P.vel.y * dt;
     P.peakY = Math.max(P.peakY, P.pos.y);
-    const g = gy(P.pos.x, P.pos.z);
+    const g = floorAt(P.pos.x, P.pos.z, yPrev);
     if (P.pos.y <= g) {
       P.pos.y = g;
       const wet = T.height(P.pos.x, P.pos.z) < -0.8;
@@ -1292,11 +1574,23 @@ function updatePlayer(dt) {
     } else if (!P.isDown && grabHeld() && P.regrabLock <= 0 && S.stamina > 0.03 && -P.vel.y < 18) {
       const hy = P.pos.y + HAND;
       const toPeak = new V3(world.T.summit.x - P.pos.x, 0, world.T.summit.z - P.pos.z);
-      if (tryRope() || tryGrab(Math.sin(P.facing), Math.cos(P.facing), hy) || tryGrab(fwd.x, fwd.z, hy) || tryGrab(toPeak.x, toPeak.z, hy)) {
+      if (tryRope() || tryZip() || tryGrab(Math.sin(P.facing), Math.cos(P.facing), hy) || tryGrab(fwd.x, fwd.z, hy) || tryGrab(toPeak.x, toPeak.z, hy)) {
         S.stamina = Math.max(0, S.stamina - 0.08);
         toastOnce('catch', 'Caught it!', 4);
       }
     }
+  } else if (P.mode === 'zip') {
+    // Slide down the line: gravity speeds you up on a steep line; jump (or the end) lets go.
+    const z = P.zip, ab = z.b.clone().sub(z.a), L = ab.length();
+    const slope = -ab.y / L;
+    P.zipV = clamp(P.zipV + (G * slope * 0.7 - 0.4) * dt, 2.5, 15);
+    P.zipT += (P.zipV * dt) / L;
+    P.facing = Math.atan2(ab.x, ab.z);
+    moving = true;
+    const hand = z.a.clone().addScaledVector(ab, Math.min(1, P.zipT));
+    P.pos.set(hand.x, hand.y - HAND - 0.25, hand.z);
+    if (P.zipT >= 1 && L >= 30) badges.earn('zip');
+    if (jump || P.zipT >= 1 || P.pos.y < gy(P.pos.x, P.pos.z)) { P.jumpBuf = 0; release(); P.pos.y = Math.max(P.pos.y, gy(P.pos.x, P.pos.z)); return; }
   } else if (P.mode === 'rope') {
     const r = P.rope;
     if (!grabHeld()) { release(); return; }
@@ -1307,8 +1601,9 @@ function updatePlayer(dt) {
     P.ropeY += iy * 2.4 * dt;
     if (moving && iy > 0) drain(0.016);
     else if (!moving) S.stamina += 0.05 * dt;
-    P.facing = Math.atan2(r.anchor.x - r.top.x, r.anchor.z - r.top.z);
-    if (P.ropeY >= r.top.y + 0.2) {
+    if (r.float) P.ropeY = Math.min(P.ropeY, r.top.y - 0.15);
+    else P.facing = Math.atan2(r.anchor.x - r.top.x, r.anchor.z - r.top.z);
+    if (!r.float && P.ropeY >= r.top.y + 0.2) {
       P.mode = 'ground';
       P.pos.set(r.anchor.x, gy(r.anchor.x, r.anchor.z), r.anchor.z);
       P.rope = null;
@@ -1364,12 +1659,16 @@ function updatePlayer(dt) {
       if (onVine(here)) { rate *= 0.25; showStatus.vine = true; }
       if (gust.on && thin) rate += 0.08 * gust.k;
       if (band.id === 'frost' && S.cold > 0.3) rate *= 1.15;
+      if (band.id === 'canyon' && S.heat > 0.3) rate *= 1.15;
       if (band.id === 'moss' && rain.k > 0.3) rate *= 1.3;
       drain(rate);
     }
     P.regenDelay = 0.6;
     if (moving) { P.stepAcc += spd * dt; if (P.stepAcc > 0.9) { P.stepAcc = 0; sfx.grab(); } }
   }
+  // Anything spent this step comes out of the bonus reserve first.
+  const spent = st0 - S.stamina;
+  if (spent > 0 && S.bonus > 0) { const r = Math.min(spent, S.bonus); S.bonus -= r; S.stamina += r; }
   S.stamina = Math.min(S.stamina, maxSt());
   P.moveAmt = moving ? (P.mode === 'ground' ? mlen : 1) : 0;
   P.anim += dt * (moving ? (P.mode === 'climb' || P.mode === 'rope' ? 6 : mlen * (sprintHeld() ? 13 : 9)) : 0);
@@ -1394,6 +1693,7 @@ function lerpAngle(a, b, t) {
 // ---------------- survival, hazards, events ----------------
 const showStatus = {};
 function updateSurvival(dt) {
+  if (P.ghost) { $('#downbox').classList.add('hidden'); return; }
   if (P.isDown && P.carriedBy) {
     const r = coop.remotes.get(P.carriedBy);
     if (!r) { P.carriedBy = null; }
@@ -1415,29 +1715,50 @@ function updateSurvival(dt) {
   const y = P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y;
   const band = bandAt(y);
   if (band !== lastBand && P.wakeT <= 0) {
-    if (lastBand && BANDS.indexOf(band) > BANDS.indexOf(lastBand)) { zoneCard(band.name, ZONE_SUB[band.id]); sfx.ding(); }
+    if (lastBand && BANDS.indexOf(band) > BANDS.indexOf(lastBand)) { zoneCard(band.name, ZONE_SUB[band.id]); sfx.ding(); if (band.id === 'frost' || band.id === 'canyon') badges.earn('frostline'); }
     lastBand = band;
   }
   stats.maxAlt = Math.max(stats.maxAlt, y);
-  S.hunger = Math.min(1, S.hunger + dt / (band.id === 'crown' ? 620 : 800));
+  S.hunger = Math.min(1, S.hunger + (D().hunger * dt) / (band.id === 'crown' ? 620 : 800));
   S.poison = Math.max(0, S.poison - 0.004 * dt);
   S.chalkT = Math.max(0, S.chalkT - dt);
   const lantern = inv.includes('lantern') ? 0.4 : 1;
   const me = myPos();
   const nearFire = world.camps.some((c) => c.lit && c.pos.distanceTo(me) < 7);
   showStatus.fire = nearFire;
+  S.drowsy = Math.max(0, S.drowsy - (nearFire ? 0.05 : 0.004) * dt);
+  // Red Canyon: the sun bakes you unless you carry shade (an umbrella in hand); it fades elsewhere.
+  if (band.id === 'canyon' && !nearFire) S.heat = Math.min(0.6, S.heat + 0.0045 * (inv[sel] === 'umbrella' ? 0.25 : 1) * D().cold * dt);
+  else S.heat = Math.max(0, S.heat - 0.03 * dt);
+  showStatus.cactus = false;
+  if (band.id === 'canyon' && P.mode === 'ground') {
+    for (const c of world.cacti) {
+      if (Math.hypot(P.pos.x - c.x, P.pos.z - c.z) < c.r + 0.45 && Math.abs(P.pos.y - c.y) < 3) {
+        S.injury = Math.min(1, S.injury + 0.06 * dt);
+        showStatus.cactus = true;
+        toastOnce('cactus', '🌵 Ouch! Cactus spines.', 5);
+      }
+    }
+  }
   if (nearFire) { S.cold = Math.max(0, S.cold - 0.1 * dt); S.injury = Math.max(0, S.injury - 0.006 * dt); }
-  else if (band.id === 'frost') S.cold = Math.min(1, S.cold + (blizzard.on ? 0.013 : 0.0045) * lantern * dt);
-  else if (band.id === 'crown') S.cold = Math.min(1, S.cold + 0.0028 * lantern * dt);
+  else if (band.id === 'frost') S.cold = Math.min(1, S.cold + (blizzard.on ? 0.013 : 0.0045) * lantern * D().cold * dt);
+  else if (band.id === 'crown') S.cold = Math.min(1, S.cold + 0.0028 * lantern * D().cold * dt);
   else S.cold = Math.max(0, S.cold - 0.02 * dt);
 
   showStatus.thorns = false;
-  if (P.mode === 'ground' && band.id === 'moss') {
+  showStatus.spores = false;
+  if (P.mode === 'ground' && (band.id === 'moss' || band.id === 'fungal')) {
     for (const t of world.thorns) {
       if (Math.hypot(P.pos.x - t.pos.x, P.pos.z - t.pos.z) < t.r && Math.abs(P.pos.y - t.pos.y) < 2) {
-        S.injury = Math.min(1, S.injury + 0.05 * dt);
-        showStatus.thorns = true;
-        toastOnce('thorn', 'Thornbrush! Get out of it.', 5);
+        if (band.id === 'fungal') {
+          S.drowsy = Math.min(0.5, S.drowsy + 0.04 * dt);
+          showStatus.spores = true;
+          toastOnce('spore', '🍄 Puffball spores! You feel drowsy.', 5);
+        } else {
+          S.injury = Math.min(1, S.injury + 0.05 * dt);
+          showStatus.thorns = true;
+          toastOnce('thorn', 'Thornbrush! Get out of it.', 5);
+        }
       }
     }
   }
@@ -1481,7 +1802,7 @@ function blackout(msg) {
   stats.blackouts++;
   if (coop.on && coop.remotes.size > 0) {
     P.isDown = true;
-    P.downT = 25;
+    P.downT = D().downT;
     sfx.blackout();
     toast(msg);
     net.send({ t: 'down' });
@@ -1496,7 +1817,66 @@ function giveUp() {
   P.carriedBy = null;
   $('#downbox').classList.add('hidden');
   net.send({ t: 'up' });
+  // With friends still climbing, you drift along as a ghost until they light the next campfire.
+  if (coop.on && livingMates().length && !D().noGhost) { becomeGhost(); return; }
   respawnAtCamp('Everything goes dark…');
+}
+const livingMates = () => [...coop.remotes.values()].filter((r) => r.st && r.st.m !== 'down' && r.st.m !== 'ghost');
+/** See-through and pale: how ghosts look (to everyone). */
+function setGhostly(model, on) {
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.userData.outline) { o.visible = !on; return; }
+    const m = o.material;
+    if (m.userData.ghostBase === undefined) m.userData.ghostBase = { t: m.transparent, o: m.opacity, e: m.emissive ? m.emissive.getHex() : null };
+    const b = m.userData.ghostBase;
+    m.transparent = on ? true : b.t;
+    m.opacity = on ? 0.38 : b.o;
+    m.depthWrite = !on;
+    if (m.emissive) m.emissive.setHex(on ? 0x6f8fd0 : b.e);
+    m.needsUpdate = true;
+  });
+}
+function becomeGhost() {
+  P.ghost = true;
+  P.ghostAlone = 0;
+  P.mode = 'ground';
+  P.vel.set(0, 0, 0);
+  P.hv.set(0, 0, 0);
+  inv.fill(null);
+  renderInv();
+  setGhostly(climber, true);
+  sfx.blackout();
+  toast('👻 You are a ghost. Float along with your team: lighting the next campfire brings you back.');
+}
+function reviveGhostAt(c) {
+  if (!P.ghost) return;
+  P.ghost = false;
+  setGhostly(climber, false);
+  S.cold = 0; S.poison = 0; S.drowsy = 0;
+  S.injury = Math.min(S.injury, 0.2);
+  S.hunger = Math.min(S.hunger, 0.4);
+  teleport(c.pos.clone().add(new V3(1.4, 0, -1.2)));
+  S.stamina = maxSt();
+  sfx.pickup();
+  badges.earn('second');
+  toast('🔥 The campfire brings you back to life!');
+}
+function updateGhost(dt) {
+  const inp = inputVec(false);
+  const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  const right = new V3(Math.cos(camYaw), 0, -Math.sin(camYaw));
+  const move = fwd.multiplyScalar(inp.y).addScaledVector(right, inp.x);
+  const up = (keys.has('Space') || (touch && touch.jumpHeld) ? 1 : 0) - (keys.has('KeyX') || touch?.crouch ? 1 : 0);
+  P.pos.x = clamp(P.pos.x + move.x * 6.5 * dt, -HALF + 2, HALF - 2);
+  P.pos.z = clamp(P.pos.z + move.z * 6.5 * dt, -HALF + 2, HALF - 2);
+  const g = gy(P.pos.x, P.pos.z);
+  P.pos.y = clamp(P.pos.y + up * 5 * dt, g + 0.4, g + 40);
+  if (move.lengthSq() > 0.01) P.facing = lerpAngle(P.facing, Math.atan2(move.x, move.z), 1 - Math.exp(-8 * dt));
+  P.moveAmt = 0;
+  // Nobody left climbing: the whole team wakes at the last campfire.
+  P.ghostAlone = livingMates().length ? 0 : (P.ghostAlone || 0) + dt;
+  if (P.ghostAlone > 4) { P.ghost = false; setGhostly(climber, false); respawnAtCamp('The whole team is down…'); }
 }
 function revived(byName) {
   if (!P.isDown) return;
@@ -1543,6 +1923,11 @@ function lightBeacon(by = null) {
   world.beacon.flame.visible = true;
   world.beacon.flagMat.color.setHex(0xff7a29);
   sfx.win();
+  badges.earn('summit');
+  if (!coop.on || coop.remotes.size === 0) badges.earn('solo');
+  if (elapsed < 25 * 60) badges.earn('speedy');
+  if (runBadges.daily) badges.earn('daily');
+  if (diff === 4) badges.earn('hardrock');
   P.isDown = false;
   $('#downbox').classList.add('hidden');
   $('#pause').classList.add('hidden');
@@ -1769,14 +2154,15 @@ function updateScene(dt, now) {
     const pm = world.particles.material;
     const embers = band.id === 'crown' && onIsland();
     const raining = band.id === 'moss' && rain.k > 0.05 && onIsland();
-    const want = !onIsland() ? 0 : band.id === 'frost' ? 0.35 + blizzard.k * 0.6 : embers ? 0.6 : raining ? 0.65 * rain.k : 0;
+    const sporey = band.id === 'fungal', dusty = band.id === 'canyon';
+    const want = !onIsland() ? 0 : band.id === 'frost' ? 0.35 + blizzard.k * 0.6 : embers ? 0.6 : raining ? 0.65 * rain.k : sporey ? 0.55 : dusty ? 0.35 : 0;
     pm.opacity += (want - pm.opacity) * Math.min(1, dt * 2);
-    pm.color.setHex(embers ? 0xff9a4a : raining ? 0xa9c2d8 : 0xffffff);
-    pm.size = embers ? 0.12 : raining ? 0.09 : 0.18;
+    pm.color.setHex(embers ? 0xff9a4a : raining ? 0xa9c2d8 : sporey ? 0xc9a8ff : dusty ? 0xe8b27a : 0xffffff);
+    pm.size = embers ? 0.12 : raining ? 0.09 : sporey ? 0.14 : dusty ? 0.1 : 0.18;
     world.particles.visible = pm.opacity > 0.02;
     if (world.particles.visible) {
       const arr = world.particles.geometry.attributes.position.array;
-      const fall = embers ? -1.2 : raining ? 22 : 3 + blizzard.k * 5;
+      const fall = embers ? -1.2 : raining ? 22 : sporey ? -0.35 : dusty ? 0.4 : 3 + blizzard.k * 5;
       const wx = (embers ? gust.dir.x * 4 * gust.k : 2 + blizzard.k * 9) * dt, wz = (embers ? gust.dir.z * 4 * gust.k : 0.5) * dt;
       for (let i = 0; i < arr.length; i += 3) {
         arr[i] += wx; arr[i + 2] += wz; arr[i + 1] -= fall * dt;
@@ -1830,8 +2216,9 @@ function updateScene(dt, now) {
     if (P.render.distanceTo(target) > 6) P.render.copy(target);
     P.render.lerp(target, 1 - Math.exp(-20 * dt));
     climber.position.copy(P.render);
-    const mode = P.isDown || P.wakeT > 0 ? 'down' : P.mode;
+    const mode = P.ghost ? 'ground' : P.isDown || P.wakeT > 0 ? 'down' : P.crouch ? 'crouch' : P.mode === 'zip' ? 'rope' : P.mode;
     poseClimber(climber, mode, P.facing, P.anim, dt, P.moveAmt);
+    if (P.ghost) climber.position.y += Math.sin(performance.now() / 400) * 0.12;
     syncHeldItem();
     if (P.tumble && P.mode === 'air') {
       // Head over heels around the body's middle.
@@ -1858,8 +2245,11 @@ function updateHud(dt) {
     $('#bar').classList.toggle('low', S.stamina < 0.2 && (P.mode === 'climb' || P.mode === 'rope'));
     $('#bHun').style.width = `${(S.hunger * 100).toFixed(1)}%`;
     $('#bCold').style.width = `${(S.cold * 100).toFixed(1)}%`;
+    $('#bHeat').style.width = `${(S.heat * 100).toFixed(1)}%`;
     $('#bInj').style.width = `${(S.injury * 100).toFixed(1)}%`;
     $('#bPois').style.width = `${(S.poison * 100).toFixed(1)}%`;
+    $('#bDrowsy').style.width = `${(S.drowsy * 100).toFixed(1)}%`;
+    $('#bBonus').style.width = `${(S.bonus * 100).toFixed(1)}%`;
     $('#bWeight').style.width = `${(packWeight() * 100).toFixed(1)}%`;
   }
   if (hudAcc < 0.1) return;
@@ -1915,7 +2305,12 @@ function updateHud(dt) {
     if (showStatus.fire) tag('🔥 Warming up', 'good');
     if (showStatus.piton) tag('📌 Resting', 'good');
     if (showStatus.thorns) tag('🌿 Thorns!', 'hot');
-    if (S.boostT > 0) tag('🧃 Fizz', 'good');
+    if (showStatus.spores) tag('🍄 Spores', 'warn');
+    if (showStatus.cactus) tag('🌵 Cactus!', 'hot');
+    if (S.heat > 0.15) tag('🥵 Overheating', 'warn');
+    if (S.boostT > 0) tag(`🧃 Fizz ${Math.ceil(S.boostT)}s`, 'good');
+    if (S.bonus > 0.01) tag('🍯 Bonus stamina', 'good');
+    if (S.drowsy > 0.05) tag('😪 Drowsy', 'bad');
     if (S.poison > 0.02) tag('🤢 Poisoned', 'hot');
     if (S.chalkT > 0) tag(`👝 Chalk ${Math.ceil(S.chalkT)}s`, 'good');
     if (inv.includes('lantern') && (bandAt(y).id === 'frost' || bandAt(y).id === 'crown')) tag('🏮 Lantern', 'good');
@@ -1937,8 +2332,12 @@ function updateHud(dt) {
     if (prompt || P.isDown || P.wakeT > 0) { /* already set */ }
     else if (world.items.some((it) => !it.taken && it.mesh.position.distanceTo(me) < 3)) { prompt = `${key}Pick up`; act = 'Take'; }
     else if (coop.on && inv[sel] && P.mode === 'ground' && giveTarget()) { prompt = `${key}Give ${ITEMS[inv[sel]].name} to ${giveTarget().name}`; act = 'Give'; }
-    else if (inv[sel] && ITEMS[inv[sel]].food && world.camps.some((c) => c.lit && c.pos.distanceTo(me) < 4)) { prompt = isTouch ? 'Use to cook and eat over the fire' : '[F] Cook and eat over the fire'; }
-    else if (world.camps.some((c) => !c.lit && c.pos.distanceTo(me) < 3.6)) { prompt = `${key}Light the campfire`; act = 'Light'; }
+    else if (roastable() && world.camps.some((c) => c.lit && c.pos.distanceTo(me) < 4)) { prompt = `${key}Roast ${ITEMS[inv[sel]].name.toLowerCase()} · ${isTouch ? '● Use' : '[F]'} eat`; act = 'Roast'; }
+    else if (world.camps.some((c) => !c.lit && c.pos.distanceTo(me) < 3.6)) {
+      const g = gathered(world.camps.find((c) => !c.lit && c.pos.distanceTo(me) < 3.6));
+      prompt = g.here < g.total ? `Gather everyone to light the fire (${g.here}/${g.total} here)` : `${key}Light the campfire`;
+      act = g.here < g.total ? '' : 'Light';
+    }
     else if (!world.beacon.lit && world.beacon.pos.distanceTo(me) < 4.5) { prompt = `${key}Light the summit beacon!`; act = 'Light'; }
     else if (P.mode === 'climb') prompt = isTouch ? 'Tap ✋ to let go · ⤒ to lunge' : 'Release to let go · Space to lunge';
     else if (P.mode === 'rope') prompt = isTouch ? 'Stick up/down to climb the rope' : 'W/S to climb the rope';
@@ -1984,10 +2383,16 @@ function updateHud(dt) {
 
 // ---------------- passport (look editor) ----------------
 let myName = 'Climber';
+const badges = new Badges(store, (b) => {
+  sfx.ding();
+  toast(`🏅 Badge earned: ${b.name}!${b.hat !== undefined ? ' A new hat is waiting in your passport.' : ''}`);
+});
 const passport = new Passport({
+  badges,
+  toast: (m) => toast(m),
   getLook: () => look,
   setLook: (l) => { look = validLook(l); applyLook(); },
-  randomLook: () => randomLook(),
+  randomLook: () => { const l = randomLook(); while (!badges.hatUnlocked(l.h)) l.h = Math.floor(Math.random() * 16); return l; },
   sfx,
   store,
 });
@@ -2006,9 +2411,44 @@ const heldBook = (() => {
   g.rotation.set(-0.5, 0, 0);
   return g;
 })();
+// Umbrella and balloons, shown in the right hand while selected on the island.
+const heldUmbrella = (() => {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.9, 6), new THREE.MeshLambertMaterial({ color: 0x3a2a20 }));
+  shaft.position.y = 0.2;
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.62, 0.3, 10, 1, true), new THREE.MeshStandardMaterial({ color: 0x8a55b8, roughness: 0.6, side: THREE.DoubleSide }));
+  canopy.position.y = 0.6;
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 6, 12, Math.PI), shaft.material);
+  hook.position.y = -0.25;
+  g.add(shaft, canopy, hook);
+  g.position.set(0, -0.22, 0.04);
+  return g;
+})();
+const heldBalloons = (() => {
+  const g = new THREE.Group();
+  const string = new THREE.LineBasicMaterial({ color: 0xf2efe8 });
+  for (const [x, y, z, c] of [[0, 1.05, 0, 0xff6f91], [0.2, 0.92, 0.08, 0xffd23f], [-0.18, 0.95, -0.06, 0x6fc3ff]]) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), new THREE.MeshStandardMaterial({ color: c, roughness: 0.25 }));
+    b.scale.set(1, 1.15, 1);
+    b.position.set(x, y, z);
+    g.add(b, new THREE.Line(new THREE.BufferGeometry().setFromPoints([new V3(0, 0, 0), new V3(x, y - 0.18, z)]), string));
+  }
+  g.position.set(0, -0.22, 0.04);
+  return g;
+})();
 function syncHeldItem() {
   const atAirport = state === 'lobby' || ((state === 'paused') && pausedFrom === 'lobby');
   const hand = climber.userData.armR?.el;
+  const prop = onIsland() && hand && !P.isDown && (P.mode === 'ground' || P.mode === 'air') ? { umbrella: heldUmbrella, balloons: heldBalloons }[inv[sel]] : null;
+  for (const m of [heldUmbrella, heldBalloons]) {
+    if (m === prop && m.parent !== hand) hand.add(m);
+    else if (m !== prop && m.parent) m.removeFromParent();
+  }
+  if (prop && (prop === heldBalloons || P.mode === 'air')) {
+    // Arm up, holding it overhead.
+    climber.userData.armR.sh.rotation.set(-0.2, 0, 2.75);
+    climber.userData.armR.el.rotation.set(0, 0, 0.2);
+  }
   const want = atAirport && inv[sel] === 'passport' && hand;
   if (want && heldBook.parent !== hand) hand.add(heldBook);
   else if (!want && heldBook.parent) heldBook.removeFromParent();
@@ -2022,6 +2462,8 @@ function applyLook() {
   store.set('look', look);
   const pos = climber.position.clone();
   heldBook.removeFromParent();
+  heldUmbrella.removeFromParent();
+  heldBalloons.removeFromParent();
   scene.remove(climber);
   disposeClimber(climber);
   climber = makeClimber(look, { shadows: Q.shadows, outline: Q.outline });
@@ -2098,7 +2540,10 @@ function updateRemotes(dt) {
     r.anim += moved * (r.st.m === 'climb' ? 3.4 : 2.2);
     r.facing = lerpAngle(r.facing, r.st.f, k);
     r.model.position.copy(r.pos);
-    poseClimber(r.model, r.st.m, r.facing, r.anim, dt, clamp(moved / Math.max(dt, 1e-3) / WALK, 0, 1));
+    const ghost = r.st.m === 'ghost';
+    if (!!r.ghostly !== ghost) { r.ghostly = ghost; setGhostly(r.model, ghost); }
+    poseClimber(r.model, ghost ? 'ground' : r.st.m, r.facing, r.anim, dt, ghost ? 0 : clamp(moved / Math.max(dt, 1e-3) / WALK, 0, 1));
+    if (ghost) r.model.position.y += Math.sin(performance.now() / 400 + r.cid) * 0.12;
     const down = r.st.m === 'down';
     r.model.visible = !hide;
     r.tag.visible = !hide;
@@ -2109,7 +2554,7 @@ function updateRemotes(dt) {
 }
 
 function giveTarget() {
-  for (const r of coop.remotes.values()) if (r.st && r.st.m !== 'down' && r.pos.distanceTo(P.pos) < 2.4) return r;
+  for (const r of coop.remotes.values()) if (r.st && r.st.m !== 'down' && r.st.m !== 'ghost' && r.pos.distanceTo(P.pos) < 2.4) return r;
   return null;
 }
 function carryToggle() {
@@ -2143,6 +2588,7 @@ function coopInteract(me) {
   for (const r of coop.remotes.values()) {
     if (r.st?.m === 'down' && r.pos.distanceTo(me) < 2.8) {
       net.send({ t: 'revive', to: r.cid });
+      badges.earn('helper');
       toast(`🤝 Helping ${r.name} up…`);
       return true;
     }
@@ -2176,6 +2622,7 @@ function applyLayout(items, camps) {
 }
 
 function enterRoom(m) {
+  if (Number.isInteger(m.diff) && m.diff !== diff) { diff = m.diff; syncDiff(); toast(`This room climbs on ${D().name}.`); }
   clearRemotes();
   coop.on = true;
   coop.code = m.code;
@@ -2190,6 +2637,7 @@ function enterRoom(m) {
   for (const r of m.ropes || []) addRope(new V3(...r[0]), new V3(...r[1]), new V3(...r[2]));
   for (const p of m.flares || []) addFlare(new V3(p[0], p[1], p[2]));
   for (const v of m.vines || []) addVine(new V3(v[0], v[1], v[2]), new V3(v[3], 0, v[4]));
+  for (const z of m.zips || []) addZip(new V3(z[0], z[1], z[2]), new V3(z[3], z[4], z[5]));
   if (m.beacon) { world.beacon.lit = true; world.beacon.flame.visible = true; }
   net.send({ t: 'look', look });
   try { history.replaceState(null, '', `?room=${m.code}`); } catch { /* ignore */ }
@@ -2268,6 +2716,8 @@ net.addEventListener('msg', (e) => {
     case 'piton': addPiton(new V3(m.p[0], m.p[1], m.p[2])); break;
     case 'rope': addRope(new V3(...m.top), new V3(...m.bottom), new V3(...m.a)); toast(`🪢 ${nameOf(m.by)} hung a rope.`); break;
     case 'vine': addVine(new V3(...m.p), new V3(m.d[0], 0, m.d[1])); toast(`🫘 ${nameOf(m.by)} grew a vine.`); break;
+    case 'zip': addZip(new V3(...m.a), new V3(...m.b)); toast(`🏹 ${nameOf(m.by)} fired a zipline.`); break;
+    case 'shelf': addShelf(new V3(...m.p), m.n[0], m.n[1]); break;
     case 'ping':
       addPing(new V3(...m.p), m.k, nameOf(m.by));
       if (m.k === 'horn') { sfx.horn(); toast(`📯 ${nameOf(m.by)} blew the signal horn!`); } else sfx.click();
@@ -2316,7 +2766,7 @@ async function coopAction(kind) {
   msg.textContent = 'Connecting…';
   try {
     await net.connect();
-    const m = kind === 'create' ? await net.create(world.seed) : await net.join(code);
+    const m = kind === 'create' ? await net.create(world.seed, diff) : await net.join(code);
     msg.textContent = '';
     enterRoom(m);
   } catch (err) {
@@ -2379,9 +2829,19 @@ $('#btnPlay').addEventListener('click', startSolo);
 $('#btnDaily').addEventListener('click', () => {
   const d = new Date();
   resetRun(false, d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate());
+  runBadges.daily = true;
   $('#seedRow').textContent = `Daily mountain · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
   sfx.unlock(); sfx.click();
 });
+function syncDiff() {
+  $('#diffName').textContent = D().name;
+  $('#diffNote').textContent = D().note;
+  $('#diffPrev').disabled = diff <= 0;
+  $('#diffNext').disabled = diff >= DIFFS.length - 1;
+}
+$('#diffPrev').addEventListener('click', () => { if (coop.on) return; diff = Math.max(0, diff - 1); store.set('difficulty', diff); syncDiff(); sfx.unlock(); sfx.click(); });
+$('#diffNext').addEventListener('click', () => { if (coop.on) return; diff = Math.min(DIFFS.length - 1, diff + 1); store.set('difficulty', diff); syncDiff(); sfx.unlock(); sfx.click(); });
+syncDiff();
 $('#btnNew').addEventListener('click', () => { resetRun(false); $('#seedRow').textContent = `Mountain #${world.seed}`; sfx.unlock(); sfx.click(); });
 $('#btnPassportTitle').addEventListener('click', () => { startSolo(); setTimeout(openPassport, 50); });
 $('#btnSettings').addEventListener('click', () => { $('#settings').classList.remove('hidden'); syncSettings(); });
@@ -2473,6 +2933,7 @@ function frame(now) {
     updatePlayer(dt / 2);
     updateSurvival(dt);
   } else if (state === 'lobby') updateLobbyPlayer(dt);
+  if (world && onIsland()) updateGear(dt);
   else if (state === 'flight') updateFlight(dt);
   if (state === 'play' || state === 'lobby') updateHud(dt);
   if (coop.on && state !== 'title') {
@@ -2481,7 +2942,7 @@ function frame(now) {
       coop.sendAcc = 0;
       const alt = P.mode === 'climb' && world ? world.T.height(P.cx, P.cz) : P.pos.y;
       const inLobby = state === 'lobby' || (state === 'paused' && pausedFrom === 'lobby');
-      net.send({ t: 'st', p: [P.render.x, P.render.y, P.render.z], f: Math.atan2(Math.sin(P.facing), Math.cos(P.facing)), m: P.isDown || P.wakeT > 0 ? 'down' : P.mode, a: 0, alt: inLobby ? 0 : alt, l: inLobby ? 1 : 0 });
+      net.send({ t: 'st', p: [P.render.x, P.render.y, P.render.z], f: Math.atan2(Math.sin(P.facing), Math.cos(P.facing)), m: P.ghost ? 'ghost' : P.isDown || P.wakeT > 0 ? 'down' : P.crouch ? 'crouch' : P.mode === 'zip' ? 'rope' : P.mode, a: 0, alt: inLobby ? 0 : alt, l: inLobby ? 1 : 0 });
     }
   }
   updateRemotes(dt);
@@ -2531,6 +2992,16 @@ window.__highcrag = {
   lobbyTo: (x, z) => { P.pos.set(x, LOBBY_FLOOR, z); P.render.copy(P.pos); },
   setYaw: (y) => { camYaw = y; },
   setPitch: (v) => { camPitch = v; },
+  setVitals: (o) => { Object.assign(S, o); },
+  clearInv: () => { inv.fill(null); sel = 0; renderInv(); },
+  gathered: (i) => gathered(world.camps[i]),
+  giveUp: () => giveUp(),
+  get badges() { return [...badges.earned]; },
+  launcherTarget: () => { const t = launcherTarget(); return t && { x: t.x, y: t.y, z: t.z }; },
+  ghost: () => { becomeGhost(); },
+  get ghosted() { return !!P.ghost; },
+  interact: () => interact(),
+  use: () => useItem(),
   setFacing: (f) => { P.facing = f; },
   give: (type) => { const s = inv.indexOf(null); if (s >= 0) { inv[s] = type; sel = s; renderInv(); } },
 };

@@ -11,7 +11,9 @@ export const FACES = ['Cheery', 'Focused', 'Sleepy', 'Wow'];
 export const HAIRS = ['Bald', 'Short', 'Side swoop', 'Curly', 'Ponytail', 'Buns', 'Spiky', 'Long'];
 export const HAIR_COLORS = [0x2b1d14, 0x5a3825, 0x8a5a32, 0xc98a4a, 0xe8c37a, 0xb8432e, 0xe8e4dc, 0x3a4fa8, 0xe07ab0, 0x3fa890];
 export const HAIR_COLOR_NAMES = ['Black', 'Dark brown', 'Brown', 'Copper', 'Blond', 'Red', 'White', 'Blue', 'Pink', 'Teal'];
-export const HATS = ['No hat', 'Beanie', 'Bobble hat', 'Bucket hat', 'Cap', 'Backwards cap', 'Cowboy hat', 'Top hat', 'Party hat', 'Crown', 'Climbing helmet', 'Chef hat', 'Propeller cap', 'Bandana', 'Viking helmet', 'Flower crown'];
+export const HATS = ['No hat', 'Beanie', 'Bobble hat', 'Bucket hat', 'Cap', 'Backwards cap', 'Cowboy hat', 'Top hat', 'Party hat', 'Crown', 'Climbing helmet', 'Chef hat', 'Propeller cap', 'Bandana', 'Viking helmet', 'Flower crown',
+  // Unlocked by badges:
+  'Laurel wreath', 'Gecko cap', 'Racing helmet', 'Golden helmet', 'Aviator cap'];
 export const TOPS = ['T-shirt', 'Hoodie', 'Puffer jacket', 'Raincoat', 'Flannel shirt', 'Sweater', 'Vest', 'Tank top'];
 export const BOTTOMS = ['Shorts', 'Trousers', 'Cargo pants', 'Overalls', 'Skirt'];
 export const SHOES = ['Hiking boots', 'Sneakers', 'Wellies', 'Sandals'];
@@ -207,7 +209,7 @@ function buildFace(head, f, skinHex, browHex) {
 }
 
 /** Hats that cover the top of the head: only hair that would show below them is built. */
-const COVERING_HATS = new Set([1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14]);
+const COVERING_HATS = new Set([1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 17, 18, 19, 20]);
 /** Hair, built around the skull centre. */
 function buildHair(hr, hex, hatId) {
   const g = new THREE.Group();
@@ -382,6 +384,58 @@ function buildHat(h, col) {
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2;
       g.add(mesh(new THREE.IcosahedronGeometry(0.045, 0), mat([0xff9fb8, 0xffe27a, 0xffffff][i % 3], 0.6), Math.cos(a) * HEAD_R * 0.85, top - 0.07, Math.sin(a) * HEAD_R * 0.85));
+    }
+  } else if (h === 16) {
+    // Laurel wreath: two rows of leaves, tipped with gold.
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      if (Math.abs(Math.sin(a / 2)) < 0.12) continue; // gap at the front
+      const leaf = mesh(new THREE.SphereGeometry(0.045, 8, 6), mat(i % 3 ? 0x5f9a3a : 0xd8b23a, 0.5), Math.sin(a) * HEAD_R * 0.9, top - 0.06 + (i % 2) * 0.03, Math.cos(a) * HEAD_R * 0.9);
+      leaf.scale.set(0.55, 0.45, 1.3);
+      leaf.rotation.y = a;
+      leaf.rotation.x = 0.5;
+      g.add(leaf);
+    }
+  } else if (h === 17) {
+    // Gecko cap: a green cap with two big googly eyes on top.
+    const cap = dome(HEAD_R * 1.03, mat(0x5fbf4a, 0.6), 0.42);
+    cap.position.y = 0.05;
+    g.add(cap);
+    for (const sx of [-1, 1]) {
+      const eye = mesh(new THREE.SphereGeometry(0.07, 14, 10), mat(0xffffff, 0.3), sx * 0.1, top + 0.07, 0.06);
+      eye.add(mesh(new THREE.SphereGeometry(0.035, 10, 8), mat(0x1d1b22, 0.3), 0, 0.005, 0.05));
+      g.add(eye, mesh(new THREE.SphereGeometry(0.08, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x5fbf4a, 0.6), sx * 0.1, top + 0.06, 0.06));
+    }
+  } else if (h === 18) {
+    // Racing helmet: glossy shell, dark visor, a stripe over the top.
+    const shell = dome(HEAD_R * 1.12, mat(col, 0.2), 0.58);
+    shell.position.y = -0.02;
+    const visor = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R * 1.13, 22, 10, -0.9, 1.8, Math.PI * 0.36, Math.PI * 0.16), new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.05, metalness: 0.6 }));
+    visor.position.y = -0.02;
+    const stripe = new THREE.Mesh(new THREE.TorusGeometry(HEAD_R * 1.12, 0.022, 6, 28, Math.PI), mat(0xffffff, 0.3));
+    stripe.rotation.y = Math.PI / 2;
+    stripe.position.y = -0.02;
+    g.add(shell, visor, stripe);
+  } else if (h === 19) {
+    // Golden helmet with a crest along the top.
+    const gold = mat(0xf2c33b, 0.22, { metalness: 0.85 });
+    const d = dome(HEAD_R * 1.07, gold, 0.5);
+    d.position.y = 0.02;
+    const crest = mesh(new RoundedBoxGeometry(0.05, 0.12, 0.42, 2, 0.02), mat(0xe0453a, 0.6), 0, top + 0.08, -0.02);
+    g.add(d, crest);
+  } else if (h === 20) {
+    // Aviator cap: leather cap, ear flaps, goggles pushed up on the forehead.
+    const leather = mat(0x7a4a2a, 0.75);
+    const d = dome(HEAD_R * 1.05, leather, 0.5);
+    d.position.y = 0.0;
+    g.add(d);
+    for (const sx of [-1, 1]) {
+      const flap = mesh(new RoundedBoxGeometry(0.06, 0.16, 0.13, 2, 0.03), leather, sx * HEAD_R * 1.0, top - 0.24, 0);
+      g.add(flap);
+      const lens = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.014, 6, 16), mat(0xb9c2cc, 0.3, { metalness: 0.7 }));
+      lens.position.set(sx * 0.07, top - 0.02, HEAD_R * 0.86);
+      lens.rotation.x = -0.6;
+      g.add(lens);
     }
   }
   g.position.y = HEAD_R * 0.6 - 0.1;
@@ -750,6 +804,17 @@ export function poseClimber(model, mode, facing, phase, dt, moving = 0) {
     legR.knee.rotation.x = 0.7;
     head.rotation.set(0, 0.4, 0);
     eyes.scale.y = 0.15;
+  } else if (mode === 'crouch') {
+    // Squatting low with hands cupped in front: a step for a friend.
+    hips.position.y = H0 - 0.2;
+    spine.rotation.x = 0.45;
+    head.rotation.x = -0.35;
+    for (const l of [legL, legR]) { l.hip.rotation.x = -1.25; l.knee.rotation.x = 1.9; l.foot.rotation.x = -0.6; }
+    legL.hip.rotation.z = -0.18;
+    legR.hip.rotation.z = 0.18;
+    armL.sh.rotation.set(-1.0, 0, 0.35);
+    armR.sh.rotation.set(-1.0, 0, -0.35);
+    armL.el.rotation.x = armR.el.rotation.x = -0.6;
   } else {
     // Bouncy walk/run with a little waddle.
     const w = Math.min(1, moving);

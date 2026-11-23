@@ -55,13 +55,15 @@ export class TouchControls {
       b.addEventListener('pointercancel', up);
       b.addEventListener('pointerleave', up);
     };
-    tap('bJump', () => this.cb.onJump?.());
+    tap('bJump', () => { this.jumpHeld = true; this.cb.onJump?.(); });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) document.getElementById('bJump').addEventListener(ev, () => { this.jumpHeld = false; });
     tap('bGrab', () => this.setGrab(!this.grab, true));
     tap('bAct', () => this.cb.onAct?.());
     tap('bUse', () => this.cb.onUse?.());
     tap('bDrop', () => this.cb.onDrop?.());
     tap('bPing', () => this.cb.onPing?.());
     tap('bRun', (b) => { this.sprint = !this.sprint; b.classList.toggle('on', this.sprint); });
+    tap('bCrouch', (b) => { this.crouch = !this.crouch; b.classList.toggle('on', this.crouch); });
     tap('bEmote', () => this.cb.onEmote?.());
     // iOS: stop page scroll / zoom gestures on the game surface.
     // Stop one-finger page scrolling outside the menus (pinch and double-tap zoom are blocked in main.js).

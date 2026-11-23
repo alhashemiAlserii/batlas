@@ -14,13 +14,17 @@ import type { SiteBridge } from '../game-server/bridge.js';
 
 export const HC_WS_PATH = '/ws/highcrag';
 export const HC_MAX_PLAYERS = 4;
-const ITEM_TYPES = new Set(['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit', 'binoculars', 'horn', 'lantern', 'chalk', 'bean', 'marshmallow']);
+const BASE_ITEMS = ['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit', 'binoculars', 'horn', 'lantern', 'chalk', 'bean', 'marshmallow', 'honey', 'coconut', 'floatrope', 'launcher', 'shelf', 'umbrella', 'balloons'];
+// Food roasted at a campfire travels as "<food>@1" (roasted), "@2" (twice-roasted) or "@3" (burnt).
+const COOKABLE = ['berry', 'mushroom', 'ration', 'marshmallow', 'coconut'];
+const ITEM_TYPES = new Set([...BASE_ITEMS, ...COOKABLE.flatMap((k) => [1, 2, 3].map((lv) => `${k}@${lv}`))]);
 const EMOTES = new Set(['wave', 'cheer', 'point']);
 const MAX_ITEMS = 400;
 const MAX_PITONS = 300;
 const MAX_ROPES = 120;
 const MAX_FLARES = 60;
 const MAX_VINES = 80;
+const MAX_ZIPS = 40;
 const PING_KINDS = new Set(['ping', 'horn']);
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
@@ -47,6 +51,9 @@ interface Room {
   ropes: [number, number, number][][];
   flares: [number, number, number][];
   vines: number[][];
+  zips: number[][];
+  /** Difficulty chosen by whoever made the room: 0 Stroll, 1 Expedition, 2-4 Summit I-III. */
+  diff: number;
   boarded: boolean;
   beacon: { by: string } | null;
   dropSeq: number;
@@ -58,7 +65,7 @@ const vec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) && 
 const round = (v: number) => Math.round(v * 100) / 100;
 const smallInt = (v: unknown, max: number) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : 0);
 // Outfit pieces and how many options each has (must match the passport options in characters.js).
-const LOOK_LIMITS: Record<string, number> = { s: 11, f: 3, hr: 7, hc: 9, h: 15, t: 7, c: 9, b: 4, bc: 9, sh: 3, a: 8 };
+const LOOK_LIMITS: Record<string, number> = { s: 11, f: 3, hr: 7, hc: 9, h: 20, t: 7, c: 9, b: 4, bc: 9, sh: 3, a: 8 };
 const validLook = (l: any) => Object.fromEntries(Object.entries(LOOK_LIMITS).map(([k, max]) => [k, smallInt(l?.[k], max)]));
 
 export function attachHighcragServer(
@@ -80,6 +87,7 @@ export function attachHighcragServer(
       t: 'room',
       code: room.code,
       seed: room.seed,
+      diff: room.diff,
       you: you.cid,
       players: [...room.clients.values()].map(playerOut),
       layout: room.items ? { items: [...room.items.values()].map((i) => [i.id, i.type, ...i.p, i.taken ? 1 : 0]), camps: room.camps } : null,
@@ -88,6 +96,7 @@ export function attachHighcragServer(
       ropes: room.ropes,
       flares: room.flares,
       vines: room.vines,
+      zips: room.zips,
       boarded: room.boarded,
       beacon: room.beacon,
       states: Object.fromEntries([...room.clients.values()].filter((c) => c !== you && c.lastState).map((c) => [c.cid, c.lastState])),
@@ -130,7 +139,8 @@ export function attachHighcragServer(
         if (room) leave(c);
         if (rooms.size >= (opts.maxRooms ?? 500)) return send(c, { t: 'error', code: 'full', message: 'Too many rooms are open right now.' });
         const seed = num(m.seed, 4294967295) && m.seed > 0 ? Math.floor(m.seed) : Math.floor(Math.random() * 1e9) + 1;
-        const r: Room = { code: newCode(), seed, clients: new Map(), items: null, camps: null, lit: new Set(), pitons: [], ropes: [], flares: [], vines: [], boarded: false, beacon: null, dropSeq: 0, createdAt: Date.now() };
+        const diff = Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 4 ? m.diff : 1;
+        const r: Room = { code: newCode(), seed, diff, clients: new Map(), items: null, camps: null, lit: new Set(), pitons: [], ropes: [], flares: [], vines: [], zips: [], boarded: false, beacon: null, dropSeq: 0, createdAt: Date.now() };
         rooms.set(r.code, r);
         c.slot = 0;
         r.clients.set(c.cid, c);
@@ -173,7 +183,7 @@ export function attachHighcragServer(
         return broadcast(room, { t: 'layout', items: [...items.values()].map((i) => [i.id, i.type, ...i.p, 0]), camps: room.camps });
       }
       case 'st': {
-        if (!vec3(m.p) || !num(m.f, 100) || !['ground', 'air', 'climb', 'rope', 'down'].includes(m.m)) return;
+        if (!vec3(m.p) || !num(m.f, 100) || !['ground', 'air', 'climb', 'rope', 'down', 'ghost', 'crouch'].includes(m.m)) return;
         const st = { p: m.p.map(round), f: round(m.f), m: m.m, a: num(m.a, 1e6) ? round(m.a) : 0, alt: num(m.alt, 2000) ? Math.round(m.alt) : 0, l: m.l === 1 ? 1 : 0 };
         c.lastState = st;
         return broadcast(room, { t: 'st', cid: c.cid, ...st }, c);
@@ -236,6 +246,19 @@ export function attachHighcragServer(
         const v = [...m.p.map(round), round(m.d[0]), round(m.d[1])];
         room.vines.push(v);
         return broadcast(room, { t: 'vine', p: v.slice(0, 3), d: v.slice(3), by: c.cid }, c);
+      }
+      case 'zip': {
+        // A zipline from the launcher: it only ever runs level or downhill, up to 50 m.
+        if (!vec3(m.a) || !vec3(m.b) || room.zips.length >= MAX_ZIPS) return;
+        const a = m.a.map(round), b = m.b.map(round);
+        if (b[1] > a[1] + 1 || Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) > 50) return;
+        room.zips.push([...a, ...b]);
+        return broadcast(room, { t: 'zip', a, b, by: c.cid }, c);
+      }
+      case 'shelf': {
+        // Fungus shelves wither after a minute and a half, so they are not kept for late joiners.
+        if (!vec3(m.p) || !Array.isArray(m.n) || m.n.length !== 2 || !m.n.every((v: unknown) => num(v, 2))) return;
+        return broadcast(room, { t: 'shelf', p: m.p.map(round), n: m.n.map(round), by: c.cid }, c);
       }
       case 'ping': {
         if (!vec3(m.p) || !PING_KINDS.has(m.k)) return;
