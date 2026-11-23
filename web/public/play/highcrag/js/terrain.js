@@ -183,10 +183,10 @@ export class Terrain {
         if (band.id === 'shore' && y >= 2.6) {
           // Lowland meadows: lush green with dry golden patches and darker forest floor.
           const dry = smooth(0.15, 0.5, fbm(x * 0.02, z * 0.02, this.seed + 61, 3));
-          cg.setHex(0x4f8f33).lerp(new THREE.Color(0xa3a058), dry * 0.65).offsetHSL(0, 0, n * 0.05);
+          cg.setHex(0x4e8436).lerp(new THREE.Color(0x98935e), dry * 0.55).offsetHSL(0, -0.04, n * 0.05);
           cr.setHex(0x8a7a5e);
         }
-        if (y < 2.6) cg.setHex(0xe8d7ac).lerp(new THREE.Color(0x4f8f33), smooth(1.8, 2.6, y));
+        if (y < 2.6) cg.setHex(0xe8d7ac).lerp(new THREE.Color(0x4e8436), smooth(1.8, 2.6, y));
         if (y < 0.35) cg.setHex(0xfffbf0); // surf foam along the waterline
         if (y < -0.6) cg.setHex(0x9fd8d0);
         if (y < -3) cg.setHex(0x4fa3b6);

@@ -1129,6 +1129,7 @@ function land(impact) {
   P.spin = 0;
   P.jumped = false;
   if (impact > 4) dust.puff(P.pos, Math.min(12, 3 + impact * 0.35));
+  if (impact > 3) climber.userData.squash = Math.min(1, impact / 16); // knees soak up the landing
   if (impact > 36) { sfx.land(true); stats.falls++; if (!P.isDown) blackout('You fell too far…'); return; }
   if (impact > 13.5) {
     const dmg = (impact - 13.5) * 0.028;

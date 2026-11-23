@@ -111,7 +111,13 @@ function grassTex(key, hue, light) {
     x.clearRect(0, 0, 128, 128);
     for (let i = 0; i < 46; i++) {
       const bx = 6 + rnd() * 116, h = 50 + rnd() * 74, lean = (rnd() - 0.5) * 30;
-      x.fillStyle = hsl(hue + (rnd() - 0.5) * 18, 45 + rnd() * 15, light + (rnd() - 0.5) * 16);
+      // Each blade: darker at the root, sunlit toward the tip.
+      const hh = hue + (rnd() - 0.5) * 14, sat = 40 + rnd() * 12, li = light + (rnd() - 0.5) * 8;
+      const gr = x.createLinearGradient(0, 128, 0, 128 - h);
+      gr.addColorStop(0, hsl(hh + 4, sat, li * 0.55));
+      gr.addColorStop(0.55, hsl(hh, sat, li));
+      gr.addColorStop(1, hsl(hh - 10, sat - 6, li * 1.35));
+      x.fillStyle = gr;
       x.beginPath();
       x.moveTo(bx - 2.2, 128);
       x.quadraticCurveTo(bx + lean * 0.4, 128 - h * 0.6, bx + lean, 128 - h);
@@ -260,6 +266,9 @@ function waterShader(sh, { shore }) {
       wc = mix(wc, deep, smoothstep(3.5, 18.0, d));
       float n = hc_fbm(vW * 0.3 + vec2(uTime * 0.22, uTime * 0.15));
       float foam = smoothstep(0.55, 0.0, d + (n - 0.5) * 0.6) * (0.65 + 0.35 * hc_noise(vW * 2.5 - uTime * 0.5));
+      ${shore ? `// Lines of surf rolling in toward the beach, breaking up as they go.
+      float surf = smoothstep(0.86, 1.0, sin(d * 2.3 + uTime * 1.5 + n * 3.0)) * smoothstep(2.8, 0.5, d) * smoothstep(-0.1, 0.35, d);
+      foam = max(foam, surf * (0.45 + 0.55 * hc_noise(vW * 1.7 + uTime * 0.3)));` : ''}
       diffuseColor.rgb = mix(wc, vec3(0.95, 0.97, 0.97), clamp(foam, 0.0, 1.0));
       diffuseColor.a = mix(0.55, 0.96, smoothstep(0.1, 5.0, d)) + foam * 0.35;`)
     .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -958,9 +967,9 @@ export function makeGrassField(T, q) {
           d.updateMatrix();
           im.setMatrixAt(k, d.matrix);
           // Gentle tint: brighter and greener in the jungle, sun-dried patches in the lowlands.
-          const v = 0.8 + hash(ii, jj, 6) * 0.35;
-          const dry = y < 36 ? hash(ii >> 4, jj >> 4, 7) * 0.6 : 0;
-          col.setRGB(v * (0.95 + dry * 0.25), v, v * (0.88 - dry * 0.3));
+          const v = 0.88 + hash(ii, jj, 6) * 0.18;
+          const dry = y < 36 ? hash(ii >> 4, jj >> 4, 7) * 0.45 : 0;
+          col.setRGB(v * (0.94 + dry * 0.22), v, v * (0.9 - dry * 0.25));
           im.setColorAt(k, col);
           if (++k >= q.grass) break outer;
         }

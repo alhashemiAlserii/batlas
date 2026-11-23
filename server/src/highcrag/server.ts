@@ -58,7 +58,7 @@ const vec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) && 
 const round = (v: number) => Math.round(v * 100) / 100;
 const smallInt = (v: unknown, max: number) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : 0);
 // Outfit pieces and how many options each has (must match the passport options in characters.js).
-const LOOK_LIMITS: Record<string, number> = { s: 11, f: 3, h: 15, t: 7, c: 9, b: 4, bc: 9, sh: 3, a: 8 };
+const LOOK_LIMITS: Record<string, number> = { s: 11, f: 3, hr: 7, hc: 9, h: 15, t: 7, c: 9, b: 4, bc: 9, sh: 3, a: 8 };
 const validLook = (l: any) => Object.fromEntries(Object.entries(LOOK_LIMITS).map(([k, max]) => [k, smallInt(l?.[k], max)]));
 
 export function attachHighcragServer(

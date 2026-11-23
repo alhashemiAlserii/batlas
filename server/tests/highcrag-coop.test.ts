@@ -213,10 +213,10 @@ describe('Highcrag co-op server', () => {
     b.c.send({ t: 'join', code: room.code });
     await b.c.wait((m) => m.t === 'room');
 
-    a.c.send({ t: 'look', look: { s: 7, f: 2, h: 14, t: 3, c: 3, b: 4, bc: 5, sh: 2, a: 8 } });
-    expect((await b.c.wait((m) => m.t === 'look')).look).toEqual({ s: 7, f: 2, h: 14, t: 3, c: 3, b: 4, bc: 5, sh: 2, a: 8 });
-    a.c.send({ t: 'look', look: { c: 99, h: -1, s: 'x', evil: '<script>' } });
-    expect((await b.c.wait((m) => m.t === 'look')).look).toEqual({ s: 0, f: 0, h: 0, t: 0, c: 0, b: 0, bc: 0, sh: 0, a: 0 });
+    a.c.send({ t: 'look', look: { s: 7, f: 2, hr: 6, hc: 8, h: 14, t: 3, c: 3, b: 4, bc: 5, sh: 2, a: 8 } });
+    expect((await b.c.wait((m) => m.t === 'look')).look).toEqual({ s: 7, f: 2, hr: 6, hc: 8, h: 14, t: 3, c: 3, b: 4, bc: 5, sh: 2, a: 8 });
+    a.c.send({ t: 'look', look: { c: 99, h: -1, s: 'x', hr: 8, evil: '<script>' } });
+    expect((await b.c.wait((m) => m.t === 'look')).look).toEqual({ s: 0, f: 0, hr: 0, hc: 0, h: 0, t: 0, c: 0, b: 0, bc: 0, sh: 0, a: 0 });
 
     b.c.send({ t: 'emote', e: 'wave' });
     expect((await a.c.wait((m) => m.t === 'emote')).e).toBe('wave');
@@ -241,7 +241,7 @@ describe('Highcrag co-op server', () => {
     expect(rc.boarded).toBe(true);
     expect(rc.ropes).toHaveLength(1);
     expect(rc.flares).toEqual([[2, 60, 2]]);
-    expect(rc.players.find((p: any) => p.cid === a.you.cid).look).toEqual({ s: 0, f: 0, h: 0, t: 0, c: 0, b: 0, bc: 0, sh: 0, a: 0 });
+    expect(rc.players.find((p: any) => p.cid === a.you.cid).look).toEqual({ s: 0, f: 0, hr: 0, hc: 0, h: 0, t: 0, c: 0, b: 0, bc: 0, sh: 0, a: 0 });
     for (const x of [a, b, c]) x.c.close();
   });
 

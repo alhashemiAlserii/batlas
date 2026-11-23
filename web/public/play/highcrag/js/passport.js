@@ -8,6 +8,7 @@ const SEC = Object.fromEntries(WARDROBE.map((s) => [s.key, s]));
 const TABS = [
   { id: 'skin', icon: '🎨', label: 'Skin', parts: ['s'], frame: 'head' },
   { id: 'face', icon: '🙂', label: 'Face', parts: ['f'], frame: 'face' },
+  { id: 'hair', icon: '💇', label: 'Hair', parts: ['hr', 'hc'], frame: 'hat' },
   { id: 'hat', icon: '🎩', label: 'Hat', parts: ['h'], frame: 'hat' },
   { id: 'top', icon: '👕', label: 'Top', parts: ['t', 'c'], frame: 'top' },
   { id: 'bottoms', icon: '👖', label: 'Bottoms', parts: ['b', 'bc'], frame: 'legs' },
