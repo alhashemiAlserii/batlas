@@ -2478,6 +2478,7 @@ const heldUmbrella = (() => {
   const hook = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 6, 12, Math.PI), shaft.material);
   hook.position.y = -0.25;
   g.add(shaft, canopy, hook);
+  g.userData.canopy = canopy;
   g.position.set(0, -0.22, 0.04);
   return g;
 })();
@@ -2500,6 +2501,13 @@ function syncHeldItem() {
   for (const m of [heldUmbrella, heldBalloons]) {
     if (m === prop && m.parent !== hand) hand.add(m);
     else if (m !== prop && m.parent) m.removeFromParent();
+  }
+  if (prop === heldUmbrella) {
+    // Closed and pointing down like a walking stick on the ground; open overhead while falling.
+    const open = P.mode === 'air';
+    heldUmbrella.rotation.x = Math.PI; // the canopy sits beyond the hand: overhead with the arm up, at the feet with it down
+    heldUmbrella.userData.canopy.scale.set(open ? 1 : 0.16, open ? 1 : 1.8, open ? 1 : 0.16);
+    heldUmbrella.userData.canopy.position.y = open ? 0.6 : 0.42;
   }
   if (prop && (prop === heldBalloons || P.mode === 'air')) {
     // Arm up, holding it overhead.
