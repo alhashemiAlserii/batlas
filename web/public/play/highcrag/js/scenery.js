@@ -391,7 +391,7 @@ export function terrainMaterial(q) {
 // ---------------- lights ----------------
 export function makeLights(scene, q) {
   USE_STD = !!q.standard;
-  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x5a5440, q.standard ? 0.45 : 1.25);
+  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x6a6450, q.standard ? 0.58 : 1.25);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffe8c4, q.standard ? 3.0 : 2.8);
   sun.position.set(90, 110, 60);

@@ -393,3 +393,4 @@ body.tablet #bCrouch{left:calc(40px + env(safe-area-inset-left));bottom:calc(345
 
 .lg.heat::before{background:#ff6a3a}
 #bHeat{background:repeating-linear-gradient(90deg,#ff6a3a 0 8px,#ffa05a 8px 10px)}
+#legend .lg.off{display:none}

@@ -87,8 +87,8 @@ export class Post {
           c = mix(c, mix(vec3(l), c, 0.86) * vec3(0.97, 1.0, 1.04), greenish * 0.6);
           c = mix(vec3(l), c, saturation);
           c = clamp((c - 0.5) * contrast + 0.5, 0.0, 1.0) * warmth;
-          // Split toning: cool shadows, warm highlights.
-          c += mix(vec3(-0.012, 0.0, 0.022), vec3(0.02, 0.008, -0.018), smoothstep(0.15, 0.75, l));
+          // Split toning: slightly cool shadows, warm highlights (scaled, so blacks don't turn navy).
+          c *= mix(vec3(0.97, 0.99, 1.04), vec3(1.03, 1.01, 0.97), smoothstep(0.15, 0.75, l));
           vec2 d = vUv - 0.5;
           c *= 1.0 - vignette * smoothstep(0.35, 0.85, length(d * vec2(1.0, 0.85)) * 1.35);
           vec3 s = toSRGB(clamp(c, 0.0, 1.0));

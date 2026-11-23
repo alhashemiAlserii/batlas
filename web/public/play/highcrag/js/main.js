@@ -2250,6 +2250,9 @@ function updateHud(dt) {
     $('#bPois').style.width = `${(S.poison * 100).toFixed(1)}%`;
     $('#bDrowsy').style.width = `${(S.drowsy * 100).toFixed(1)}%`;
     $('#bBonus').style.width = `${(S.bonus * 100).toFixed(1)}%`;
+    // The legend only lists what is affecting you right now (stamina always).
+    const legend = { hun: S.hunger, cold: S.cold, heat: S.heat, inj: S.injury, pois: S.poison, drw: S.drowsy, wt: packWeight(), bon: S.bonus };
+    for (const [k, v] of Object.entries(legend)) $(`#legend .lg.${k}`)?.classList.toggle('off', v < 0.005);
     $('#bWeight').style.width = `${(packWeight() * 100).toFixed(1)}%`;
   }
   if (hudAcc < 0.1) return;
