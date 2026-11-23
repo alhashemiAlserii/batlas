@@ -666,6 +666,13 @@ function interact() {
   if (state !== 'play' || P.wakeT > 0) return;
   const me = myPos();
   if (coop.on && coopInteract(me)) return;
+  // An unlit campfire right here comes first (even with a full pack and items lying around).
+  const ci = world.camps.findIndex((c) => !c.lit && c.pos.distanceTo(me) < 3.6);
+  const gather = ci >= 0 ? gathered(world.camps[ci]) : null;
+  if (gather && gather.here >= gather.total) {
+    if (coop.on) net.send({ t: 'camp', i: ci }); else lightCamp(world.camps[ci]);
+    return;
+  }
   let best = null, bd = 2.4;
   for (const it of world.items) {
     if (it.taken) continue;
@@ -685,14 +692,7 @@ function interact() {
     best.mesh.visible = false;
     return;
   }
-  for (const [i, c] of world.camps.entries()) {
-    if (!c.lit && c.pos.distanceTo(me) < 3.6) {
-      const g = gathered(c);
-      if (g.here < g.total) { toast(`🔥 Gather the whole team at the fire to light it (${g.here}/${g.total} here).`); return; }
-      if (coop.on) net.send({ t: 'camp', i }); else lightCamp(c);
-      return;
-    }
-  }
+  if (gather) { toast(`🔥 Gather the whole team at the fire to light it (${gather.here}/${gather.total} here).`); return; }
   if (!world.beacon.lit && world.beacon.pos.distanceTo(me) < 4.5) {
     if (coop.on) net.send({ t: 'beacon' }); else lightBeacon();
     return;
@@ -2996,6 +2996,7 @@ window.__highcrag = {
   clearInv: () => { inv.fill(null); sel = 0; renderInv(); },
   gathered: (i) => gathered(world.camps[i]),
   giveUp: () => giveUp(),
+  wakeUp: () => { P.wakeT = 0; },
   get badges() { return [...badges.earned]; },
   launcherTarget: () => { const t = launcherTarget(); return t && { x: t.x, y: t.y, z: t.z }; },
   ghost: () => { becomeGhost(); },
