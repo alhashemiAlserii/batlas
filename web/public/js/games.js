@@ -1,7 +1,7 @@
 import { api, h } from './common.js';
-import { gameCard, builtinSkyCrew } from './ui.js';
+import { gameCard, withBuiltins } from './ui.js';
 const { games: catalog } = await api('GET', '/api/games');
-const games = catalog.length ? catalog : [builtinSkyCrew];
+const games = withBuiltins(catalog);
 const list = document.getElementById('list');
 function render(f) {
   const g = f === 'all' ? games : games.filter((x) => x.status === f);

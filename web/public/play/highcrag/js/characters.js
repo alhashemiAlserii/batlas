@@ -1,6 +1,6 @@
 // Highcrag — the climbers: chunky cartoon explorers with big round heads (original design),
 // jointed arms and legs, and a big wardrobe. Looks are small data objects shared over co-op:
-// { s: head colour, f: face, h: hat, t: top, c: top colour, b: bottoms, bc: bottoms colour, sh: shoes, a: extra }
+// { s: head colour, f: face, hr: hair, hc: hair colour, h: hat, t: top, c: top colour, b: bottoms, bc: bottoms colour, sh: shoes, a: extra }
 import * as THREE from '../../vendor/three.module.js';
 import { RoundedBoxGeometry } from '../../vendor/addons/RoundedBoxGeometry.js';
 
@@ -8,7 +8,12 @@ export const COLORS = [0xe0453a, 0x2f5fb3, 0x4c9a45, 0xf08a2c, 0x23a3a3, 0xf2c33
 export const COLOR_NAMES = ['Red', 'Blue', 'Green', 'Orange', 'Teal', 'Yellow', 'Purple', 'Grey', 'White', 'Black'];
 export const SKINS = [0xf6d6c0, 0xe8b997, 0xcf9a6e, 0xa8704a, 0x7d4f33, 0x55362a, 0xff9a62, 0x7fb7ff, 0x8fe0b0, 0xc4a8ff, 0xffe27a, 0xff9fb8];
 export const FACES = ['Cheery', 'Focused', 'Sleepy', 'Wow'];
-export const HATS = ['No hat', 'Beanie', 'Bobble hat', 'Bucket hat', 'Cap', 'Backwards cap', 'Cowboy hat', 'Top hat', 'Party hat', 'Crown', 'Climbing helmet', 'Chef hat', 'Propeller cap', 'Bandana', 'Viking helmet', 'Flower crown'];
+export const HAIRS = ['Bald', 'Short', 'Side swoop', 'Curly', 'Ponytail', 'Buns', 'Spiky', 'Long'];
+export const HAIR_COLORS = [0x2b1d14, 0x5a3825, 0x8a5a32, 0xc98a4a, 0xe8c37a, 0xb8432e, 0xe8e4dc, 0x3a4fa8, 0xe07ab0, 0x3fa890];
+export const HAIR_COLOR_NAMES = ['Black', 'Dark brown', 'Brown', 'Copper', 'Blond', 'Red', 'White', 'Blue', 'Pink', 'Teal'];
+export const HATS = ['No hat', 'Beanie', 'Bobble hat', 'Bucket hat', 'Cap', 'Backwards cap', 'Cowboy hat', 'Top hat', 'Party hat', 'Crown', 'Climbing helmet', 'Chef hat', 'Propeller cap', 'Bandana', 'Viking helmet', 'Flower crown',
+  // Unlocked by badges:
+  'Laurel wreath', 'Gecko cap', 'Racing helmet', 'Golden helmet', 'Aviator cap'];
 export const TOPS = ['T-shirt', 'Hoodie', 'Puffer jacket', 'Raincoat', 'Flannel shirt', 'Sweater', 'Vest', 'Tank top'];
 export const BOTTOMS = ['Shorts', 'Trousers', 'Cargo pants', 'Overalls', 'Skirt'];
 export const SHOES = ['Hiking boots', 'Sneakers', 'Wellies', 'Sandals'];
@@ -21,6 +26,8 @@ export const OUTFIT_NAMES = COLOR_NAMES;
 export const WARDROBE = [
   { key: 's', label: 'Head colour', type: 'color', items: SKINS },
   { key: 'f', label: 'Face', items: FACES },
+  { key: 'hr', label: 'Hair', items: HAIRS },
+  { key: 'hc', label: 'Hair colour', type: 'color', items: HAIR_COLORS, names: HAIR_COLOR_NAMES },
   { key: 'h', label: 'Hat', items: HATS },
   { key: 't', label: 'Top', items: TOPS },
   { key: 'c', label: 'Top colour', type: 'color', items: COLORS, names: COLOR_NAMES },
@@ -29,7 +36,7 @@ export const WARDROBE = [
   { key: 'sh', label: 'Shoes', items: SHOES },
   { key: 'a', label: 'Extras', items: EXTRAS },
 ];
-export const DEFAULT_LOOK = { s: 1, f: 0, h: 1, t: 2, c: 0, b: 1, bc: 1, sh: 0, a: 0 };
+export const DEFAULT_LOOK = { s: 1, f: 0, hr: 1, hc: 1, h: 1, t: 2, c: 0, b: 1, bc: 1, sh: 0, a: 0 };
 export function validLook(l) {
   const out = {};
   for (const w of WARDROBE) {
@@ -81,7 +88,20 @@ function plaidTexture(hex) {
   t.colorSpace = THREE.SRGBColorSpace;
   return (_plaid[hex] = t);
 }
-const mat = (color, rough = 0.75, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...extra });
+/** Soft warm rim light so climbers stand out from the scenery (one shared shader variant). */
+function rimLight(m) {
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `
+      {
+        float rimF = 1.0 - max(dot(normalize(normal), normalize(vViewPosition)), 0.0);
+        outgoingLight += vec3(1.0, 0.9, 0.78) * pow(rimF, 3.0) * 0.32 * (0.35 + 0.65 * diffuseColor.rgb);
+      }
+      #include <opaque_fragment>`);
+  };
+  m.customProgramCacheKey = () => 'climber-rim';
+  return m;
+}
+const mat = (color, rough = 0.75, extra = {}) => rimLight(new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...extra }));
 
 // ---------------- builders ----------------
 const mesh = (geo, m, x = 0, y = 0, z = 0) => { const k = new THREE.Mesh(geo, m); k.position.set(x, y, z); return k; };
@@ -118,46 +138,160 @@ function quiltTexture() {
   return _quilt;
 }
 
-function buildFace(head, f, skinHex) {
-  const black = mat(0x1d1b22, 0.3);
-  const white = mat(0xffffff, 0.3);
-  const cheek = mat(0xff7f8f, 0.8, { transparent: true, opacity: 0.55 });
+function buildFace(head, f, skinHex, browHex) {
+  const ink = mat(0x1d1b22, 0.3);
+  const white = mat(0xffffff, 0.25);
+  const sclera = mat(0xfbf8f2, 0.35);
+  const iris = mat(0x3a2a20, 0.3);
+  const cheek = mat(0xff7f8f, 0.8, { transparent: true, opacity: 0.5 });
+  const brow = mat(browHex, 0.7);
+  const lid = mat(new THREE.Color(skinHex).multiplyScalar(0.94), 0.6);
   const z = HEAD_R * 0.93;
+  // Both eyes sit in one group centred on the eye line, so blinking squashes them in place.
   const eyes = new THREE.Group();
+  eyes.position.y = 0.035;
+  const big = f === 3 ? 1.15 : 1;
   for (const sx of [-1, 1]) {
-    let eye;
-    if (f === 3) { eye = sphere(0.05, black); eye.scale.set(1, 1.1, 0.45); }
-    else if (f === 2) { eye = capsule(0.018, 0.05, black); eye.rotation.z = Math.PI / 2; eye.scale.set(1, 1, 0.5); }
-    else { eye = capsule(0.025, 0.045, black); eye.scale.set(1, 1, 0.5); }
-    eye.position.set(sx * 0.085, 0.03, z - 0.01);
-    eyes.add(eye);
-    if (f !== 2) {
-      const glint = sphere(f === 3 ? 0.016 : 0.011, white, 8, 6);
-      glint.position.set(sx * 0.085 + 0.012, f === 3 ? 0.055 : 0.05, z + 0.012);
-      eyes.add(glint);
+    const eye = new THREE.Group();
+    eye.position.set(sx * 0.088, 0, z - 0.014);
+    const w = sphere(0.05 * big, sclera, 16, 12);
+    w.scale.set(0.8, 1, 0.34);
+    const p = sphere(0.032 * big, iris, 14, 10);
+    p.scale.set(0.9, 1, 0.36);
+    p.position.set(-sx * 0.004, -0.006, 0.012);
+    const pu = sphere(0.019 * big, ink, 12, 8);
+    pu.scale.set(0.9, 1, 0.3);
+    pu.position.set(-sx * 0.004, -0.008, 0.02);
+    const gl = sphere(0.011 * big, white, 8, 6);
+    gl.position.set(0.011, 0.012, 0.026);
+    eye.add(w, p, pu, gl);
+    if (f === 2) {
+      // Sleepy: heavy upper lids.
+      const l = sphere(0.053, lid, 14, 10);
+      l.scale.set(0.84, 0.62, 0.38);
+      l.position.set(0, 0.024, 0.004);
+      eye.add(l);
     }
+    eyes.add(eye);
+    // Eyebrows, shaped by the face.
+    const b = capsule(0.011, 0.05, brow);
+    b.rotation.z = Math.PI / 2 + sx * ([-0.18, 0.38, 0.05, -0.3][f] ?? 0);
+    b.scale.set(1, 1, 0.55);
+    b.position.set(sx * 0.09, [0.112, 0.098, 0.092, 0.13][f] ?? 0.11, z - 0.004);
+    head.add(b);
     const ck = sphere(0.045, cheek, 12, 8);
     ck.scale.set(1, 0.6, 0.3);
     ck.position.set(sx * 0.15, -0.045, z - 0.05);
     head.add(ck);
-    if (f === 1) {
-      const brow = mesh(new THREE.BoxGeometry(0.07, 0.018, 0.02), black, sx * 0.085, 0.1, z - 0.012);
-      brow.rotation.z = sx * 0.3;
-      head.add(brow);
-    }
   }
   head.add(eyes);
   let mouth;
-  if (f === 0) { mouth = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.009, 6, 14, Math.PI), black); mouth.rotation.z = Math.PI; mouth.position.set(0, -0.06, z - 0.004); }
-  else if (f === 1) { mouth = mesh(new THREE.BoxGeometry(0.06, 0.012, 0.012), black, 0, -0.07, z - 0.01); }
-  else if (f === 2) { mouth = sphere(0.016, black, 8, 6); mouth.scale.set(1, 0.7, 0.4); mouth.position.set(0, -0.07, z - 0.008); }
-  else { mouth = sphere(0.03, mat(0x5a1f2a, 0.5), 12, 8); mouth.scale.set(0.9, 1.1, 0.4); mouth.position.set(0, -0.075, z - 0.012); }
+  if (f === 0) {
+    // Open smile: a dark half-moon with a little tongue.
+    mouth = new THREE.Group();
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.042, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mat(0x4a1822, 0.5));
+    m.scale.set(1, 0.7, 0.3);
+    const tg = sphere(0.02, mat(0xe86a7a, 0.5), 10, 8);
+    tg.scale.set(1.2, 0.6, 0.4);
+    tg.position.set(0, -0.018, 0.004);
+    mouth.add(m, tg);
+    mouth.position.set(0, -0.058, z - 0.006);
+  } else if (f === 1) { mouth = capsule(0.008, 0.045, ink); mouth.rotation.z = Math.PI / 2 + 0.08; mouth.scale.set(1, 1, 0.5); mouth.position.set(0, -0.07, z - 0.008); }
+  else if (f === 2) { mouth = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.007, 6, 12, Math.PI), ink); mouth.rotation.z = Math.PI; mouth.position.set(0.01, -0.068, z - 0.006); }
+  else { mouth = sphere(0.03, mat(0x4a1822, 0.5), 12, 8); mouth.scale.set(0.85, 1.1, 0.4); mouth.position.set(0, -0.078, z - 0.012); }
   head.add(mouth);
   // A little nose bump in the head colour.
   const nose = sphere(0.03, mat(new THREE.Color(skinHex).multiplyScalar(0.92), 0.6), 10, 8);
-  nose.position.set(0, -0.01, z + 0.012);
+  nose.scale.set(1, 0.85, 1);
+  nose.position.set(0, -0.012, z + 0.012);
   head.add(nose);
   return eyes;
+}
+
+/** Hats that cover the top of the head: only hair that would show below them is built. */
+const COVERING_HATS = new Set([1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 17, 18, 19, 20]);
+/** Hair, built around the skull centre. */
+function buildHair(hr, hex, hatId) {
+  const g = new THREE.Group();
+  if (!hr) return g;
+  const m = mat(hex, 0.55);
+  const R = HEAD_R;
+  const covered = COVERING_HATS.has(hatId);
+  if (!covered) {
+    // Scalp: a cap tilted back so the forehead shows.
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(R * 1.035, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), m);
+    cap.rotation.x = -0.6;
+    cap.scale.set(1.01, 1.02, 0.99);
+    g.add(cap);
+  }
+  // Fringe along the hairline (short, swoop, ponytail, buns, long).
+  if ([1, 4, 5, 7].includes(hr)) {
+    for (let i = -2; i <= 2; i++) {
+      const a = i * 0.32;
+      const lock = sphere(0.05, m, 10, 8);
+      lock.scale.set(1, 0.7, 0.75);
+      lock.position.set(Math.sin(a) * R * 0.9, R * 0.62 - Math.abs(i) * 0.02, Math.cos(a) * R * 0.66);
+      if (!covered || Math.abs(i) >= 1) g.add(lock);
+    }
+  }
+  if (hr === 2) {
+    const sw = sphere(0.1, m, 14, 10);
+    sw.scale.set(1.6, 0.55, 0.8);
+    sw.position.set(-0.05, R * 0.66, R * 0.55);
+    sw.rotation.set(0.5, 0, -0.35);
+    g.add(sw);
+  }
+  if (hr === 3 && !covered) {
+    // Curls: little balls spread over the top (golden-angle spiral).
+    for (let i = 0; i < 26; i++) {
+      const y = 1 - (i / 25) * 0.62, r = Math.sqrt(1 - y * y), a = i * 2.39996;
+      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(0.055, 1), m);
+      c.position.set(Math.cos(a) * r * R * 1.03, y * R * 1.03, Math.sin(a) * r * R * 1.03 - 0.02);
+      if (c.position.z > R * 0.62 && c.position.y < R * 0.65) continue; // keep the forehead clear
+      g.add(c);
+    }
+  }
+  if (hr === 4) {
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.016, 8, 16), mat(0xe0453a, 0.5));
+    tie.position.set(0, R * 0.45, -R * 1.02);
+    tie.rotation.x = 0.9;
+    const tail = new THREE.Mesh(limbGeo(0.055, 0.035, 0.16), m);
+    tail.position.set(0, R * 0.12, -R * 1.25);
+    tail.rotation.x = 0.55;
+    g.add(tie, tail);
+  }
+  if (hr === 5 && !covered) for (const sx of [-1, 1]) g.add(mesh(new THREE.SphereGeometry(0.085, 14, 10), m, sx * R * 0.62, R * 0.86, -0.03));
+  if (hr === 6 && !covered) {
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2, tilt = 0.55;
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.15, 8), m);
+      const dir = new THREE.Vector3(Math.cos(a) * Math.sin(tilt), Math.cos(tilt), Math.sin(a) * Math.sin(tilt) - 0.25).normalize();
+      sp.position.copy(dir).multiplyScalar(R * 1.05);
+      sp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      g.add(sp);
+    }
+    g.add(mesh(new THREE.ConeGeometry(0.06, 0.2, 8), m, 0, R * 1.1, 0.02));
+  }
+  if (hr === 7) {
+    // Long hair down the back and over the ears.
+    const backMat = mat(hex, 0.55, { side: THREE.DoubleSide });
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.03, R * 1.1, 0.34, 26, 1, true, Math.PI * 0.55, Math.PI * 0.9), backMat);
+    back.position.set(0, -0.07, -0.02);
+    g.add(back);
+    // Soft rounded ends along the bottom edge.
+    for (let i = 0; i < 7; i++) {
+      const a = Math.PI * 0.6 + (i / 6) * Math.PI * 0.8;
+      const tip = sphere(0.045, m, 10, 8);
+      tip.position.set(Math.sin(a) * R * 1.07, -0.24, Math.cos(a) * R * 1.07 - 0.02);
+      g.add(tip);
+    }
+    for (const sx of [-1, 1]) {
+      const lock = capsule(0.045, 0.16, m);
+      lock.position.set(sx * R * 0.93, -0.06, 0.02);
+      g.add(lock);
+    }
+  }
+  return g;
 }
 
 function buildHat(h, col) {
@@ -250,6 +384,58 @@ function buildHat(h, col) {
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2;
       g.add(mesh(new THREE.IcosahedronGeometry(0.045, 0), mat([0xff9fb8, 0xffe27a, 0xffffff][i % 3], 0.6), Math.cos(a) * HEAD_R * 0.85, top - 0.07, Math.sin(a) * HEAD_R * 0.85));
+    }
+  } else if (h === 16) {
+    // Laurel wreath: two rows of leaves, tipped with gold.
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      if (Math.abs(Math.sin(a / 2)) < 0.12) continue; // gap at the front
+      const leaf = mesh(new THREE.SphereGeometry(0.045, 8, 6), mat(i % 3 ? 0x5f9a3a : 0xd8b23a, 0.5), Math.sin(a) * HEAD_R * 0.9, top - 0.06 + (i % 2) * 0.03, Math.cos(a) * HEAD_R * 0.9);
+      leaf.scale.set(0.55, 0.45, 1.3);
+      leaf.rotation.y = a;
+      leaf.rotation.x = 0.5;
+      g.add(leaf);
+    }
+  } else if (h === 17) {
+    // Gecko cap: a green cap with two big googly eyes on top.
+    const cap = dome(HEAD_R * 1.03, mat(0x5fbf4a, 0.6), 0.42);
+    cap.position.y = 0.05;
+    g.add(cap);
+    for (const sx of [-1, 1]) {
+      const eye = mesh(new THREE.SphereGeometry(0.07, 14, 10), mat(0xffffff, 0.3), sx * 0.1, top + 0.07, 0.06);
+      eye.add(mesh(new THREE.SphereGeometry(0.035, 10, 8), mat(0x1d1b22, 0.3), 0, 0.005, 0.05));
+      g.add(eye, mesh(new THREE.SphereGeometry(0.08, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x5fbf4a, 0.6), sx * 0.1, top + 0.06, 0.06));
+    }
+  } else if (h === 18) {
+    // Racing helmet: glossy shell, dark visor, a stripe over the top.
+    const shell = dome(HEAD_R * 1.12, mat(col, 0.2), 0.58);
+    shell.position.y = -0.02;
+    const visor = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R * 1.13, 22, 10, -0.9, 1.8, Math.PI * 0.36, Math.PI * 0.16), new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.05, metalness: 0.6 }));
+    visor.position.y = -0.02;
+    const stripe = new THREE.Mesh(new THREE.TorusGeometry(HEAD_R * 1.12, 0.022, 6, 28, Math.PI), mat(0xffffff, 0.3));
+    stripe.rotation.y = Math.PI / 2;
+    stripe.position.y = -0.02;
+    g.add(shell, visor, stripe);
+  } else if (h === 19) {
+    // Golden helmet with a crest along the top.
+    const gold = mat(0xf2c33b, 0.22, { metalness: 0.85 });
+    const d = dome(HEAD_R * 1.07, gold, 0.5);
+    d.position.y = 0.02;
+    const crest = mesh(new RoundedBoxGeometry(0.05, 0.12, 0.42, 2, 0.02), mat(0xe0453a, 0.6), 0, top + 0.08, -0.02);
+    g.add(d, crest);
+  } else if (h === 20) {
+    // Aviator cap: leather cap, ear flaps, goggles pushed up on the forehead.
+    const leather = mat(0x7a4a2a, 0.75);
+    const d = dome(HEAD_R * 1.05, leather, 0.5);
+    d.position.y = 0.0;
+    g.add(d);
+    for (const sx of [-1, 1]) {
+      const flap = mesh(new RoundedBoxGeometry(0.06, 0.16, 0.13, 2, 0.03), leather, sx * HEAD_R * 1.0, top - 0.24, 0);
+      g.add(flap);
+      const lens = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.014, 6, 16), mat(0xb9c2cc, 0.3, { metalness: 0.7 }));
+      lens.position.set(sx * 0.07, top - 0.02, HEAD_R * 0.86);
+      lens.rotation.x = -0.6;
+      g.add(lens);
     }
   }
   g.position.y = HEAD_R * 0.6 - 0.1;
@@ -421,7 +607,29 @@ function buildClimber(look, shadows) {
   const roll = mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.34, 14), mat(0x3a7a5a, 0.85), 0, 0.22, 0);
   roll.rotation.z = Math.PI / 2;
   pack.add(roll);
-  for (const sx of [-1, 1]) pack.add(mesh(new THREE.BoxGeometry(0.04, 0.012, 0.22), mat(0x2b2724, 0.7), sx * 0.11, 0.17, 0.11));
+  const webbing = mat(0x2b2724, 0.7);
+  for (const sx of [-1, 1]) pack.add(mesh(new THREE.BoxGeometry(0.04, 0.012, 0.22), webbing, sx * 0.11, 0.17, 0.11));
+  // Shoulder straps down the front, joined by a chest strap with a buckle.
+  for (const sx of [-1, 1]) {
+    const st = mesh(new RoundedBoxGeometry(0.045, 0.24, 0.014, 2, 0.006), webbing, sx * 0.1, 0.25, 0.184);
+    st.rotation.x = -0.27;
+    spine.add(st);
+  }
+  spine.add(mesh(new RoundedBoxGeometry(0.2, 0.026, 0.014, 2, 0.006), webbing, 0, 0.255, 0.186));
+  spine.add(mesh(new RoundedBoxGeometry(0.04, 0.034, 0.02, 2, 0.006), mat(0xf2c33b, 0.4), 0, 0.255, 0.192));
+  // Water bottle in the side pocket, a coiled rope and a carabiner.
+  const bottle = mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.13, 14), mat(0x23a3a3, 0.35), 0.17, -0.06, 0.01);
+  bottle.add(mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.035, 12), mat(0x2b2c33, 0.5), 0, 0.08, 0));
+  pack.add(bottle);
+  const coil = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.022, 8, 22), mat(0xe8762c, 0.8));
+  coil.position.set(0, -0.04, -0.09);
+  coil.scale.set(1, 1, 1.4);
+  pack.add(coil);
+  const biner = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.007, 6, 14), mat(0xb9c2cc, 0.25, { metalness: 0.8 }));
+  biner.position.set(-0.16, 0.05, 0.02);
+  biner.rotation.y = Math.PI / 2;
+  biner.scale.set(1, 1.4, 1);
+  pack.add(biner);
 
   // Head.
   const neck = new THREE.Group();
@@ -437,7 +645,9 @@ function buildClimber(look, shadows) {
   const face = new THREE.Group();
   face.position.y = HEAD_R * 0.8;
   head.add(face);
-  const eyes = buildFace(face, L.f, skinHex);
+  const hairHex = HAIR_COLORS[L.hc];
+  const eyes = buildFace(face, L.f, skinHex, L.hr ? hairHex : 0x3a2a20);
+  face.add(buildHair(L.hr, hairHex, L.h));
   for (const sx of [-1, 1]) {
     const ear = sphere(0.05, skin, 10, 8);
     ear.scale.set(0.45, 1, 0.8);
@@ -505,6 +715,10 @@ function buildClimber(look, shadows) {
       if (L.sh === 2) foot.add(mesh(new THREE.CylinderGeometry(0.085, 0.08, 0.2, 14), sm, 0, 0.1, 0));
       if (L.sh === 1) foot.add(mesh(new THREE.BoxGeometry(0.152, 0.02, 0.12), mat(topCol, 0.6), 0, 0.0, 0.05));
       if (L.sh === 0) foot.add(mesh(new THREE.CylinderGeometry(0.08, 0.078, 0.07, 14), sm, 0, 0.06, 0));
+      if (L.sh === 0 || L.sh === 1) {
+        const lace = mat(L.sh === 0 ? 0xe0453a : 0xffffff, 0.7);
+        for (let i = 0; i < 3; i++) foot.add(mesh(new THREE.BoxGeometry(0.07, 0.012, 0.016), lace, 0, 0.05 - i * 0.004, 0.06 + i * 0.035));
+      }
     }
     knee.add(shin, foot);
     hip.add(thigh, knee);
@@ -514,7 +728,7 @@ function buildClimber(look, shadows) {
   const U = {
     hips, spine, neck, head, eyes, pack, hat,
     armL: arm(-1), armR: arm(1), legL: leg(-1), legR: leg(1),
-    look: L, blinkT: 2 + Math.random() * 3, emote: null, emoteT: 0, t: Math.random() * 10,
+    look: L, blinkT: 2 + Math.random() * 3, emote: null, emoteT: 0, t: Math.random() * 10, squash: 0,
   };
   root.traverse((o) => { if (o.isMesh) { o.castShadow = shadows; o.receiveShadow = shadows; } });
   root.userData = U;
@@ -590,6 +804,17 @@ export function poseClimber(model, mode, facing, phase, dt, moving = 0) {
     legR.knee.rotation.x = 0.7;
     head.rotation.set(0, 0.4, 0);
     eyes.scale.y = 0.15;
+  } else if (mode === 'crouch') {
+    // Squatting low with hands cupped in front: a step for a friend.
+    hips.position.y = H0 - 0.2;
+    spine.rotation.x = 0.45;
+    head.rotation.x = -0.35;
+    for (const l of [legL, legR]) { l.hip.rotation.x = -1.25; l.knee.rotation.x = 1.9; l.foot.rotation.x = -0.6; }
+    legL.hip.rotation.z = -0.18;
+    legR.hip.rotation.z = 0.18;
+    armL.sh.rotation.set(-1.0, 0, 0.35);
+    armR.sh.rotation.set(-1.0, 0, -0.35);
+    armL.el.rotation.x = armR.el.rotation.x = -0.6;
   } else {
     // Bouncy walk/run with a little waddle.
     const w = Math.min(1, moving);
@@ -610,6 +835,23 @@ export function poseClimber(model, mode, facing, phase, dt, moving = 0) {
     armL.el.rotation.x = -0.3 - (0.3 + 0.5 * run) * w;
     armR.el.rotation.x = -0.3 - (0.3 + 0.5 * run) * w;
     pack.rotation.z = -s * 0.05 * w;
+    // The pack bounces with each step; standing still, the climber breathes.
+    pack.rotation.x = Math.abs(Math.cos(phase)) * 0.07 * w + 0.05 * run;
+    const idle = 1 - w, br = Math.sin(t * 1.7);
+    spine.rotation.x += br * 0.022 * idle;
+    armL.sh.rotation.z -= br * 0.03 * idle;
+    armR.sh.rotation.z += br * 0.03 * idle;
+  }
+
+  // Landing: knees bend and spring back.
+  if (U.squash > 0 && mode !== 'down') {
+    const k = Math.sin(Math.min(1, U.squash) * Math.PI * 0.5);
+    hips.position.y -= 0.11 * k;
+    spine.rotation.x += 0.22 * k;
+    for (const l of [legL, legR]) { l.hip.rotation.x -= 0.55 * k; l.knee.rotation.x += 1.0 * k; l.foot.rotation.x -= 0.45 * k; }
+    armL.sh.rotation.z -= 0.35 * k;
+    armR.sh.rotation.z += 0.35 * k;
+    U.squash = Math.max(0, U.squash - dt * 3.2);
   }
 
   if (U.emote && mode !== 'down') {

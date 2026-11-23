@@ -27,6 +27,14 @@ export const builtinSkyCrew = {
   settings: { playEnabled: true, showLeaderboard: true, featured: true },
 };
 
+/** Games the site lists by itself (server/src/lib/seed-games.ts); they are not the studio filling in its catalog. */
+const AUTO_LISTED = new Set(['highcrag']);
+/** The public list: the studio's catalog, plus the shipped Sky Crew until the studio lists its own games. */
+export function withBuiltins(catalog) {
+  if (catalog.some((g) => g.slug === 'sky-crew' || !AUTO_LISTED.has(g.slug))) return catalog;
+  return [builtinSkyCrew, ...catalog];
+}
+
 export function releaseLine(g) {
   if (g.status !== 'upcoming') return null;
   if (!g.releaseDate) return h('span', { class: 'release' }, 'Release date TBA');

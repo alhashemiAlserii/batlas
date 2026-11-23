@@ -111,7 +111,13 @@ function grassTex(key, hue, light) {
     x.clearRect(0, 0, 128, 128);
     for (let i = 0; i < 46; i++) {
       const bx = 6 + rnd() * 116, h = 50 + rnd() * 74, lean = (rnd() - 0.5) * 30;
-      x.fillStyle = hsl(hue + (rnd() - 0.5) * 18, 45 + rnd() * 15, light + (rnd() - 0.5) * 16);
+      // Each blade: darker at the root, sunlit toward the tip.
+      const hh = hue + (rnd() - 0.5) * 14, sat = 40 + rnd() * 12, li = light + (rnd() - 0.5) * 8;
+      const gr = x.createLinearGradient(0, 128, 0, 128 - h);
+      gr.addColorStop(0, hsl(hh + 4, sat, li * 0.55));
+      gr.addColorStop(0.55, hsl(hh, sat, li));
+      gr.addColorStop(1, hsl(hh - 10, sat - 6, li * 1.35));
+      x.fillStyle = gr;
       x.beginPath();
       x.moveTo(bx - 2.2, 128);
       x.quadraticCurveTo(bx + lean * 0.4, 128 - h * 0.6, bx + lean, 128 - h);
@@ -180,6 +186,7 @@ export function makeSky() {
     horizon: { value: new THREE.Color(0xc9dfea) },
     sunDir: { value: new THREE.Vector3(0.45, 0.5, 0.3).normalize() },
     sunColor: { value: new THREE.Color(0xfff0d0) },
+    uTime: shared.time,
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -187,7 +194,8 @@ export function makeSky() {
     depthWrite: false,
     fog: false,
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; varying vec3 vDir;
+    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; uniform float uTime; varying vec3 vDir;
+      ${NOISE_GLSL}
       void main(){
         vec3 d = normalize(vDir);
         float h = d.y;
@@ -198,6 +206,13 @@ export function makeSky() {
         c += sunColor * (pow(s, 1400.0) * 3.0 + pow(s, 60.0) * 0.35 + pow(s, 6.0) * 0.12);
         // Warm the horizon toward the sun.
         c += vec3(0.25, 0.14, 0.04) * pow(s, 3.0) * (1.0 - clamp(h * 3.0, 0.0, 1.0)) * 0.6;
+        // Thin, slowly drifting high cloud streaks, lit warmer near the sun.
+        if (h > 0.015) {
+          vec2 p = d.xz / (h + 0.15);
+          float n = hc_fbm(p * vec2(0.9, 2.6) + vec2(uTime * 0.006, 0.0)) * 0.7 + hc_fbm(p * 3.1 - vec2(0.0, uTime * 0.004)) * 0.3;
+          float cir = smoothstep(0.52, 0.82, n) * smoothstep(0.015, 0.18, h) * (1.0 - smoothstep(0.55, 0.95, h)) * 0.42;
+          c = mix(c, mix(vec3(0.97, 0.98, 1.0), vec3(1.0, 0.9, 0.76), pow(s, 4.0)), cir);
+        }
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -260,6 +275,9 @@ function waterShader(sh, { shore }) {
       wc = mix(wc, deep, smoothstep(3.5, 18.0, d));
       float n = hc_fbm(vW * 0.3 + vec2(uTime * 0.22, uTime * 0.15));
       float foam = smoothstep(0.55, 0.0, d + (n - 0.5) * 0.6) * (0.65 + 0.35 * hc_noise(vW * 2.5 - uTime * 0.5));
+      ${shore ? `// Lines of surf rolling in toward the beach, breaking up as they go.
+      float surf = smoothstep(0.86, 1.0, sin(d * 2.3 + uTime * 1.5 + n * 3.0)) * smoothstep(2.8, 0.5, d) * smoothstep(-0.1, 0.35, d);
+      foam = max(foam, surf * (0.45 + 0.55 * hc_noise(vW * 1.7 + uTime * 0.3)));` : ''}
       diffuseColor.rgb = mix(wc, vec3(0.95, 0.97, 0.97), clamp(foam, 0.0, 1.0));
       diffuseColor.a = mix(0.55, 0.96, smoothstep(0.1, 5.0, d)) + foam * 0.35;`)
     .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -373,7 +391,7 @@ export function terrainMaterial(q) {
 // ---------------- lights ----------------
 export function makeLights(scene, q) {
   USE_STD = !!q.standard;
-  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x5a5440, q.standard ? 0.45 : 1.25);
+  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x6a6450, q.standard ? 0.58 : 1.25);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffe8c4, q.standard ? 3.0 : 2.8);
   sun.position.set(90, 110, 60);
@@ -476,6 +494,38 @@ function broadleafTree(rng) {
   const wood = mergeGeometries([trunk, ...branches]);
   const crown = cardCluster(22, new THREE.Vector3(0.3, 5.2, 0), 1.9, 2.2, rng, 0.75);
   return { wood, crown };
+}
+/** Giant mushroom for the Fungal Hollow: a leaning stalk and a wide domed cap. */
+function mushroomGeometry(rng) {
+  const lean = (rng() - 0.5) * 0.5;
+  const stalk = trunkGeometry(3.2 + rng() * 1.6, 0.36, 0.26, lean, 7);
+  const h = 3.6 + rng() * 1.2;
+  const cap = new THREE.SphereGeometry(2.0 + rng() * 0.7, 18, 8, 0, Math.PI * 2, 0, Math.PI * 0.42);
+  cap.scale(1, 0.55, 1);
+  cap.translate(lean * 1.4, h, 0);
+  const gills = new THREE.CircleGeometry(1.95, 18);
+  gills.rotateX(Math.PI / 2);
+  gills.translate(lean * 1.4, h + 0.02, 0);
+  return { stalk, cap, gills };
+}
+/** Desert cactus: a ribbed column with one or two raised arms. */
+function cactusGeometry(rng) {
+  const parts = [];
+  const H = 2.2 + rng() * 1.6;
+  const col = new THREE.CapsuleGeometry(0.32, H, 4, 10);
+  col.translate(0, H / 2 + 0.3, 0);
+  parts.push(col);
+  const arms = 1 + (rng() < 0.6 ? 1 : 0);
+  for (let i = 0; i < arms; i++) {
+    const side = i === 0 ? 1 : -1, y = H * (0.35 + rng() * 0.25), up = 0.7 + rng() * 0.7;
+    const out = new THREE.CapsuleGeometry(0.2, 0.45, 4, 8);
+    out.rotateZ(Math.PI / 2);
+    out.translate(side * 0.55, y, 0);
+    const rise = new THREE.CapsuleGeometry(0.2, up, 4, 8);
+    rise.translate(side * 0.85, y + up / 2 + 0.05, 0);
+    parts.push(out, rise);
+  }
+  return mergeGeometries(parts.map((g) => g.toNonIndexed()));
 }
 function palmGeometry() {
   const trunk = trunkGeometry(5.2, 0.2, 0.13, 1.0, 8);
@@ -581,7 +631,8 @@ const foliage = (map, tint = 0xffffff, extra = {}) => {
 const barkMat = (key, base) => pbr(0xffffff, { map: barkTex(key, base), roughness: 0.95 });
 
 /** Scatter vegetation and props over the island. Returns tree colliders. */
-export function dressMountain(root, T, rng, q, avoid) {
+export function dressMountain(root, T, rng, q, avoid, zones = { mid: 'moss', high: 'frost' }) {
+  const fungal = zones.mid === 'fungal', canyon = zones.high === 'canyon';
   USE_STD = !!q.standard;
   const trees = [];
   const ok = (p, r) => avoid.every((a) => a.p.distanceTo(p) > a.r + r);
@@ -613,7 +664,7 @@ export function dressMountain(root, T, rng, q, avoid) {
   const bl = broadleafTree(rng);
   const bl2 = broadleafTree(rng);
   const woods = scatter(620, 4, 34, 0.9).filter(patch);
-  const jungle = scatter(360, 37, 124, 0.88);
+  const jungle = fungal ? [] : scatter(360, 37, 124, 0.88);
   const allBroad = [...woods, ...jungle];
   const wood = barkMat('bark', '#5e4632');
   instanced(root, bl.wood, wood, allBroad.filter((_, i) => i % 2 === 0), place(), sh);
@@ -626,27 +677,61 @@ export function dressMountain(root, T, rng, q, avoid) {
   instanced(root, bl.crown, leafC, jungle.filter((_, i) => i % 2 === 0), place(), sh);
   instanced(root, bl2.crown, leafA, jungle.filter((_, i) => i % 2 === 1), place(), sh);
 
+  // Fungal Hollow: giant glowing mushrooms instead of jungle trees, and little glowcaps instead of bushes.
+  const shrooms = fungal ? scatter(300, 37, 124, 0.86) : [];
+  if (fungal) {
+    const capCols = [0x8a5cd6, 0x2fb5a8, 0xe0703a];
+    for (let k = 0; k < 3; k++) {
+      const g = mushroomGeometry(rng);
+      const list = shrooms.filter((_, i) => i % 3 === k);
+      instanced(root, g.stalk, pbr(0xe8dcc6, { roughness: 0.8 }), list, place(), sh);
+      instanced(root, g.cap, pbr(capCols[k], { roughness: 0.55, emissive: capCols[k], emissiveIntensity: 0.18 }), list, place(), sh);
+      instanced(root, g.gills, pbr(0xf6e7ff, { roughness: 0.9, side: THREE.DoubleSide, emissive: 0xb8a0ff, emissiveIntensity: 0.25 }), list, place(), false);
+    }
+    const small = new THREE.SphereGeometry(0.22, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    small.scale(1, 0.6, 1);
+    small.translate(0, 0.32, 0);
+    const smallStalk = new THREE.CylinderGeometry(0.05, 0.07, 0.34, 6);
+    smallStalk.translate(0, 0.17, 0);
+    const glows = scatter(700, 37, 124, 0.8, 0.4);
+    instanced(root, smallStalk, pbr(0xf1e6cf), glows, place(), false);
+    instanced(root, small, pbr(0x7ff7e8, { emissive: 0x3fe0d0, emissiveIntensity: 0.9, roughness: 0.4 }), glows.filter((_, i) => i % 2), place(), false);
+    instanced(root, small, pbr(0xd59bff, { emissive: 0xb070ff, emissiveIntensity: 0.9, roughness: 0.4 }), glows.filter((_, i) => !(i % 2)), place(), false);
+  }
+
   // Bushes, flowers and grass.
   const bushGeo = cardCluster(9, new THREE.Vector3(0, 0.55, 0), 0.6, 1.0, rng, 0.7);
-  const bushes = [...scatter(420, 37, 124, 0.85, 1), ...scatter(460, 3, 34, 0.88, 1)];
+  const bushes = [...(fungal ? [] : scatter(420, 37, 124, 0.85, 1)), ...scatter(460, 3, 34, 0.88, 1)];
   instanced(root, bushGeo, sway(foliage(leafTex('leafBush', 100, 42, 28)), 0.08), bushes, place(), sh);
-  const flowers = scatter(620, 3, 124, 0.9, 1);
+  const flowers = scatter(620, 3, fungal ? 34 : 124, 0.9, 1);
   const flowerGeo = crossedCards(0.6, 0.45, 2);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flPink', 330)), 0.25), flowers.filter((_, i) => i % 3 === 0), place(), false);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flYel', 48)), 0.25), flowers.filter((_, i) => i % 3 === 1), place(), false);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flWht', 220)), 0.25), flowers.filter((_, i) => i % 3 === 2), place(), false);
   const grass = scatter(4200, 2.2, 124, 0.88, 0.5);
   const grassGeo = crossedCards(0.9, 0.55, 3);
-  instanced(root, grassGeo, sway(foliage(grassTex('grassG', 100, 32)), 0.3), grass.filter((p) => p.y > 3), place(), false);
+  instanced(root, grassGeo, sway(foliage(grassTex('grassG', 100, 32)), 0.3), grass.filter((p) => p.y > 3 && !(fungal && p.y > 36)), place(), false);
+  if (fungal) instanced(root, grassGeo, sway(foliage(grassTex('grassF', 255, 34)), 0.3), grass.filter((p) => p.y > 36), place(), false);
   instanced(root, grassGeo, sway(foliage(grassTex('grassD', 62, 48)), 0.3), grass.filter((p) => p.y <= 3), place(), false);
 
   // Conifers higher up, some dusted with snow.
-  const pine = pineGeometry(rng);
-  const pines = scatter(260, 127, 212, 0.88);
-  instanced(root, pine.trunk, barkMat('barkPine', '#4a3526'), pines, place(), sh);
-  instanced(root, pine.top, sway(foliage(needleTex('needle', false)), 0.003), pines.filter((_, i) => i % 3 === 0), place(), sh);
-  instanced(root, pine.top, sway(foliage(needleTex('needleSnow', true)), 0.003), pines.filter((_, i) => i % 3 !== 0), place(), sh);
-  const crystals = scatter(160, 127, 214, 0.85, 1);
+  const pines = canyon ? [] : scatter(260, 127, 212, 0.88);
+  if (!canyon) {
+    const pine = pineGeometry(rng);
+    instanced(root, pine.trunk, barkMat('barkPine', '#4a3526'), pines, place(), sh);
+    instanced(root, pine.top, sway(foliage(needleTex('needle', false)), 0.003), pines.filter((_, i) => i % 3 === 0), place(), sh);
+    instanced(root, pine.top, sway(foliage(needleTex('needleSnow', true)), 0.003), pines.filter((_, i) => i % 3 !== 0), place(), sh);
+  }
+  // Red Canyon: cacti, dry scrub and dusty grass instead of pines and ice.
+  const cacti = canyon ? scatter(220, 127, 212, 0.85) : [];
+  if (canyon) {
+    const cg = [cactusGeometry(rng), cactusGeometry(rng)];
+    cg.forEach((g, k) => instanced(root, g, pbr(k ? 0x4f8a3e : 0x3f7a4a, { roughness: 0.7 }), cacti.filter((_, i) => i % 2 === k), place(), sh));
+    const scrub = scatter(520, 127, 214, 0.85, 0.6);
+    instanced(root, cardCluster(7, new THREE.Vector3(0, 0.35, 0), 0.45, 0.7, rng, 0.6), sway(foliage(leafTex('scrub', 42, 35, 42)), 0.06), scrub.filter((_, i) => i % 2), place(), false);
+    instanced(root, crossedCards(0.9, 0.5, 3), sway(foliage(grassTex('grassDry', 40, 52)), 0.3), scrub.filter((_, i) => !(i % 2)), place(), false);
+  }
+  const crystals = canyon ? [] : scatter(160, 127, 214, 0.85, 1);
   const crystalGeo = new THREE.OctahedronGeometry(0.5, 0);
   crystalGeo.scale(0.6, 1.6, 0.6);
   crystalGeo.translate(0, 0.6, 0);
@@ -658,14 +743,18 @@ export function dressMountain(root, T, rng, q, avoid) {
   // Boulders.
   const rocks = scatter(380, 2, 280, 0.75, 1);
   const rockMat = pbr(0x9a9284, { map: rockTex(), roughness: 0.92 });
+  const redRock = pbr(0xb86a46, { map: rockTex(), roughness: 0.92 });
   const darkRock = pbr(0x4a403c, { map: rockTex(), roughness: 0.9 });
   const rg = [rockGeometry(1), rockGeometry(2.7), rockGeometry(5.3)];
   rg.forEach((g, k) => {
-    instanced(root, g, rockMat, rocks.filter((p, i) => p.y < 216 && i % 3 === k), place(0.05), sh);
+    instanced(root, g, rockMat, rocks.filter((p, i) => p.y < 216 && !(canyon && p.y > 126) && i % 3 === k), place(0.05), sh);
+    if (canyon) instanced(root, g, redRock, rocks.filter((p, i) => p.y > 126 && p.y < 216 && i % 3 === k), place(0.05), sh);
     instanced(root, g, darkRock, rocks.filter((p, i) => p.y >= 216 && i % 3 === k), place(0.05), sh);
   });
 
   for (const p of [...palms, ...woods, ...jungle, ...pines, ...dead]) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.35 * p.userData.s });
+  for (const p of shrooms) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.45 * p.userData.s });
+  for (const p of cacti) trees.push({ x: p.x, z: p.z, y: p.y, r: 0.4 * p.userData.s, cactus: true });
 
   // Vines hanging down jungle cliff faces.
   const vines = [];
@@ -681,7 +770,7 @@ export function dressMountain(root, T, rng, q, avoid) {
   }
   const vineGeo = new THREE.PlaneGeometry(0.8, 1);
   vineGeo.translate(0, -0.5, 0);
-  instanced(root, vineGeo, foliage(leafTex('vine', 110, 45, 26)), vines, (d, v) => { d.position.set(v.x, v.y, v.z); d.scale.set(1, v.len, 1); d.rotation.set(0, v.r, 0); }, false);
+  instanced(root, vineGeo, foliage(fungal ? leafTex('vineF', 275, 40, 40) : leafTex('vine', 110, 45, 26)), vines, (d, v) => { d.position.set(v.x, v.y, v.z); d.scale.set(1, v.len, 1); d.rotation.set(0, v.r, 0); }, false);
 
   return trees;
 }
@@ -958,9 +1047,9 @@ export function makeGrassField(T, q) {
           d.updateMatrix();
           im.setMatrixAt(k, d.matrix);
           // Gentle tint: brighter and greener in the jungle, sun-dried patches in the lowlands.
-          const v = 0.8 + hash(ii, jj, 6) * 0.35;
-          const dry = y < 36 ? hash(ii >> 4, jj >> 4, 7) * 0.6 : 0;
-          col.setRGB(v * (0.95 + dry * 0.25), v, v * (0.88 - dry * 0.3));
+          const v = 0.88 + hash(ii, jj, 6) * 0.18;
+          const dry = y < 36 ? hash(ii >> 4, jj >> 4, 7) * 0.45 : 0;
+          col.setRGB(v * (0.94 + dry * 0.22), v, v * (0.9 - dry * 0.25));
           im.setColorAt(k, col);
           if (++k >= q.grass) break outer;
         }

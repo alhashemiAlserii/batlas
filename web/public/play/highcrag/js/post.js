@@ -57,7 +57,7 @@ export class Post {
     this.final = new THREE.ShaderMaterial({
       uniforms: {
         tScene: { value: null }, tBloom1: { value: null }, tBloom2: { value: null },
-        exposure: { value: 1.05 }, bloom: { value: 0.55 }, saturation: { value: 1.1 }, contrast: { value: 1.06 },
+        exposure: { value: 1.05 }, bloom: { value: 0.55 }, saturation: { value: 1.06 }, contrast: { value: 1.07 },
         warmth: { value: new THREE.Vector3(1.03, 1.0, 0.95) }, vignette: { value: 0.32 }, time: { value: 0 }, grain: { value: 0.025 },
         sunUv: { value: new THREE.Vector2(0.5, 0.5) }, rays: { value: 0 },
       },
@@ -82,8 +82,13 @@ export class Post {
           }
           c = aces(c * exposure);
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          // Tame acid yellow-greens a little, then the overall saturation.
+          float greenish = clamp((c.g - max(c.r, c.b)) * 4.0, 0.0, 1.0);
+          c = mix(c, mix(vec3(l), c, 0.86) * vec3(0.97, 1.0, 1.04), greenish * 0.6);
           c = mix(vec3(l), c, saturation);
           c = clamp((c - 0.5) * contrast + 0.5, 0.0, 1.0) * warmth;
+          // Split toning: slightly cool shadows, warm highlights (scaled, so blacks don't turn navy).
+          c *= mix(vec3(0.97, 0.99, 1.04), vec3(1.03, 1.01, 0.97), smoothstep(0.15, 0.75, l));
           vec2 d = vUv - 0.5;
           c *= 1.0 - vignette * smoothstep(0.35, 0.85, length(d * vec2(1.0, 0.85)) * 1.35);
           vec3 s = toSRGB(clamp(c, 0.0, 1.0));

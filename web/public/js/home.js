@@ -1,5 +1,5 @@
 import { api, h, getMe, fmtDay, safeUrl } from './common.js';
-import { gameCard, coverOf, statusLabel, releaseLine, builtinSkyCrew } from './ui.js';
+import { gameCard, coverOf, statusLabel, releaseLine, withBuiltins } from './ui.js';
 
 const $id = (id) => document.getElementById(id);
 
@@ -42,8 +42,8 @@ function newsCard(p) {
 
 const [gamesR, newsR, me] = await Promise.allSettled([api('GET', '/api/games'), api('GET', '/api/news?limit=3'), getMe()]);
 const games = gamesR.status === 'fulfilled' ? gamesR.value.games : [];
-// The catalog is whatever the studio has published. A fresh database still has Sky Crew on disk.
-const listed = games.length ? games : [builtinSkyCrew];
+// The catalog is whatever the studio has published. Until the studio lists its own games, Sky Crew ships on disk.
+const listed = withBuiltins(games);
 const pub = listed.filter((g) => g.status === 'published');
 const up = listed.filter((g) => g.status === 'upcoming').sort((a, b) => (a.releaseDate || '9999').localeCompare(b.releaseDate || '9999'));
 
