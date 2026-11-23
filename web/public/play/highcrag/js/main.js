@@ -2435,14 +2435,30 @@ checkRotate();
 }
 
 // ---------------- main loop ----------------
-{
+// Boot in steps so the loading screen can show what is happening (see loader.js).
+const LD = window.HCLoad || { stage() {}, done() { $('#loading').classList.add('hidden'); }, fail() {} };
+// Let the browser paint the loading screen between the heavy steps (a timer too, for hidden tabs).
+const breathe = () => new Promise((res) => { requestAnimationFrame(() => setTimeout(res, 0)); setTimeout(res, 150); });
+try {
+  LD.stage('Shaping the mountain…', 0.66);
+  await breathe();
   const urlSeed = Number(new URLSearchParams(location.search).get('seed'));
   const seed = Number.isFinite(urlSeed) && urlSeed > 0 ? urlSeed >>> 0 : store.get('lastSeed', (Math.random() * 1e9) >>> 0);
   resetRun(true, seed);
+  LD.stage('Opening the airport…', 0.84);
+  await breathe();
+  toLobby();
+  showTitle();
+  LD.stage('Lighting the sky…', 0.93);
+  await breathe();
+  // Draw one frame behind the loading screen so shaders are ready before the menu appears.
+  if (post) post.render(scene, camera, performance.now() / 1000); else renderer.render(scene, camera);
+  await breathe();
+} catch (err) {
+  LD.fail();
+  throw err;
 }
-toLobby();
-showTitle();
-$('#loading').classList.add('hidden');
+LD.done();
 
 let last = performance.now();
 function frame(now) {
@@ -2513,6 +2529,7 @@ window.__highcrag = {
   teleport: (x, z) => teleport(new V3(x, 0, z)),
   lobbyTo: (x, z) => { P.pos.set(x, LOBBY_FLOOR, z); P.render.copy(P.pos); },
   setYaw: (y) => { camYaw = y; },
+  setPitch: (v) => { camPitch = v; },
   setFacing: (f) => { P.facing = f; },
   give: (type) => { const s = inv.indexOf(null); if (s >= 0) { inv[s] = type; sel = s; renderInv(); } },
 };
