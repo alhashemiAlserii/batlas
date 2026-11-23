@@ -2542,7 +2542,8 @@ function updateRemotes(dt) {
     r.model.position.copy(r.pos);
     const ghost = r.st.m === 'ghost';
     if (!!r.ghostly !== ghost) { r.ghostly = ghost; setGhostly(r.model, ghost); }
-    poseClimber(r.model, ghost ? 'ground' : r.st.m, r.facing, r.anim, dt, ghost ? 0 : clamp(moved / Math.max(dt, 1e-3) / WALK, 0, 1));
+    // 'wake' (knocked flat for a moment) looks like lying down but isn't "down": nobody needs to help.
+    poseClimber(r.model, ghost ? 'ground' : r.st.m === 'wake' ? 'down' : r.st.m, r.facing, r.anim, dt, ghost ? 0 : clamp(moved / Math.max(dt, 1e-3) / WALK, 0, 1));
     if (ghost) r.model.position.y += Math.sin(performance.now() / 400 + r.cid) * 0.12;
     const down = r.st.m === 'down';
     r.model.visible = !hide;
@@ -2942,7 +2943,7 @@ function frame(now) {
       coop.sendAcc = 0;
       const alt = P.mode === 'climb' && world ? world.T.height(P.cx, P.cz) : P.pos.y;
       const inLobby = state === 'lobby' || (state === 'paused' && pausedFrom === 'lobby');
-      net.send({ t: 'st', p: [P.render.x, P.render.y, P.render.z], f: Math.atan2(Math.sin(P.facing), Math.cos(P.facing)), m: P.ghost ? 'ghost' : P.isDown || P.wakeT > 0 ? 'down' : P.crouch ? 'crouch' : P.mode === 'zip' ? 'rope' : P.mode, a: 0, alt: inLobby ? 0 : alt, l: inLobby ? 1 : 0 });
+      net.send({ t: 'st', p: [P.render.x, P.render.y, P.render.z], f: Math.atan2(Math.sin(P.facing), Math.cos(P.facing)), m: P.ghost ? 'ghost' : P.isDown ? 'down' : P.wakeT > 0 ? 'wake' : P.crouch ? 'crouch' : P.mode === 'zip' ? 'rope' : P.mode, a: 0, alt: inLobby ? 0 : alt, l: inLobby ? 1 : 0 });
     }
   }
   updateRemotes(dt);

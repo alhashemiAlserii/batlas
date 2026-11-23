@@ -183,7 +183,7 @@ export function attachHighcragServer(
         return broadcast(room, { t: 'layout', items: [...items.values()].map((i) => [i.id, i.type, ...i.p, 0]), camps: room.camps });
       }
       case 'st': {
-        if (!vec3(m.p) || !num(m.f, 100) || !['ground', 'air', 'climb', 'rope', 'down', 'ghost', 'crouch'].includes(m.m)) return;
+        if (!vec3(m.p) || !num(m.f, 100) || !['ground', 'air', 'climb', 'rope', 'down', 'wake', 'ghost', 'crouch'].includes(m.m)) return;
         const st = { p: m.p.map(round), f: round(m.f), m: m.m, a: num(m.a, 1e6) ? round(m.a) : 0, alt: num(m.alt, 2000) ? Math.round(m.alt) : 0, l: m.l === 1 ? 1 : 0 };
         c.lastState = st;
         return broadcast(room, { t: 'st', cid: c.cid, ...st }, c);
