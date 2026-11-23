@@ -186,6 +186,7 @@ export function makeSky() {
     horizon: { value: new THREE.Color(0xc9dfea) },
     sunDir: { value: new THREE.Vector3(0.45, 0.5, 0.3).normalize() },
     sunColor: { value: new THREE.Color(0xfff0d0) },
+    uTime: shared.time,
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -193,7 +194,8 @@ export function makeSky() {
     depthWrite: false,
     fog: false,
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; varying vec3 vDir;
+    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; uniform float uTime; varying vec3 vDir;
+      ${NOISE_GLSL}
       void main(){
         vec3 d = normalize(vDir);
         float h = d.y;
@@ -204,6 +206,13 @@ export function makeSky() {
         c += sunColor * (pow(s, 1400.0) * 3.0 + pow(s, 60.0) * 0.35 + pow(s, 6.0) * 0.12);
         // Warm the horizon toward the sun.
         c += vec3(0.25, 0.14, 0.04) * pow(s, 3.0) * (1.0 - clamp(h * 3.0, 0.0, 1.0)) * 0.6;
+        // Thin, slowly drifting high cloud streaks, lit warmer near the sun.
+        if (h > 0.015) {
+          vec2 p = d.xz / (h + 0.15);
+          float n = hc_fbm(p * vec2(0.9, 2.6) + vec2(uTime * 0.006, 0.0)) * 0.7 + hc_fbm(p * 3.1 - vec2(0.0, uTime * 0.004)) * 0.3;
+          float cir = smoothstep(0.52, 0.82, n) * smoothstep(0.015, 0.18, h) * (1.0 - smoothstep(0.55, 0.95, h)) * 0.42;
+          c = mix(c, mix(vec3(0.97, 0.98, 1.0), vec3(1.0, 0.9, 0.76), pow(s, 4.0)), cir);
+        }
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
       }`,
