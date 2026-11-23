@@ -807,13 +807,32 @@ function addZip(a, b) {
   world.root.add(g);
   world.zips.push({ a: a.clone(), b: b.clone(), mesh: g });
 }
-/** Where the line launcher would land: the first ground hit along the camera's aim. */
+/** Where the line launcher would land. The crosshair spot if it is a good one; otherwise the longest
+ *  clear downhill line in the direction you face (up to 45 m), so it is easy to use on phones too. */
 function launcherTarget() {
+  const a = P.pos.clone(); a.y += HAND + 0.25;
+  const clear = (b) => {
+    for (let k = 1; k < 20; k++) {
+      const q = a.clone().lerp(b, k / 20);
+      if (q.y < world.T.height(q.x, q.z) + 0.35) return false;
+    }
+    return true;
+  };
+  const good = (b) => b && b.y < a.y - 1 && Math.hypot(b.x - a.x, b.z - a.z) > 4 && b.distanceTo(a) < 48 && clear(b);
   const from = camera.position.clone(), dir = camera.getWorldDirection(new V3());
-  // Start past your own climber, so the line goes where the crosshair points.
   for (let t = from.distanceTo(P.pos) + 1.5; t < 60; t += 0.4) {
     const p = from.clone().addScaledVector(dir, t);
-    if (p.y <= world.T.height(p.x, p.z) + 0.05) return new V3(p.x, gy(p.x, p.z) + HAND + 0.6, p.z);
+    if (p.y <= world.T.height(p.x, p.z) + 0.05) {
+      const b = new V3(p.x, gy(p.x, p.z) + HAND + 0.6, p.z);
+      if (good(b)) return b;
+      break;
+    }
+  }
+  const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
+  for (let d = 44; d >= 5; d -= 1) {
+    const x = a.x + fx * d, z = a.z + fz * d;
+    const b = new V3(x, gy(x, z) + HAND + 0.6, z);
+    if (good(b)) return b;
   }
   return null;
 }
@@ -1006,8 +1025,7 @@ function useItem() {
   } else if (t === 'launcher') {
     const target = P.mode === 'ground' ? launcherTarget() : null;
     const a = P.pos.clone(); a.y += HAND + 0.25;
-    const ok = target && target.y < a.y + 0.5 && Math.hypot(target.x - a.x, target.z - a.z) > 4;
-    if (!ok) { toast(P.mode !== 'ground' ? 'Stand on solid ground to fire the launcher.' : 'Aim at the ground somewhere below you (4 to 45 m away).'); used = false; }
+    if (!target) { toast(P.mode !== 'ground' ? 'Stand on solid ground to fire the launcher.' : 'Face downhill: the zipline needs clear ground below you, 5 to 45 m away.'); used = false; }
     else {
       addZip(a, target);
       if (coop.on) net.send({ t: 'zip', a: a.toArray(), b: target.toArray() });
