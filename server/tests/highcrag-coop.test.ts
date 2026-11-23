@@ -259,6 +259,10 @@ describe('Highcrag co-op server', () => {
     expect(await b.c.wait((m) => m.t === 'ping')).toMatchObject({ p: [1, 2, 3], k: 'horn', by: a.you.cid });
     expect((await c.c.wait((m) => m.t === 'ping')).k).toBe('horn');
     a.c.send({ t: 'ping', p: [1, 2, 3], k: 'nuke' }); // unknown kind: ignored
+    a.c.send({ t: 'say', i: 2 });
+    expect(await b.c.wait((m) => m.t === 'say')).toMatchObject({ cid: a.you.cid, i: 2 });
+    a.c.send({ t: 'say', i: 9 }); // not one of the set phrases: ignored
+    a.c.send({ t: 'say', i: 'hello' }); // free text: ignored
 
     a.c.send({ t: 'vine', p: [10, 40, 10], d: [0.6, -0.8] });
     expect(await b.c.wait((m) => m.t === 'vine')).toMatchObject({ p: [10, 40, 10], d: [0.6, -0.8] });

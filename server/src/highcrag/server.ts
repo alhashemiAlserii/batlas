@@ -223,6 +223,11 @@ export function attachHighcragServer(
         c.look = validLook(m.look);
         return broadcast(room, { t: 'look', cid: c.cid, look: c.look }, c);
       }
+      case 'say': {
+        // Quick chat: only the index of one of the game's set phrases is relayed, never free text.
+        if (!Number.isInteger(m.i) || m.i < 0 || m.i > 5) return;
+        return broadcast(room, { t: 'say', cid: c.cid, i: m.i }, c);
+      }
       case 'emote': {
         if (!EMOTES.has(m.e)) return;
         return broadcast(room, { t: 'emote', cid: c.cid, e: m.e }, c);
