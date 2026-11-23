@@ -678,14 +678,15 @@ export function dressMountain(root, T, rng, q, avoid, zones = { mid: 'moss', hig
   instanced(root, bl2.crown, leafA, jungle.filter((_, i) => i % 2 === 1), place(), sh);
 
   // Fungal Hollow: giant glowing mushrooms instead of jungle trees, and little glowcaps instead of bushes.
-  const shrooms = fungal ? scatter(300, 37, 124, 0.86) : [];
+  const shrooms = fungal ? scatter(210, 37, 124, 0.86) : [];
   if (fungal) {
     const capCols = [0x8a5cd6, 0x2fb5a8, 0xe0703a];
     for (let k = 0; k < 3; k++) {
       const g = mushroomGeometry(rng);
       const list = shrooms.filter((_, i) => i % 3 === k);
       instanced(root, g.stalk, pbr(0xe8dcc6, { roughness: 0.8 }), list, place(), sh);
-      instanced(root, g.cap, pbr(capCols[k], { roughness: 0.55, emissive: capCols[k], emissiveIntensity: 0.18 }), list, place(), sh);
+      // Caps don't cast shadows: the hollow would be too dark under them.
+      instanced(root, g.cap, pbr(capCols[k], { roughness: 0.55, emissive: capCols[k], emissiveIntensity: 0.22 }), list, place(), false);
       instanced(root, g.gills, pbr(0xf6e7ff, { roughness: 0.9, side: THREE.DoubleSide, emissive: 0xb8a0ff, emissiveIntensity: 0.25 }), list, place(), false);
     }
     const small = new THREE.SphereGeometry(0.22, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
@@ -1040,6 +1041,7 @@ export function makeGrassField(T, q) {
           const x = ii * step + (hash(ii, jj, 1) - 0.5) * step, z = jj * step + (hash(ii, jj, 2) - 0.5) * step;
           const y = T.height(x, z);
           if (y < 2.6 || y > 124 || T.normal(x, z, n).y < 0.86) continue;
+          if (BANDS[1].id === 'fungal' && y > BANDS[1].y0) continue; // the hollow has moss and glowcaps, not grass
           const s = (0.55 + hash(ii, jj, 3) * 0.7) * (1 - r2 * 0.45);
           d.position.set(x, y, z);
           d.rotation.set(0, hash(ii, jj, 4) * 6.28, 0);
