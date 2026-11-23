@@ -89,6 +89,35 @@ const capsule = (r, len, m) => new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 
 const sphere = (r, m, ws = 18, hs = 14) => new THREE.Mesh(new THREE.SphereGeometry(r, ws, hs), m);
 const HEAD_R = 0.27;
 
+/** Smooth tapered limb: one continuous rounded surface whose radius narrows from rTop to rBot. */
+function limbGeo(rTop, rBot, len, seg = 20) {
+  const pts = [];
+  for (let i = 0; i <= 8; i++) { const a = -Math.PI / 2 + (i / 8) * (Math.PI / 2); pts.push(new THREE.Vector2(Math.max(1e-4, rBot * Math.cos(a)), -len / 2 + rBot * Math.sin(a))); }
+  for (let i = 1; i <= 8; i++) { const a = (i / 8) * (Math.PI / 2); pts.push(new THREE.Vector2(Math.max(1e-4, rTop * Math.cos(a)), len / 2 + rTop * Math.sin(a))); }
+  return new THREE.LatheGeometry(pts, seg);
+}
+const limb = (rTop, rBot, len, m) => new THREE.Mesh(limbGeo(rTop, rBot, len), m);
+/** The torso: one smooth bean shape from the hips up into the neck. */
+const TORSO = [[0, -0.075], [0.1, -0.07], [0.17, -0.035], [0.205, 0.025], [0.218, 0.1], [0.218, 0.17], [0.207, 0.24], [0.182, 0.3], [0.142, 0.35], [0.098, 0.39], [0.074, 0.42], [0.067, 0.46], [0.04, 0.5], [0, 0.51]];
+function torsoGeo(scale = 1, to = TORSO.length) {
+  return new THREE.LatheGeometry(TORSO.slice(0, to).map(([r, y]) => new THREE.Vector2(Math.max(1e-4, r * scale), y)), 30);
+}
+let _quilt = null;
+function quiltTexture() {
+  if (_quilt) return _quilt;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0, '#bdbdbd'); g.addColorStop(0.15, '#ffffff'); g.addColorStop(0.85, '#f0f0f0'); g.addColorStop(1, '#9a9a9a');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  _quilt = new THREE.CanvasTexture(c);
+  _quilt.wrapS = _quilt.wrapT = THREE.RepeatWrapping;
+  _quilt.repeat.set(1, 6);
+  _quilt.colorSpace = THREE.SRGBColorSpace;
+  return _quilt;
+}
+
 function buildFace(head, f, skinHex) {
   const black = mat(0x1d1b22, 0.3);
   const white = mat(0xffffff, 0.3);
@@ -276,7 +305,32 @@ function buildExtra(a, head) {
 }
 
 /** Build a climber. The origin is at the feet; +z is forward. */
-export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
+export function makeClimber(look = DEFAULT_LOOK, { shadows = false, outline = false } = {}) {
+  const model = buildClimber(look, shadows);
+  if (outline) addOutlines(model);
+  return model;
+}
+
+/** Cartoon ink outline: a slightly bigger, back-face-only dark copy behind each body part. */
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x1c140e, side: THREE.BackSide });
+function addOutlines(model) {
+  const meshes = [];
+  model.traverse((o) => { if (o.isMesh && !o.material.transparent) meshes.push(o); });
+  for (const m of meshes) {
+    if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+    const r = m.geometry.boundingSphere.radius * Math.max(m.scale.x, m.scale.y, m.scale.z);
+    if (r < 0.035) continue;
+    const o = new THREE.Mesh(m.geometry, OUTLINE_MAT);
+    o.position.copy(m.geometry.boundingSphere.center).multiplyScalar(-0.02 / r);
+    o.scale.setScalar(1 + 0.022 / r);
+    o.castShadow = false;
+    o.receiveShadow = false;
+    o.userData.outline = true;
+    m.add(o);
+  }
+}
+
+function buildClimber(look, shadows) {
   const L = validLook(look);
   const skinHex = SKINS[L.s];
   const topCol = COLORS[L.c];
@@ -285,7 +339,8 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
   const skin = mat(skinHex, 0.6);
   const top = L.t === 4 ? mat(0xffffff, 0.85, { map: plaidTexture(topCol) })
     : L.t === 5 ? mat(topCol, 0.95, { map: knitTexture(), bumpMap: knitTexture(), bumpScale: 0.8 })
-      : L.t === 3 ? mat(topCol, 0.3) : mat(topCol, 0.8);
+      : L.t === 3 ? mat(topCol, 0.3)
+        : L.t === 2 ? mat(topCol, 0.7, { map: quiltTexture(), bumpMap: quiltTexture(), bumpScale: 2 }) : mat(topCol, 0.8);
   const topDark = mat(new THREE.Color(topCol).multiplyScalar(0.7), 0.8);
   const bottom = mat(botCol, 0.85);
   const longSleeves = [1, 2, 3, 4, 5].includes(L.t);
@@ -296,10 +351,6 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
   const hips = new THREE.Group();
   hips.position.y = 0.55;
   root.add(hips);
-  const pelvis = capsule(0.15, 0.08, bottom);
-  pelvis.rotation.z = Math.PI / 2;
-  pelvis.scale.set(1, 1, 0.85);
-  hips.add(pelvis);
   if (L.b === 4) {
     const skirt = mesh(new THREE.CylinderGeometry(0.17, 0.27, 0.22, 22), bottom, 0, -0.06, 0);
     hips.add(skirt);
@@ -308,61 +359,62 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
   const spine = new THREE.Group();
   spine.position.y = 0.04;
   hips.add(spine);
-  const torso = capsule(0.2, 0.18, top);
-  torso.position.y = 0.2;
-  torso.scale.set(1.08, 1, 0.88);
+  const torso = new THREE.Mesh(torsoGeo(1), top);
+  torso.scale.set(1, 1, 0.86);
   spine.add(torso);
-  if (L.t === 2) for (let i = 0; i < 3; i++) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.205, 0.028, 8, 24), top);
-    ring.rotation.x = Math.PI / 2;
-    ring.scale.set(1.08, 0.88, 1);
-    ring.position.y = 0.12 + i * 0.1;
-    spine.add(ring);
-  }
+  // Trousers/shorts wrap the lower torso, with a belt at the waist.
+  const pants = new THREE.Mesh(torsoGeo(1.035, 5), bottom);
+  pants.scale.set(1, 1, 0.86);
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.222, 0.016, 8, 30), mat(0x2b2724, 0.6));
+  belt.rotation.x = Math.PI / 2;
+  belt.scale.set(1, 0.86, 1);
+  belt.position.y = 0.1;
+  spine.add(pants, belt);
   if (L.t === 1) {
     const hood = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.06, 8, 18, Math.PI * 1.3), top);
     hood.position.set(0, 0.4, -0.08);
     hood.rotation.x = -0.4;
-    const pocket = mesh(new RoundedBoxGeometry(0.2, 0.08, 0.03, 2, 0.015), topDark, 0, 0.12, 0.17);
+    const pocket = mesh(new RoundedBoxGeometry(0.2, 0.08, 0.03, 2, 0.015), topDark, 0, 0.16, 0.185);
     spine.add(hood, pocket);
   }
-  if (L.t === 3) for (let i = 0; i < 3; i++) spine.add(mesh(new THREE.SphereGeometry(0.014, 8, 6), mat(0xf2efe8, 0.3), 0, 0.1 + i * 0.09, 0.178));
-  if (L.t === 3) spine.add(mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.12, 22), top, 0, 0.02, 0));
+  if (L.t === 3) for (let i = 0; i < 3; i++) spine.add(mesh(new THREE.SphereGeometry(0.014, 8, 6), mat(0xf2efe8, 0.3), 0, 0.12 + i * 0.08, 0.19));
+  if (L.t === 3) spine.add(mesh(new THREE.CylinderGeometry(0.23, 0.26, 0.1, 26), top, 0, 0.0, 0));
   if (L.t === 6) for (const sx of [-1, 1]) {
-    const panel = mesh(new RoundedBoxGeometry(0.15, 0.3, 0.05, 2, 0.02), mat(topCol, 0.8), sx * 0.1, 0.2, 0.15);
+    const panel = mesh(new RoundedBoxGeometry(0.15, 0.3, 0.05, 2, 0.02), mat(topCol, 0.8), sx * 0.1, 0.2, 0.17);
     spine.add(panel);
   }
   if (L.t === 6) torso.material = mat(0xf2efe8, 0.8);
   if (L.t === 0 || L.t === 6 || L.t === 7 || L.t === 5) {
     const collar = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.022, 6, 18), L.t === 5 ? top : topDark);
     collar.rotation.x = Math.PI / 2;
-    collar.position.y = 0.37;
+    collar.scale.set(1, 0.86, 1);
+    collar.position.y = 0.4;
     spine.add(collar);
   }
   if (L.b === 3) {
-    spine.add(mesh(new RoundedBoxGeometry(0.22, 0.18, 0.05, 2, 0.02), bottom, 0, 0.12, 0.16));
-    for (const sx of [-1, 1]) spine.add(mesh(new THREE.BoxGeometry(0.04, 0.26, 0.02), bottom, sx * 0.09, 0.26, 0.15));
+    spine.add(mesh(new RoundedBoxGeometry(0.22, 0.18, 0.05, 2, 0.02), bottom, 0, 0.14, 0.18));
+    for (const sx of [-1, 1]) spine.add(mesh(new THREE.BoxGeometry(0.04, 0.22, 0.02), bottom, sx * 0.09, 0.28, 0.165));
   }
   if (L.a === 4) {
-    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.05, 8, 18), mat(0xe0453a, 0.9, { map: knitTexture() }));
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.045, 10, 22), mat(0xe0453a, 0.9, { map: knitTexture() }));
     scarf.rotation.x = Math.PI / 2;
     scarf.position.y = 0.38;
-    const tail = mesh(new RoundedBoxGeometry(0.08, 0.2, 0.03, 2, 0.01), scarf.material, 0.07, 0.28, 0.17);
+    const tail = mesh(new RoundedBoxGeometry(0.08, 0.2, 0.03, 2, 0.01), scarf.material, 0.07, 0.29, 0.15);
     tail.rotation.z = -0.2;
     spine.add(scarf, tail);
   }
   if (L.a === 6) {
     for (const sx of [-1, 1]) {
-      const wing = mesh(new THREE.ConeGeometry(0.035, 0.07, 4), mat(0xe0453a, 0.6), sx * 0.04, 0.35, 0.17);
+      const wing = mesh(new THREE.ConeGeometry(0.035, 0.07, 4), mat(0xe0453a, 0.6), sx * 0.04, 0.36, 0.13);
       wing.rotation.z = sx * Math.PI / 2;
       spine.add(wing);
     }
-    spine.add(mesh(new THREE.SphereGeometry(0.018, 8, 6), mat(0xe0453a, 0.6), 0, 0.35, 0.18));
+    spine.add(mesh(new THREE.SphereGeometry(0.018, 8, 6), mat(0xe0453a, 0.6), 0, 0.36, 0.14));
   }
 
   // Backpack.
   const pack = new THREE.Group();
-  pack.position.set(0, 0.22, -0.2);
+  pack.position.set(0, 0.2, -0.22);
   spine.add(pack);
   pack.add(mesh(new RoundedBoxGeometry(0.3, 0.36, 0.16, 3, 0.06), mat(0x6b5a3a, 0.85)));
   pack.add(mesh(new RoundedBoxGeometry(0.31, 0.1, 0.17, 2, 0.04), mat(0x544529, 0.85), 0, 0.14, 0.003));
@@ -380,7 +432,7 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
   neck.add(head);
   const skull = sphere(HEAD_R, skin, 28, 22);
   skull.position.y = HEAD_R * 0.8;
-  skull.scale.set(1, 0.97, 0.96);
+  skull.scale.set(1, 1.02, 0.97);
   head.add(skull);
   const face = new THREE.Group();
   face.position.y = HEAD_R * 0.8;
@@ -400,23 +452,27 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
   // Arms: chunky with mitten hands.
   const arm = (sx) => {
     const sh = new THREE.Group();
-    sh.position.set(sx * 0.25, 0.32, 0);
+    sh.position.set(sx * 0.198, 0.305, 0);
     spine.add(sh);
-    const upper = capsule(0.07, 0.1, longSleeves || L.t === 0 || L.t === 6 ? sleeveMat : skin);
-    upper.position.y = -0.09;
+    const upMat = longSleeves || L.t === 0 || L.t === 6 ? sleeveMat : skin;
+    const cap = sphere(0.08, upMat, 18, 14);
+    const upper = limb(0.08, 0.066, 0.11, upMat);
+    upper.position.y = -0.1;
     const el = new THREE.Group();
-    el.position.y = -0.2;
-    const fore = capsule(0.064, 0.08, longSleeves ? sleeveMat : skin);
-    fore.position.y = -0.06;
-    const hand = sphere(0.075, skin, 14, 10);
-    hand.scale.set(0.9, 1, 0.8);
-    hand.position.y = -0.17;
-    const thumb = capsule(0.025, 0.03, skin);
-    thumb.position.set(-sx * 0.05, -0.15, 0.03);
-    thumb.rotation.z = sx * 0.6;
-    el.add(fore, hand, thumb);
-    if (longSleeves) { const cuff = mesh(new THREE.CylinderGeometry(0.068, 0.068, 0.03, 14), topDark, 0, -0.11, 0); el.add(cuff); }
-    sh.add(upper, el);
+    el.position.y = -0.205;
+    const foreMat = longSleeves ? sleeveMat : skin;
+    const elbow = sphere(0.066, foreMat, 16, 12);
+    const fore = limb(0.066, 0.057, 0.085, foreMat);
+    fore.position.y = -0.075;
+    const hand = limb(0.057, 0.072, 0.05, skin);
+    hand.scale.set(1, 1, 0.74);
+    hand.position.y = -0.19;
+    const thumb = limb(0.027, 0.022, 0.035, skin);
+    thumb.position.set(-sx * 0.055, -0.175, 0.025);
+    thumb.rotation.z = sx * 0.75;
+    el.add(elbow, fore, hand, thumb);
+    if (longSleeves) { const cuff = mesh(new THREE.CylinderGeometry(0.064, 0.064, 0.03, 16), topDark, 0, -0.13, 0); el.add(cuff); }
+    sh.add(cap, upper, el);
     return { sh, el };
   };
   // Legs: short and sturdy.
@@ -425,12 +481,15 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
     const hip = new THREE.Group();
     hip.position.set(sx * 0.1, -0.03, 0);
     hips.add(hip);
-    const thigh = capsule(0.085, 0.1, L.b === 4 ? skin : bottom);
+    const thigh = limb(0.1, 0.082, 0.1, L.b === 4 ? skin : bottom);
     thigh.position.y = -0.11;
     const knee = new THREE.Group();
     knee.position.y = -0.25;
-    const shin = capsule(0.075, 0.08, longLegs ? bottom : skin);
-    shin.position.y = -0.09;
+    const shinMat = longLegs ? bottom : skin;
+    const kneeBall = sphere(0.082, shinMat, 16, 12);
+    const shin = limb(0.082, 0.07, 0.08, shinMat);
+    shin.position.y = -0.1;
+    knee.add(kneeBall);
     const foot = new THREE.Group();
     foot.position.y = -0.22;
     if (!longLegs && L.sh !== 2) { const sock = mesh(new THREE.CylinderGeometry(0.078, 0.078, 0.08, 14), mat(0xf2efe8, 0.9, { map: knitTexture() }), 0, 0.07, 0); foot.add(sock); }
@@ -464,7 +523,7 @@ export function makeClimber(look = DEFAULT_LOOK, { shadows = false } = {}) {
 
 export function disposeClimber(model) {
   // Shared canvas textures stay alive for the next climber.
-  model.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+  model.traverse((o) => { if (o.isMesh && !o.userData.outline) { o.geometry.dispose(); o.material.dispose(); } });
 }
 
 /** Animate a climber. mode: ground | air | climb | rope | down. phase advances with movement. */

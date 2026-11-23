@@ -61,10 +61,11 @@ export class TouchControls {
     tap('bUse', () => this.cb.onUse?.());
     tap('bDrop', () => this.cb.onDrop?.());
     tap('bPing', () => this.cb.onPing?.());
+    tap('bRun', (b) => { this.sprint = !this.sprint; b.classList.toggle('on', this.sprint); });
     tap('bEmote', () => this.cb.onEmote?.());
     // iOS: stop page scroll / zoom gestures on the game surface.
     // Stop one-finger page scrolling outside the menus (pinch and double-tap zoom are blocked in main.js).
-    document.addEventListener('touchmove', (e) => { if (!e.target.closest?.('.overlay')) e.preventDefault(); }, { passive: false });
+    document.addEventListener('touchmove', (e) => { if (!e.target.closest?.('.overlay, #passport')) e.preventDefault(); }, { passive: false });
   }
 
   stickStart(e) {
@@ -94,7 +95,7 @@ export class TouchControls {
     this.base.style.top = '';
     this.knob.style.transform = 'translate(-50%, -50%)';
   }
-  get running() { return Math.hypot(this.move.x, this.move.y) > 0.9; }
+  get running() { return this.sprint || Math.hypot(this.move.x, this.move.y) > 0.9; }
 
   setGrab(on, fromUser = false) {
     this.grab = on;

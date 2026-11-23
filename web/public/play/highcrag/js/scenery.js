@@ -17,9 +17,9 @@ export function pickQuality(isTouch) {
   return 'high';
 }
 export const QUALITY = {
-  low: { shadows: false, shadowSize: 0, decor: 0.45, pixelRatio: 1.25, standard: false, aa: false, clouds: 18, detail: false },
-  medium: { shadows: true, shadowSize: 1024, decor: 0.75, pixelRatio: 1.5, standard: true, aa: false, clouds: 26, detail: true },
-  high: { shadows: true, shadowSize: 2048, decor: 1, pixelRatio: 2, standard: true, aa: true, clouds: 36, detail: true },
+  low: { shadows: false, shadowSize: 0, decor: 0.45, pixelRatio: 1.25, standard: false, aa: false, clouds: 18, detail: false, post: false, grass: 0, outline: false },
+  medium: { shadows: true, shadowSize: 1024, decor: 0.75, pixelRatio: 1.5, standard: true, aa: false, clouds: 26, detail: true, post: true, grass: 7000, outline: true },
+  high: { shadows: true, shadowSize: 2048, decor: 1, pixelRatio: 2, standard: true, aa: true, clouds: 36, detail: true, post: true, grass: 15000, outline: true },
 };
 
 // Material factory: physically based on Medium/High, Lambert on Low (much cheaper on phones).
@@ -303,7 +303,11 @@ export function makeShoreWater(T, q) {
 
 /** Gentle wind sway for instanced plants. k scales with height above the plant's base. */
 export function sway(mat, k) {
-  mat.onBeforeCompile = (sh) => {
+  const prev = mat.onBeforeCompile;
+  // Each sway strength is baked into the shader text, so give each its own program cache key.
+  mat.customProgramCacheKey = () => `sway:${k.toFixed(4)}:${mat.userData.unpremul ? 1 : 0}`;
+  mat.onBeforeCompile = (sh, r) => {
+    prev.call(mat, sh, r);
     sh.uniforms.uTime = shared.time;
     sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
@@ -553,7 +557,27 @@ export function instanced(root, geo, mat, list, place, shadows) {
   return im;
 }
 
-const foliage = (map, tint = 0xffffff, extra = {}) => pbr(tint, { map, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, ...extra });
+// Canvas cut-outs store black in their transparent pixels; mipmaps blend that black into every blade and leaf edge,
+// which turns distant grass and tree crowns almost black. Dividing by the filtered alpha restores the true colour.
+const foliage = (map, tint = 0xffffff, extra = {}) => {
+  const m = pbr(tint, { map, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, ...extra });
+  m.userData.unpremul = true;
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      #ifdef USE_MAP
+        diffuseColor.rgb /= max(sampledDiffuseColor.a, 0.08);
+      #endif`)
+      // Double-sided cards normally flip the normal on their back face, which points it at the ground and
+      // turns half the blades and leaves nearly black. Keep the (upward-leaning) normal on both faces.
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+      #ifndef FLAT_SHADED
+        normal = normalize(vNormal);
+        nonPerturbedNormal = normal;
+      #endif`);
+  };
+  m.customProgramCacheKey = () => 'foliage';
+  return m;
+};
 const barkMat = (key, base) => pbr(0xffffff, { map: barkTex(key, base), roughness: 0.95 });
 
 /** Scatter vegetation and props over the island. Returns tree colliders. */
@@ -887,4 +911,63 @@ export class Gulls {
       b.wr.rotation.z = -flap;
     }
   }
+}
+
+// ---------------- dense grass around the player ----------------
+/** A field of grass tufts on a grid around the player, rebuilt as you move (Medium/High only). */
+export function makeGrassField(T, q) {
+  if (!q.grass) return null;
+  USE_STD = !!q.standard;
+  const geo = crossedCards(0.75, 0.5, 3);
+  const mat = sway(foliage(grassTex('grassField', 98, 34)), 0.35);
+  const im = new THREE.InstancedMesh(geo, mat, q.grass);
+  im.count = 0;
+  im.frustumCulled = false;
+  im.receiveShadow = !!q.shadows;
+  const d = new THREE.Object3D();
+  const col = new THREE.Color();
+  const n = new THREE.Vector3();
+  const step = 0.55;
+  const half = Math.floor(Math.sqrt(q.grass) / 2);
+  const hash = (i, j, k) => {
+    let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(k, 1442695041)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  let cx = NaN, cz = NaN;
+  return {
+    mesh: im,
+    update(px, pz) {
+      const gx = Math.round(px / 6) * 6, gz = Math.round(pz / 6) * 6;
+      if (gx === cx && gz === cz) return;
+      cx = gx; cz = gz;
+      const i0 = Math.round(gx / step), j0 = Math.round(gz / step);
+      let k = 0;
+      outer: for (let j = -half; j < half; j++) {
+        for (let i = -half; i < half; i++) {
+          const r2 = (i * i + j * j) / (half * half);
+          if (r2 > 1) continue;
+          const ii = i0 + i, jj = j0 + j;
+          const x = ii * step + (hash(ii, jj, 1) - 0.5) * step, z = jj * step + (hash(ii, jj, 2) - 0.5) * step;
+          const y = T.height(x, z);
+          if (y < 2.6 || y > 124 || T.normal(x, z, n).y < 0.86) continue;
+          const s = (0.55 + hash(ii, jj, 3) * 0.7) * (1 - r2 * 0.45);
+          d.position.set(x, y, z);
+          d.rotation.set(0, hash(ii, jj, 4) * 6.28, 0);
+          d.scale.set(s, s * (0.8 + hash(ii, jj, 5) * 0.6), s);
+          d.updateMatrix();
+          im.setMatrixAt(k, d.matrix);
+          // Gentle tint: brighter and greener in the jungle, sun-dried patches in the lowlands.
+          const v = 0.8 + hash(ii, jj, 6) * 0.35;
+          const dry = y < 36 ? hash(ii >> 4, jj >> 4, 7) * 0.6 : 0;
+          col.setRGB(v * (0.95 + dry * 0.25), v, v * (0.88 - dry * 0.3));
+          im.setColorAt(k, col);
+          if (++k >= q.grass) break outer;
+        }
+      }
+      im.count = k;
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    },
+  };
 }

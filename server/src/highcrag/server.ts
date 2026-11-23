@@ -57,7 +57,7 @@ const num = (v: unknown, lim = 1e5) => typeof v === 'number' && Number.isFinite(
 const vec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((x) => num(x, 2000));
 const round = (v: number) => Math.round(v * 100) / 100;
 const smallInt = (v: unknown, max: number) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : 0);
-// Outfit pieces and how many options each has (must match the game's wardrobe).
+// Outfit pieces and how many options each has (must match the passport options in characters.js).
 const LOOK_LIMITS: Record<string, number> = { s: 11, f: 3, h: 15, t: 7, c: 9, b: 4, bc: 9, sh: 3, a: 8 };
 const validLook = (l: any) => Object.fromEntries(Object.entries(LOOK_LIMITS).map(([k, max]) => [k, smallInt(l?.[k], max)]));
 
