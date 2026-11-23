@@ -5,7 +5,7 @@ import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST, setVariant }
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
 import { Post } from './post.js';
-import { pickQuality, QUALITY, makeSky, makeEnvironment, makeGrassField, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared } from './scenery.js';
+import { pickQuality, QUALITY, makeSky, makeEnvironment, makeGrassField, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared, makeLava } from './scenery.js';
 import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, WARDROBE, DEFAULT_LOOK, validLook, randomLook } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
@@ -409,7 +409,9 @@ function buildWorld(seed) {
   const pitonGroup = new THREE.Group();
   root.add(pitonGroup);
   scene.add(root);
-  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], zones, cacti: trees.filter((t) => t.cactus), smokes, gulls, grass, marks: marks.anim };
+  const lavaMesh = makeLava();
+  root.add(lavaMesh);
+  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], zones, cacti: trees.filter((t) => t.cactus), lava: { mesh: lavaMesh, y: -999, on: false }, smokes, gulls, grass, marks: marks.anim };
 }
 
 // ---------------- player & game state ----------------
@@ -432,11 +434,11 @@ let gust = { t: 8, on: false, k: 0, dir: new V3(1, 0, 0) };
 // ---------------- difficulty ----------------
 // Highcrag's own tiers. In co-op, the room creator's choice applies to everyone.
 const DIFFS = [
-  { name: 'Stroll', note: 'Gentle: slower hunger and cold, softer falls, lighter packs.', hunger: 0.6, cold: 0.6, fall: 0.6, weight: 0.8, downT: 35 },
-  { name: 'Expedition', note: 'The normal climb.', hunger: 1, cold: 1, fall: 1, weight: 1, downT: 25 },
-  { name: 'Summit I', note: 'You get hungry faster.', hunger: 1.3, cold: 1, fall: 1, weight: 1, downT: 25 },
-  { name: 'Summit II', note: 'Hungrier, colder, heavier packs, harder falls.', hunger: 1.3, cold: 1.3, fall: 1.15, weight: 1.5, downT: 20 },
-  { name: 'Summit III', note: 'All of that and worse. No ghosts: the fallen wake at the last fire with nothing.', hunger: 1.45, cold: 1.4, fall: 1.3, weight: 1.6, downT: 15, noGhost: true },
+  { name: 'Stroll', note: 'Gentle: slower hunger and cold, softer falls, lighter packs.', hunger: 0.6, cold: 0.6, fall: 0.6, weight: 0.8, downT: 35, lava: 0.6 },
+  { name: 'Expedition', note: 'The normal climb.', hunger: 1, cold: 1, fall: 1, weight: 1, downT: 25, lava: 1 },
+  { name: 'Summit I', note: 'You get hungry faster.', hunger: 1.3, cold: 1, fall: 1, weight: 1, downT: 25, lava: 1.1 },
+  { name: 'Summit II', note: 'Hungrier, colder, heavier packs, harder falls, faster lava.', hunger: 1.3, cold: 1.3, fall: 1.15, weight: 1.5, downT: 20, lava: 1.25 },
+  { name: 'Summit III', note: 'All of that and worse. No ghosts: the fallen wake at the last fire with nothing.', hunger: 1.45, cold: 1.4, fall: 1.3, weight: 1.6, downT: 15, noGhost: true, lava: 1.4 },
 ];
 const storedDiff = Number(store.get('difficulty', 1));
 let diff = Number.isInteger(storedDiff) && storedDiff >= 0 && storedDiff <= 4 ? storedDiff : 1;
@@ -1875,11 +1877,43 @@ function reviveGhostAt(c) {
   S.injury = Math.min(S.injury, 0.2);
   S.hunger = Math.min(S.hunger, 0.4);
   teleport(c.pos.clone().add(new V3(1.4, 0, -1.2)));
+  lavaBelow(c.pos.y);
   S.stamina = maxSt();
   sfx.pickup();
   badges.earn('second');
   toast('🔥 The campfire brings you back to life!');
 }
+// ---------------- rising lava (Ember Crown) ----------------
+// Once you reach the top zone, lava starts creeping up from below. It stops a few metres under the summit.
+function updateLava(dt) {
+  const L = world.lava;
+  const y = P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y;
+  if (!L.on) {
+    if (y > BANDS[3].y0 + 2 && !P.ghost && state === 'play') {
+      L.on = true;
+      L.y = BANDS[3].y0 - 12;
+      L.mesh.visible = true;
+      toast('🌋 The ground rumbles… lava is rising below you. Keep climbing!');
+      sfx.gust();
+    }
+    return;
+  }
+  if (world.beacon.lit) return;
+  L.y = Math.min(world.T.summit.y - 7, L.y + 0.08 * D().lava * dt);
+  L.mesh.position.y = L.y;
+  showStatus.lava = false;
+  if (state === 'play' && !P.ghost && !P.isDown && y < L.y + 0.2) {
+    S.injury = Math.min(1, S.injury + 0.14 * dt);
+    S.cold = 0;
+    showStatus.lava = true;
+    toastOnce('lava', '🔥 Lava! Get up out of it!', 4);
+  }
+}
+/** After waking at a campfire, the lava sinks back below it. */
+function lavaBelow(y) {
+  if (world?.lava?.on) { world.lava.y = Math.min(world.lava.y, y - 6); world.lava.mesh.position.y = world.lava.y; }
+}
+
 function updateGhost(dt) {
   const inp = inputVec(false);
   const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
@@ -1929,6 +1963,7 @@ function respawnAtCamp(msg) {
     S.hunger = Math.min(S.hunger, 0.4);
     S.stamina = maxSt();
     teleport(checkpoint);
+    lavaBelow(checkpoint.y);
     state = 'play';
     toast('You wake by the fire. Your pack is empty.');
   }, 1300);
@@ -2328,6 +2363,7 @@ function updateHud(dt) {
     if (showStatus.thorns) tag('🌿 Thorns!', 'hot');
     if (showStatus.spores) tag('🍄 Spores', 'warn');
     if (showStatus.cactus) tag('🌵 Cactus!', 'hot');
+    if (world.lava.on && !world.beacon.lit) { const gap = Math.max(0, Math.round(y - world.lava.y)); tag(showStatus.lava ? '🔥 In the lava!' : `🌋 Lava ${gap} m below`, gap < 8 ? 'hot' : 'warn'); }
     if (S.heat > 0.15) tag('🥵 Overheating', 'warn');
     if (S.boostT > 0) tag(`🧃 Fizz ${Math.ceil(S.boostT)}s`, 'good');
     if (S.bonus > 0.01) tag('🍯 Bonus stamina', 'good');
@@ -2955,7 +2991,7 @@ function frame(now) {
     updatePlayer(dt / 2);
     updateSurvival(dt);
   } else if (state === 'lobby') updateLobbyPlayer(dt);
-  if (world && onIsland()) updateGear(dt);
+  if (world && onIsland()) { updateGear(dt); if (state === 'play') updateLava(dt); }
   else if (state === 'flight') updateFlight(dt);
   if (state === 'play' || state === 'lobby') updateHud(dt);
   if (coop.on && state !== 'title') {
@@ -3019,6 +3055,8 @@ window.__highcrag = {
   gathered: (i) => gathered(world.camps[i]),
   giveUp: () => giveUp(),
   wakeUp: () => { P.wakeT = 0; },
+  get lava() { return { on: world.lava.on, y: world.lava.y }; },
+  setLava: (y) => { world.lava.y = y; },
   get badges() { return [...badges.earned]; },
   launcherTarget: () => { const t = launcherTarget(); return t && { x: t.x, y: t.y, z: t.z }; },
   ghost: () => { becomeGhost(); },

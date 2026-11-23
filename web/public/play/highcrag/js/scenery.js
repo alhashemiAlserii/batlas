@@ -822,6 +822,31 @@ function smokeTexture() {
   _smokeTex = new THREE.CanvasTexture(c);
   return _smokeTex;
 }
+/** Rising lava for the Ember Crown: a glowing, slowly churning sheet with dark crust drifting on it. */
+export function makeLava() {
+  const geo = new THREE.CircleGeometry(HALF * 1.3, 72);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = shared.time;
+    sh.vertexShader = 'varying vec2 vW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvW = (modelMatrix * vec4(transformed, 1.0)).xz;');
+    sh.fragmentShader = 'uniform float uTime;\nvarying vec2 vW;\n' + NOISE_GLSL + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+      // Dark cooling crust, split by glowing cracks, with a few molten pools that slowly churn.
+      float n = hc_fbm(vW * 0.09 + vec2(uTime * 0.04, -uTime * 0.025));
+      float m = hc_fbm(vW * 0.3 - vec2(uTime * 0.1, uTime * 0.02));
+      float crack = 1.0 - smoothstep(0.015, 0.09, abs(n - 0.5));
+      float pool = smoothstep(0.66, 0.82, m);
+      vec3 crust = vec3(0.10, 0.035, 0.025) + vec3(0.22, 0.05, 0.0) * m;
+      vec3 glow = mix(vec3(1.05, 0.22, 0.03), vec3(1.45, 0.55, 0.08), m);
+      diffuseColor.rgb = mix(crust, glow, max(crack, pool * 0.85));`);
+  };
+  mat.customProgramCacheKey = () => 'lava';
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.visible = false;
+  mesh.renderOrder = 1;
+  return mesh;
+}
+
 export function glowSprite(color, size) {
   const m = new THREE.SpriteMaterial({ map: smokeTexture(), color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
   const s = new THREE.Sprite(m);

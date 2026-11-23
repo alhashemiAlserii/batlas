@@ -28,6 +28,7 @@
     'In the <b>Red Canyon</b>, an umbrella in hand gives shade and coconuts cool you down.',
     'Puffball spores in the <b>Fungal Hollow</b> make you drowsy. Walk around them.',
     'Crouch (<b>X</b>) and a friend can jump off you to reach higher ledges.',
+    'Near the summit, <b>lava</b> rises behind you. Don\'t linger at the last fire.',
     'Earn <b>badges</b> as you climb. Some unlock new hats in your passport.',
   ];
   let tipI = Math.floor(Math.random() * TIPS.length);
