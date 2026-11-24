@@ -14,7 +14,7 @@ import type { SiteBridge } from '../game-server/bridge.js';
 
 export const HC_WS_PATH = '/ws/highcrag';
 export const HC_MAX_PLAYERS = 4;
-const BASE_ITEMS = ['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit', 'binoculars', 'horn', 'lantern', 'chalk', 'bean', 'marshmallow', 'honey', 'coconut', 'floatrope', 'launcher', 'shelf', 'umbrella', 'balloons'];
+const BASE_ITEMS = ['berry', 'mushroom', 'ration', 'bandage', 'warmer', 'piton', 'tonic', 'compass', 'rope', 'flare', 'medkit', 'binoculars', 'horn', 'lantern', 'chalk', 'bean', 'marshmallow', 'honey', 'coconut', 'floatrope', 'launcher', 'shelf', 'umbrella', 'balloons', 'herb'];
 // Food roasted at a campfire travels as "<food>@1" (roasted), "@2" (twice-roasted) or "@3" (burnt).
 const COOKABLE = ['berry', 'mushroom', 'ration', 'marshmallow', 'coconut'];
 const ITEM_TYPES = new Set([...BASE_ITEMS, ...COOKABLE.flatMap((k) => [1, 2, 3].map((lv) => `${k}@${lv}`))]);

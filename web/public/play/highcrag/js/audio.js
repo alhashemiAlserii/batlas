@@ -121,5 +121,9 @@ export class Sfx {
   flare() { this.burst(1.2, 3500, 0.25); this.tone(900, 0.6, 'sawtooth', 0.04, 600); }
   ding() { this.tone(988, 0.35, 'sine', 0.12); setTimeout(() => this.tone(784, 0.5, 'sine', 0.12), 260); }
   whoosh() { this.burst(0.5, 900, 0.25); }
+  /** Suitcase: a quick zipper rasp, then a pop as the lid flips. */
+  zip() { for (let i = 0; i < 6; i++) setTimeout(() => this.burst(0.035, 4200 - i * 250, 0.12), i * 32); setTimeout(() => this.tone(520, 0.12, 'triangle', 0.15, 260), 230); }
+  /** Rescue flare: a rising hiss and a bright bang. */
+  launch() { this.tone(300, 0.9, 'sawtooth', 0.06, 1400); this.burst(0.9, 3000, 0.2); setTimeout(() => { this.burst(0.6, 600, 0.5); this.tone(1200, 0.5, 'sine', 0.08, -400); }, 850); }
   blackout() { this.tone(300, 1.2, 'sine', 0.2, -240); }
 }

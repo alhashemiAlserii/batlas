@@ -413,3 +413,7 @@ body.touch #chatPanel kbd{display:none}
 #badgePop b{display:block;font-size:1.05rem;line-height:1.1}
 #badgePop span{display:block;font-size:.78rem;font-weight:700;line-height:1.2}
 @media (max-height:500px){#badgePop{top:calc(52px + env(safe-area-inset-top));padding:6px 12px 6px 6px}#badgePop .bp-icon{width:36px;height:36px;font-size:1.15rem}#badgePop span{display:none}}
+
+/* knocked out: the view lurches sideways, blurs and darkens, then settles */
+#view.ko canvas{animation:ko 2.6s ease-out}
+@keyframes ko{0%{transform:none;filter:none}18%{transform:rotate(-9deg) scale(1.12) translateY(4%);filter:blur(3px) brightness(.55) saturate(.6)}70%{transform:rotate(-6deg) scale(1.08) translateY(3%);filter:blur(2px) brightness(.4)}100%{transform:none;filter:none}}
