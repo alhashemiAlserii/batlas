@@ -121,7 +121,8 @@ a{color:var(--accent);font-weight:800}
 .slot small{position:absolute;top:2px;left:6px;font-size:.65rem;font-weight:900;color:var(--ink2)}
 #invName{font-size:.8rem;font-weight:800;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.7);min-height:1em;max-width:300px;text-align:right}
 
-.topbtns{position:absolute;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));pointer-events:auto}
+.topbtns{position:absolute;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));pointer-events:auto;display:flex;gap:8px}
+#btnView.on{background:linear-gradient(180deg,#ffe98a,var(--st))}
 .hbtn{background:rgba(255,246,228,.92);color:var(--ink);border:0;border-radius:14px;min-width:46px;min-height:46px;font-size:1rem;font-weight:900;cursor:pointer;box-shadow:0 4px 0 rgba(107,82,51,.4)}
 
 #downbox{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;pointer-events:auto;width:min(420px,90vw)}

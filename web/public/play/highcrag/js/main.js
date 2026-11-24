@@ -7,7 +7,7 @@ import { Sfx } from './audio.js';
 import { HNet } from './net.js';
 import { Post } from './post.js';
 import { pickQuality, QUALITY, makeSky, makeEnvironment, makeGrassField, makeWater, makeShoreWater, terrainMaterial, makeLights, makeClouds, dressMountain, buildLandmarks, Gulls, Smoke, glowSprite, bandSkyColors, shared, makeLava } from './scenery.js';
-import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, WARDROBE, DEFAULT_LOOK, validLook, randomLook } from './characters.js';
+import { makeClimber, poseClimber, playEmote, makeTag, disposeClimber, OUTFITS, WARDROBE, DEFAULT_LOOK, validLook, randomLook, SKINS, COLORS } from './characters.js';
 import { buildLobby, buildAirliner, buildWreck, LOBBY_FLOOR } from './lobby.js';
 import { TouchControls } from './touch.js';
 import { Passport } from './passport.js';
@@ -625,6 +625,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyG') emote('cheer');
   if (e.code === 'KeyY') emote('point');
   if (e.code === 'KeyV') toggleChat();
+  if (e.code === 'KeyP') setFirstPerson(!firstPerson);
   if (/^Digit[4-9]$/.test(e.code)) say(Number(e.code.slice(5)) - 4);
   if (e.code === 'Enter' && P.isDown) giveUp();
   if (e.code.startsWith('Digit')) { const d = Number(e.code.slice(5)) - 1; if (d >= 0 && d < 3) { sel = d; renderInv(); } }
@@ -2263,6 +2264,78 @@ function wakeOnBeach() {
 
 // ---------------- camera ----------------
 const camTarget = new V3();
+// First-person view (P, or the 👁 button): see through your climber's eyes, hands gripping the rock in front.
+let firstPerson = !!store.get('fp', false);
+function setFirstPerson(on) {
+  firstPerson = on;
+  store.set('fp', on);
+  $('#btnView').classList.toggle('on', on);
+  if (!on && climber.userData.head) climber.userData.head.visible = true;
+}
+// First-person hands: two mittens with sleeve cuffs that live on the camera.
+const fpHands = (() => {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe8b997, roughness: 0.6 });
+  const sleeve = new THREE.MeshStandardMaterial({ color: 0xe0453a, roughness: 0.8 });
+  const hands = [-1, 1].map((sx) => {
+    const h = new THREE.Group();
+    const palm = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.15, 0.06, 3, 0.03), skin);
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.05, 4, 8), skin);
+    thumb.position.set(-sx * 0.065, -0.02, 0.01);
+    thumb.rotation.z = sx * 0.7;
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.07, 0.12, 12), sleeve);
+    cuff.position.y = -0.13;
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.5, 12), sleeve);
+    arm.position.y = -0.42;
+    h.add(palm, thumb, cuff, arm);
+    g.add(h);
+    return h;
+  });
+  g.visible = false;
+  g.userData = { hands, skin, sleeve, t: 0 };
+  return g;
+})();
+camera.add(fpHands);
+scene.add(camera);
+function updateFpHands(dt, show) {
+  fpHands.visible = show;
+  if (!show) return;
+  const U = fpHands.userData;
+  U.skin.color.setHex(SKINS[look.s] ?? 0xe8b997);
+  U.sleeve.color.setHex(COLORS[look.c] ?? 0xe0453a);
+  U.t += dt;
+  const [L, Rh] = U.hands;
+  if (P.mode === 'climb' || P.mode === 'rope' || P.mode === 'zip') {
+    // Reaching up the rock, one hand then the other.
+    const s = Math.sin(P.anim);
+    L.position.set(-0.26, 0.05 + Math.max(0, s) * 0.16, -0.5);
+    Rh.position.set(0.26, 0.05 + Math.max(0, -s) * 0.16, -0.5);
+    L.rotation.set(-0.25, 0, -0.15);
+    Rh.rotation.set(-0.25, 0, 0.15);
+  } else {
+    // Low at your sides, swinging gently as you walk.
+    const b = Math.sin(P.anim) * 0.04 * Math.min(1, P.moveAmt);
+    L.position.set(-0.32, -0.36 + b, -0.55);
+    Rh.position.set(0.32, -0.36 - b, -0.55);
+    L.rotation.set(-1.1, 0, -0.2);
+    Rh.rotation.set(-1.1, 0, 0.2);
+  }
+}
+function updateFirstPerson() {
+  climber.visible = true;
+  climber.userData.head.visible = false;
+  const fwd = new V3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+  let p = camPitch - 0.25;
+  const eye = P.render.clone().add(new V3(0, P.crouch ? 1.05 : 1.5, 0));
+  if (P.mode === 'climb') {
+    // On a wall: lean back from the rock and look up a little so both hands are in view.
+    const n = world.T.normal(P.cx, P.cz, new V3());
+    eye.addScaledVector(new V3(n.x, 0, n.z).normalize(), 0.42);
+    p -= 0.35;
+  } else eye.addScaledVector(fwd, 0.14);
+  camera.position.copy(eye);
+  camera.lookAt(eye.clone().add(new V3(fwd.x * Math.cos(p), -Math.sin(p), fwd.z * Math.cos(p))));
+}
 function updateCamera(dt) {
   if (state === 'title') {
     const t = (performance.now() / 1000) * 0.05;
@@ -2294,6 +2367,15 @@ function updateCamera(dt) {
     const floor = Math.max(world.T.height(camera.position.x, camera.position.z), 0) + 0.3;
     if (camera.position.y < floor) camera.position.y = floor;
   }
+  const fpNow = firstPerson && !inLobby && onIsland() && !P.isDown;
+  updateFpHands(dt, fpNow && !P.ghost);
+  if (fpNow) {
+    updateFirstPerson();
+    const fovF = zoomed ? 24 : P.running ? 82 : 76;
+    if (Math.abs(camera.fov - fovF) > 0.05) { camera.fov += (fovF - camera.fov) * (1 - Math.exp(-6 * dt)); camera.updateProjectionMatrix(); }
+    return;
+  }
+  if (climber.userData.head) climber.userData.head.visible = true;
   if (shake > 0) {
     camera.position.x += (Math.random() - 0.5) * shake * 0.4;
     camera.position.y += (Math.random() - 0.5) * shake * 0.4;
@@ -3082,6 +3164,8 @@ $('#btnQuit').addEventListener('click', () => { if (coop.on) leaveCoop(); else r
 $('#btnLeave').addEventListener('click', () => { leaveCoop(); showTitle(); });
 $('#btnAgain').addEventListener('click', () => { if (coop.on) { leaveCoop(); showTitle(); } else { resetRun(true); startSolo(); } });
 $('#btnNew2').addEventListener('click', () => { resetRun(false); startSolo(); });
+$('#btnView').addEventListener('click', () => { setFirstPerson(!firstPerson); sfx.click(); });
+$('#btnView').classList.toggle('on', firstPerson);
 $('#btnPause').addEventListener('click', () => { if (isTouch) pause(); else document.exitPointerLock?.(); });
 $('#btnGiveUp').addEventListener('click', () => giveUp());
 $('#btnSkip').addEventListener('click', skipFlight);
@@ -3228,6 +3312,7 @@ window.__highcrag = {
   gathered: (i) => gathered(world.camps[i]),
   giveUp: () => giveUp(),
   wakeUp: () => { P.wakeT = 0; },
+  setFirstPerson: (on) => setFirstPerson(on),
   get cases() { return world.cases.map((c) => ({ x: c.pos.x, y: c.pos.y, z: c.pos.z, open: c.open })); },
   say: (i) => say(i),
   get bubble() { return climber.userData.bubble ? climber.userData.bubble.visible : false; },
