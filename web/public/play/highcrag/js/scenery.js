@@ -345,53 +345,28 @@ export function sway(mat, k) {
 // ---------------- terrain material ----------------
 export function terrainMaterial(q) {
   USE_STD = !!q.standard;
-  const opts = { vertexColors: true, flatShading: false };
-  const mat = q.standard ? new THREE.MeshStandardMaterial({ ...opts, roughness: 0.93, metalness: 0 }) : new THREE.MeshLambertMaterial(opts);
+  // Stylised low-poly ground: flat-shaded facets coloured by slope and height (vertex colours), with only a
+  // faint per-facet grain, so cliffs read as crisp rock faces instead of stretched noise.
+  const opts = { vertexColors: true, flatShading: true };
+  const mat = q.standard ? new THREE.MeshStandardMaterial({ ...opts, roughness: 0.95, metalness: 0 }) : new THREE.MeshLambertMaterial(opts);
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = shared.time;
-    sh.vertexShader = 'attribute float glow;\nvarying float vGlow;\nvarying vec3 vWP;\nvarying vec3 vWN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;\nvWP = transformed;\nvWN = normal;');
-    let frag = 'uniform float uTime;\nvarying float vGlow;\nvarying vec3 vWP;\nvarying vec3 vWN;\n' + NOISE_GLSL + sh.fragmentShader;
+    sh.vertexShader = 'attribute float glow;\nvarying float vGlow;\nvarying vec3 vWP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;\nvWP = transformed;');
+    let frag = 'uniform float uTime;\nvarying float vGlow;\nvarying vec3 vWP;\n' + NOISE_GLSL + sh.fragmentShader;
     frag = frag.replace('#include <color_fragment>', `#include <color_fragment>
-      vec3 Nw = normalize(vWN);
-      float steep = 1.0 - smoothstep(0.58, 0.82, Nw.y);
-      // Ground: grass clumps, soil patches and fine grain. Rock: strata, streaks and cracks.
-      vec2 pg = vWP.xz;
-      vec2 pr = abs(Nw.x) > abs(Nw.z) ? vWP.zy : vWP.xy;
-      float clump = hc_fbm(pg * 0.35);
-      float grain = hc_noise(pg * 3.5) * 0.6 + hc_noise(pg * 9.0) * 0.4;
-      float g = 0.7 + clump * 0.32 + grain * 0.16;
-      // Soft horizontal layering, vertical rain streaks and fine grit (no hard lines).
-      float strata = sin(vWP.y * 1.9 + hc_fbm(pr * 0.18) * 3.0) * 0.5 + 0.5;
-      float streak = hc_fbm(pr * vec2(2.2, 0.35));
-      float r = 0.8 + strata * 0.08 + (streak - 0.5) * 0.22 + (hc_noise(pr * 6.0) - 0.5) * 0.1;
-      diffuseColor.rgb *= mix(g, r, steep);
-      // Moss and lichen creeping onto lower rock faces, dust settling on ledges.
-      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.8, 1.05, 0.75), steep * smoothstep(0.55, 0.75, hc_fbm(pr * 0.5)) * 0.6 * (1.0 - smoothstep(120.0, 140.0, vWP.y)));`);
-    if (q.detail) {
-      frag = frag.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        {
-          vec3 Nw2 = normalize(vWN);
-          float st = 1.0 - smoothstep(0.58, 0.82, Nw2.y);
-          float e = 0.12;
-          vec3 P = vWP * mix(1.0, 0.6, st);
-          float h0 = hc_bump(P);
-          vec3 grad = vec3(hc_bump(P + vec3(e, 0.0, 0.0)) - h0, hc_bump(P + vec3(0.0, e, 0.0)) - h0, hc_bump(P + vec3(0.0, 0.0, e)) - h0) / e;
-          vec3 gt = grad - dot(grad, Nw2) * Nw2;
-          float strength = mix(0.16, 0.3, st);
-          normal = normalize(normal - (viewMatrix * vec4(gt * strength, 0.0)).xyz);
-        }`);
-    }
+      diffuseColor.rgb *= 0.96 + hc_noise(floor(vWP.xz * 0.6) + floor(vWP.y * 0.6)) * 0.08;`);
     frag = frag.replace('#include <emissivemap_fragment>',
       '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.32, 0.05) * vGlow * (0.9 + 0.35 * sin(uTime * 1.7 + vGlow * 6.0));');
     sh.fragmentShader = frag;
   };
+  mat.customProgramCacheKey = () => 'terrain-faceted';
   return mat;
 }
 
 // ---------------- lights ----------------
 export function makeLights(scene, q) {
   USE_STD = !!q.standard;
-  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x6a6450, q.standard ? 0.58 : 1.25);
+  const hemi = new THREE.HemisphereLight(0xbfe6ff, 0x6b5842, 1.35);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffe8c4, q.standard ? 3.0 : 2.8);
   sun.position.set(90, 110, 60);
