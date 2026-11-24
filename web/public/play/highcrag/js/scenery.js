@@ -396,6 +396,10 @@ export function makeLights(scene, q) {
   const sun = new THREE.DirectionalLight(0xffe8c4, q.standard ? 3.0 : 2.8);
   sun.position.set(90, 110, 60);
   scene.add(sun, sun.target);
+  // Soft sky-blue fill from the far side, so faces turned away from the sun are never pitch black.
+  const fill = new THREE.DirectionalLight(0xdce4f5, q.standard ? 0.45 : 0.35);
+  fill.position.set(-90, 50, -60);
+  scene.add(fill);
   if (q.shadows) {
     sun.castShadow = true;
     sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
@@ -500,13 +504,25 @@ function mushroomGeometry(rng) {
   const lean = (rng() - 0.5) * 0.5;
   const stalk = trunkGeometry(3.2 + rng() * 1.6, 0.36, 0.26, lean, 7);
   const h = 3.6 + rng() * 1.2;
-  const cap = new THREE.SphereGeometry(2.0 + rng() * 0.7, 18, 8, 0, Math.PI * 2, 0, Math.PI * 0.42);
-  cap.scale(1, 0.55, 1);
+  const cr = 2.0 + rng() * 0.7;
+  const cap = new THREE.SphereGeometry(cr, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  cap.scale(1, 0.78, 1);
   cap.translate(lean * 1.4, h, 0);
-  const gills = new THREE.CircleGeometry(1.95, 18);
+  const gills = new THREE.CircleGeometry(cr * 0.98, 20);
   gills.rotateX(Math.PI / 2);
   gills.translate(lean * 1.4, h + 0.02, 0);
-  return { stalk, cap, gills };
+  // Pale spots dotted over the top of the cap.
+  const spots = [];
+  for (let k = 0; k < 9; k++) {
+    const a = rng() * Math.PI * 2, el = 0.25 + rng() * 0.95;
+    const dir = new THREE.Vector3(Math.cos(a) * Math.sin(el), Math.cos(el) * 0.78, Math.sin(a) * Math.sin(el));
+    const sp = new THREE.SphereGeometry(0.2 + rng() * 0.12, 8, 6);
+    sp.scale(1, 0.35, 1);
+    sp.lookAt(dir);
+    sp.translate(lean * 1.4 + dir.x * cr, h + dir.y * cr, dir.z * cr);
+    spots.push(sp);
+  }
+  return { stalk, cap, gills, spots: mergeGeometries(spots) };
 }
 /** Desert cactus: a ribbed column with one or two raised arms. */
 function cactusGeometry(rng) {
@@ -680,14 +696,15 @@ export function dressMountain(root, T, rng, q, avoid, zones = { mid: 'moss', hig
   // Fungal Hollow: giant glowing mushrooms instead of jungle trees, and little glowcaps instead of bushes.
   const shrooms = fungal ? scatter(210, 37, 124, 0.86) : [];
   if (fungal) {
-    const capCols = [0x8a5cd6, 0x2fb5a8, 0xe0703a];
+    const capCols = [0x9a4fe8, 0x20c4b2, 0xf06a2a];
     for (let k = 0; k < 3; k++) {
       const g = mushroomGeometry(rng);
       const list = shrooms.filter((_, i) => i % 3 === k);
       instanced(root, g.stalk, pbr(0xe8dcc6, { roughness: 0.8 }), list, place(), sh);
       // Caps don't cast shadows: the hollow would be too dark under them.
-      instanced(root, g.cap, pbr(capCols[k], { roughness: 0.55, emissive: capCols[k], emissiveIntensity: 0.22 }), list, place(), false);
-      instanced(root, g.gills, pbr(0xf6e7ff, { roughness: 0.9, side: THREE.DoubleSide, emissive: 0xb8a0ff, emissiveIntensity: 0.25 }), list, place(), false);
+      instanced(root, g.cap, pbr(capCols[k], { roughness: 0.5, emissive: capCols[k], emissiveIntensity: 0.32 }), list, place(), false);
+      instanced(root, g.gills, pbr(0xf6e7ff, { roughness: 0.9, side: THREE.DoubleSide, emissive: 0xc8b0ff, emissiveIntensity: 0.55 }), list, place(), false);
+      instanced(root, g.spots, pbr(0xfff6ee, { roughness: 0.6, emissive: 0xfff0e0, emissiveIntensity: 0.25 }), list, place(), false);
     }
     const small = new THREE.SphereGeometry(0.22, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
     small.scale(1, 0.6, 1);

@@ -22,7 +22,7 @@ export const BANDS = [
 // daily mountain can differ): jungle or a fungal hollow, then snowy cliffs or a red desert canyon.
 export const VARIANTS = {
   moss: { id: 'moss', name: 'Tanglewood Jungle', ground: 0x4a7f2e, rock: 0x6e6658, fog: 0xbfd6d0, sky: 0x3a74bd },
-  fungal: { id: 'fungal', name: 'Fungal Hollow', ground: 0x7a78a8, rock: 0x726a88, fog: 0xb4aad2, sky: 0x4a5194 },
+  fungal: { id: 'fungal', name: 'Fungal Hollow', ground: 0x86809a, rock: 0x786e86, fog: 0xbcb2d4, sky: 0x4a5194 },
   frost: { id: 'frost', name: 'Frostline Cliffs', ground: 0xeef3f8, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
   canyon: { id: 'canyon', name: 'Red Canyon', ground: 0xd49a5e, rock: 0xa9533a, fog: 0xf1cfa6, sky: 0x4f8ad0 },
 };
