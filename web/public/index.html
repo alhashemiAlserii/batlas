@@ -24,26 +24,36 @@
 
 <section class="hero-edit" aria-labelledby="hero-title">
   <div class="hero-copy">
-    <p class="eyebrow">Batlas studio</p>
-    <h1 id="hero-title">Bring the crew.</h1>
+    <p class="eyebrow">The Batlas collection / Games to play together</p>
+    <h1 id="hero-title">Bring the crew. Pick a game.</h1>
   </div>
   <div class="hero-side">
-    <p>Co-op games for the people you actually play with. Open a page, share a room code, and go.</p>
+    <p>Fly a cabin full of passengers, or climb a mountain after the crash.</p>
     <div class="actions">
+      <a class="btn outline-lg" href="#collection">Choose a game <span aria-hidden="true">↓</span></a>
       <a class="btn primary lg go" id="hero-play" href="/play/sky-crew">Play Sky Crew</a>
     </div>
-    <p class="micro">iPhone, iPad and Mac. <a id="hero-join" href="/register">Create an account</a>. No email needed.</p>
+    <p class="micro caps">Play in your browser.<br>One handle for every game.</p>
+    <p class="micro"><a id="hero-join" href="/register">Create an account</a>. No email needed.</p>
+  </div>
+</section>
+
+<section class="facts" aria-label="At a glance">
+  <div class="facts-head"><strong>At a glance</strong><a href="/games">All games</a></div>
+  <div class="facts-row">
+    <div><span>In the collection</span><b id="fact-count">02</b></div>
+    <div><span>Play on</span><b>iPhone · iPad · Mac</b></div>
+    <div><span>Your account</span><b>Handle + PIN</b></div>
+    <div><span>Co-op rooms</span><b>Share a code</b></div>
+    <div><span>Price</span><b>Free</b></div>
   </div>
 </section>
 
 <div class="rule" id="collection">
-  <span>The collection</span>
+  <span>Explore the collection</span>
   <span id="collection-count">Games</span>
 </div>
-<div id="featured"><p class="muted">Loading…</p></div>
-
-<div class="rule" id="upcoming-rule"><span>In development</span></div>
-<div id="upcoming" class="grid"></div>
+<div id="collection-grid" class="collection-grid"><p class="muted">Loading…</p></div>
 
 <div class="rule" id="news">
   <span>Studio notes</span>

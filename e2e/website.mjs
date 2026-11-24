@@ -248,13 +248,12 @@ for (const [engName, eng] of [['chromium', chromium], ['webkit', webkit]]) {
     const touch = !!dev.hasTouch;
 
     await page.goto(`${B}/`, { waitUntil: 'networkidle' });
-    await page.waitForSelector('.featured');
-    expect((await page.locator('.featured h3').textContent()) === 'Sky Crew', `[${L}] homepage featured game`);
-    expect(await page.locator('#upcoming .game-card').count() >= 1 && (await page.locator('#upcoming .release').first().textContent()).includes('2027'), `[${L}] upcoming games with release date`);
+    await page.waitForSelector('#collection-grid .big-card');
+    expect((await page.locator('#collection-grid .big-card h3').first().textContent()) === 'Sky Crew', `[${L}] homepage featured game first`);
+    expect(await page.locator('#collection-grid .big-card').count() >= 2 && (await page.locator('#collection-grid .release').first().textContent()).includes('2027'), `[${L}] upcoming games with release date`);
     expect(await page.locator('#news-list .news-card').count() >= 1, `[${L}] latest news`);
     expect(await page.locator('.site-banner.event').count() >= 1, `[${L}] event banner site-wide`);
-    const fv = page.locator('.featured video');
-    if (await fv.count()) expect(await fv.evaluate((v) => v.muted && v.hasAttribute('playsinline') && v.autoplay), `[${L}] featured autoplay preview is muted + playsinline`);
+
     if (await page.isVisible('.menu-btn')) {
       await page.click('.menu-btn'); expect(await page.isVisible('.nav-links a[href="/games"]'), `[${L}] mobile menu opens`);
       await page.click('.menu-btn');
