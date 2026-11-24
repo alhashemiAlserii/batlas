@@ -1,6 +1,7 @@
 // Highcrag — an original survival climbing game for the Batlas site (1–4 players).
 // Flow: title → airport terminal → flight → crash on the beach → climb → summit beacon.
 import * as THREE from '../../vendor/three.module.js';
+import { RoundedBoxGeometry } from '../../vendor/addons/RoundedBoxGeometry.js';
 import { Terrain, BANDS, bandAt, zoneName, makeRng, R, HALF, COAST, setVariant } from './terrain.js';
 import { Sfx } from './audio.js';
 import { HNet } from './net.js';
@@ -117,6 +118,7 @@ const ITEMS = {
   launcher: { name: 'Line launcher', icon: '🏹', color: 0x3b6fd6, w: 0.06, hint: 'Aim at a spot below you and use: slide down a zipline' },
   shelf: { name: 'Shelf fungus', icon: '🍄‍🟫', color: 0xc98a4a, w: 0.01, hint: 'Use facing a wall (or climbing): grows a ledge to stand on' },
   umbrella: { name: 'Umbrella', icon: '☂️', color: 0x8a55b8, w: 0.03, hint: 'Hold it while falling to float down gently' },
+  herb: { name: 'Medicinal herb', icon: '🌿', color: 0x5fbf6a, w: 0.01, hint: 'Chew it: cures poison and drowsiness' },
   balloons: { name: 'Balloon bunch', icon: '🎈', color: 0xff6f91, w: 0.01, hint: 'Hold it: higher jumps and slow falls, until they pop' },
 };
 // Cooking: E at a lit campfire roasts the food in your hand one step at a time.
@@ -135,10 +137,10 @@ for (const k of Object.keys(ITEMS)) {
 }
 const LOOT = {
   shore: ['berry', 'berry', 'ration', 'bandage', 'piton', 'marshmallow', 'bean', 'coconut', 'coconut', 'umbrella', 'balloons'],
-  moss: ['berry', 'berry', 'mushroom', 'mushroom', 'bandage', 'piton', 'piton', 'ration', 'rope', 'bean', 'binoculars', 'chalk', 'honey', 'honey', 'shelf', 'shelf', 'floatrope', 'balloons'],
+  moss: ['herb', 'herb', 'berry', 'berry', 'mushroom', 'mushroom', 'bandage', 'piton', 'piton', 'ration', 'rope', 'bean', 'binoculars', 'chalk', 'honey', 'honey', 'shelf', 'shelf', 'floatrope', 'balloons'],
   frost: ['warmer', 'warmer', 'warmer', 'ration', 'piton', 'bandage', 'tonic', 'berry', 'rope', 'lantern', 'chalk', 'marshmallow', 'honey', 'shelf', 'launcher', 'floatrope', 'umbrella'],
   crown: ['warmer', 'tonic', 'tonic', 'piton', 'bandage', 'ration', 'warmer', 'medkit', 'chalk', 'horn', 'bean', 'shelf', 'launcher', 'umbrella'],
-  fungal: ['mushroom', 'mushroom', 'mushroom', 'berry', 'bandage', 'piton', 'piton', 'ration', 'rope', 'shelf', 'shelf', 'shelf', 'binoculars', 'chalk', 'honey', 'floatrope', 'tonic'],
+  fungal: ['herb', 'herb', 'mushroom', 'mushroom', 'mushroom', 'berry', 'bandage', 'piton', 'piton', 'ration', 'rope', 'shelf', 'shelf', 'shelf', 'binoculars', 'chalk', 'honey', 'floatrope', 'tonic'],
   canyon: ['coconut', 'coconut', 'coconut', 'umbrella', 'umbrella', 'ration', 'piton', 'bandage', 'tonic', 'rope', 'launcher', 'launcher', 'chalk', 'shelf', 'honey', 'medkit'],
 };
 const CRASH_LOOT = ['compass', 'compass', 'rope', 'rope', 'rope', 'flare', 'flare', 'medkit', 'ration', 'ration', 'tonic', 'coconut', 'umbrella', 'shelf', 'launcher', 'bandage', 'bandage', 'berry', 'piton', 'warmer', 'binoculars', 'horn', 'lantern', 'marshmallow', 'marshmallow', 'chalk', 'bean'];
@@ -230,6 +232,32 @@ function makeCamp(pos, isBeacon) {
   const g = new THREE.Group();
   g.position.copy(pos);
   const stone = new THREE.MeshLambertMaterial({ color: 0x8b8f96, flatShading: true });
+  if (!isBeacon) {
+    // Revive statue: a weathered stone climber with arms raised; the fallen come back here.
+    const st = new THREE.Group();
+    const rock = new THREE.MeshLambertMaterial({ color: 0x9aa0a6, flatShading: true });
+    const moss = new THREE.MeshLambertMaterial({ color: 0x6f9a5a, flatShading: true });
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.35, 7), rock);
+    plinth.position.y = 0.17;
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.75, 7), rock);
+    body.position.y = 0.72;
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), rock);
+    head.position.y = 1.24;
+    st.add(plinth, body, head);
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.55, 5), rock);
+      arm.position.set(sx * 0.27, 1.2, 0);
+      arm.rotation.z = -sx * 0.45;
+      st.add(arm);
+    }
+    const lichen = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), moss);
+    lichen.position.set(0.2, 0.38, 0.25);
+    lichen.scale.set(1, 0.4, 1);
+    st.add(lichen);
+    st.position.set(-2.1, 0, -1.6);
+    st.traverse((o) => { if (o.isMesh) { o.castShadow = Q.shadows; o.receiveShadow = Q.shadows; } });
+    g.add(st);
+  }
   const n = isBeacon ? 10 : 8;
   const rr = isBeacon ? 1.5 : 0.8;
   for (let i = 0; i < n; i++) {
@@ -287,6 +315,14 @@ function makeCamp(pos, isBeacon) {
   return { group: g, flame, flag, flagMat, pos: pos.clone(), lit: false, isBeacon };
 }
 
+/** Loot still packed inside an unopened suitcase can't be seen or picked up. */
+const inCase = (it) => world.cases.some((c) => !c.open && Math.hypot(c.pos.x - it.mesh.position.x, c.pos.z - it.mesh.position.z) < 0.5);
+function hideCased() { for (const it of world.items) if (!it.taken) it.mesh.visible = !inCase(it); }
+function openCase(c) {
+  c.open = true;
+  sfx.zip();
+  for (const it of world.items) if (!it.taken && Math.hypot(c.pos.x - it.mesh.position.x, c.pos.z - it.mesh.position.z) < 0.5) { it.mesh.visible = true; toast(`🧳 Popped it open: ${ITEMS[it.type].name}!`); }
+}
 function spawnItem(root, type, pos) {
   const mesh = itemMesh(type);
   mesh.position.set(pos.x, pos.y + 0.45, pos.z);
@@ -391,6 +427,34 @@ function buildWorld(seed) {
     }
   }
 
+  // Suitcases: some of the loot on the shore and ledges is packed in luggage you pop open (E).
+  const cases = [];
+  const caseCols = [0x2f5fb3, 0xe0453a, 0x23a3a3, 0xf2c33b, 0x8a55b8, 0x4c9a45];
+  items.forEach((it, i) => {
+    if (it.pos.y > 214 || rng() > (it.pos.y < 36 ? 0.45 : 0.3)) return;
+    const g = new THREE.Group();
+    const col = caseCols[Math.floor(rng() * caseCols.length)];
+    const shell = new THREE.MeshStandardMaterial({ color: col, roughness: 0.55 });
+    const trim = new THREE.MeshStandardMaterial({ color: 0x2b2724, roughness: 0.6 });
+    const base = new THREE.Mesh(new RoundedBoxGeometry(0.9, 0.32, 0.6, 2, 0.06), shell);
+    base.position.y = 0.16;
+    const lid = new THREE.Group();
+    lid.position.set(0, 0.32, -0.3);
+    const lidMesh = new THREE.Mesh(new RoundedBoxGeometry(0.9, 0.16, 0.6, 2, 0.05), shell);
+    lidMesh.position.set(0, 0.08, 0.3);
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.025, 6, 12, Math.PI), trim);
+    handle.position.set(0, 0.16, 0.6);
+    lid.add(lidMesh, handle);
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.49, 0.62), trim);
+    strap.position.y = 0.245;
+    g.add(base, lid, strap);
+    g.position.set(it.pos.x, it.pos.y, it.pos.z);
+    g.rotation.y = rng() * 6.28;
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = Q.shadows; o.receiveShadow = Q.shadows; } });
+    root.add(g);
+    cases.push({ pos: it.pos.clone(), mesh: g, lid, open: false, openT: 0 });
+  });
+
   const smokes = wreck.smokeAt.map((p) => new Smoke(root, new V3(p.x, Math.max(T.height(p.x, p.z), 0) + 1, p.z), { count: Q.decor > 0.5 ? 26 : 14, size: 3, color: 0x4a4440 }));
   for (let i = 0; i < 8; i++) {
     const p = T.flatSpot(rng, 220, 270, 0.85, 60);
@@ -411,7 +475,8 @@ function buildWorld(seed) {
   scene.add(root);
   const lavaMesh = makeLava();
   root.add(lavaMesh);
-  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], zones, cacti: trees.filter((t) => t.cactus), lava: { mesh: lavaMesh, y: -999, on: false }, smokes, gulls, grass, marks: marks.anim };
+  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], cases, zones, cacti: trees.filter((t) => t.cactus), lava: { mesh: lavaMesh, y: -999, on: false }, smokes, gulls, grass, marks: marks.anim };
+  hideCased();
 }
 
 // ---------------- player & game state ----------------
@@ -679,9 +744,11 @@ function interact() {
     if (coop.on) net.send({ t: 'camp', i: ci }); else lightCamp(world.camps[ci]);
     return;
   }
+  const kase = world.cases.find((c) => !c.open && c.pos.distanceTo(me) < 2.4);
+  if (kase) { openCase(kase); return; }
   let best = null, bd = 2.4;
   for (const it of world.items) {
-    if (it.taken) continue;
+    if (it.taken || inCase(it)) continue;
     const d = it.mesh.position.distanceTo(me) - 0.6;
     if (d < bd) { bd = d; best = it; }
   }
@@ -874,6 +941,7 @@ function addShelf(p, nx, nz, life = 90) {
 }
 /** Grow new shelves in, wither old ones away. */
 function updateGear(dt) {
+  for (const c of world.cases) if (c.open && c.openT < 1) { c.openT = Math.min(1, c.openT + dt * 4); c.lid.rotation.x = -1.9 * Math.sin(c.openT * Math.PI * 0.5) - Math.sin(c.openT * Math.PI) * 0.25; }
   for (let i = world.shelves.length - 1; i >= 0; i--) {
     const sh = world.shelves[i];
     sh.life -= dt;
@@ -968,7 +1036,8 @@ function useItem() {
   if (ITEMS[t].food && lv === 1 && ++runBadges.roasted >= 3) badges.earn('gourmet');
   if (ITEMS[t].food && lv === 3) badges.earn('burnt');
   if (b === 'honey') badges.earn('sweet');
-  if (t === 'bandage') { S.injury = Math.max(0, S.injury - 0.3); S.poison = Math.max(0, S.poison - 0.15); toast('Patched up.'); }
+  if (t === 'herb') { S.poison = 0; S.drowsy = Math.max(0, S.drowsy - 0.3); toast('🌿 Bitter, but your head clears. Poison cured.'); }
+  else if (t === 'bandage') { S.injury = Math.max(0, S.injury - 0.3); S.poison = Math.max(0, S.poison - 0.15); toast('Patched up.'); }
   else if (t === 'medkit') { S.injury = Math.max(0, S.injury - 0.6); S.poison = 0; S.cold = Math.max(0, S.cold - 0.15); toast('Bandaged, splinted and cured.'); }
   else if (t === 'chalk') { S.chalkT = 45; toast('👝 Chalked up! Climbing costs less stamina for 45 s.'); }
   else if (t === 'binoculars') { setZoom(!zoomed); used = false; }
@@ -1598,6 +1667,16 @@ function updatePlayer(dt) {
         P.regenDelay -= dt;
         if (P.regenDelay <= 0) S.stamina += (thin ? 0.24 : 0.38) * dt;
       }
+      if (blizzard.k > 0.4 && band.id === 'frost') {
+        const wx = Math.cos(blizzard.dir ?? 0), wz = Math.sin(blizzard.dir ?? 0);
+        const sheltered = T.height(P.pos.x - wx * 2.5, P.pos.z - wz * 2.5) > P.pos.y + 1.4;
+        showStatus.shelter = sheltered;
+        if (!sheltered) {
+          const nx = P.pos.x + wx * 2.2 * blizzard.k * dt, nz = P.pos.z + wz * 2.2 * blizzard.k * dt;
+          const g = floorAt(nx, nz, P.pos.y);
+          if (g - P.pos.y < 0.3 && g >= P.pos.y - 0.45) { P.pos.x = nx; P.pos.z = nz; P.pos.y = g; }
+        }
+      }
       if (gust.on && thin) {
         const nx = P.pos.x + gust.dir.x * 3.2 * gust.k * dt, nz = P.pos.z + gust.dir.z * 3.2 * gust.k * dt;
         const g = gy(nx, nz);
@@ -1808,7 +1887,7 @@ function updateSurvival(dt) {
     }
   }
   if (nearFire) { S.cold = Math.max(0, S.cold - 0.1 * dt); S.injury = Math.max(0, S.injury - 0.006 * dt); }
-  else if (band.id === 'frost') S.cold = Math.min(1, S.cold + (blizzard.on ? 0.013 : 0.0045) * lantern * D().cold * dt);
+  else if (band.id === 'frost') S.cold = Math.min(1, S.cold + (blizzard.on ? (showStatus.shelter ? 0.005 : 0.013) : 0.0045) * lantern * D().cold * dt);
   else if (band.id === 'crown') S.cold = Math.min(1, S.cold + 0.0028 * lantern * D().cold * dt);
   else S.cold = Math.max(0, S.cold - 0.02 * dt);
 
@@ -1833,7 +1912,8 @@ function updateSurvival(dt) {
   if (blizzard.t <= 0) {
     blizzard.on = !blizzard.on;
     blizzard.t = blizzard.on ? 22 : 50 + Math.random() * 35;
-    if (blizzard.on && band.id === 'frost') { toast('❄ A blizzard rolls in. Find a fire or a warmer!'); sfx.gust(); }
+    if (blizzard.on) blizzard.dir = Math.random() * Math.PI * 2;
+    if (blizzard.on && band.id === 'frost') { toast('❄ A blizzard rolls in! The wind pushes you. Shelter behind rock, or find a fire.'); sfx.gust(); }
   }
   blizzard.k += ((blizzard.on && band.id === 'frost' ? 1 : 0) - blizzard.k) * Math.min(1, dt * 0.8);
   gust.t -= dt;
@@ -1870,6 +1950,7 @@ function blackout(msg) {
   if (coop.on && coop.remotes.size > 0) {
     P.isDown = true;
     P.downT = D().downT;
+    knockOut();
     sfx.blackout();
     toast(msg);
     net.send({ t: 'down' });
@@ -1990,7 +2071,13 @@ function revived(byName) {
   sfx.pickup();
   toast(`🤝 ${byName} helped you up!`);
 }
+function knockOut() {
+  const v = $('#view');
+  v.classList.remove('ko'); void v.offsetWidth; v.classList.add('ko');
+  setTimeout(() => v.classList.remove('ko'), 2600);
+}
 function respawnAtCamp(msg) {
+  knockOut();
   state = 'dead';
   sfx.blackout();
   touch?.setGrab(false);
@@ -2022,7 +2109,8 @@ function lightBeacon(by = null) {
   world.beacon.lit = true;
   world.beacon.flame.visible = true;
   world.beacon.flagMat.color.setHex(0xff7a29);
-  sfx.win();
+  sfx.launch();
+  setTimeout(() => sfx.win(), 900);
   badges.earn('summit');
   if (!coop.on || coop.remotes.size === 0) badges.earn('solo');
   if (elapsed < 25 * 60) badges.earn('speedy');
@@ -2412,6 +2500,7 @@ function updateHud(dt) {
     if (showStatus.thorns) tag('🌿 Thorns!', 'hot');
     if (showStatus.spores) tag('🍄 Spores', 'warn');
     if (showStatus.cactus) tag('🌵 Cactus!', 'hot');
+    if (blizzard.k > 0.4 && bandAt(y).id === 'frost') tag(showStatus.shelter ? '🪨 Sheltered' : '🌬 Wind!', showStatus.shelter ? 'good' : 'warn');
     if (world.lava.on && !world.beacon.lit) { const gap = Math.max(0, Math.round(y - world.lava.y)); tag(showStatus.lava ? '🔥 In the lava!' : `🌋 Lava ${gap} m below`, gap < 8 ? 'hot' : 'warn'); }
     if (S.heat > 0.15) tag('🥵 Overheating', 'warn');
     if (S.boostT > 0) tag(`🧃 Fizz ${Math.ceil(S.boostT)}s`, 'good');
@@ -2436,7 +2525,8 @@ function updateHud(dt) {
       else if (pullMate) { prompt = `${key}Pull ${pullMate.name} up`; act = 'Pull'; }
     }
     if (prompt || P.isDown || P.wakeT > 0) { /* already set */ }
-    else if (world.items.some((it) => !it.taken && it.mesh.position.distanceTo(me) < 3)) { prompt = `${key}Pick up`; act = 'Take'; }
+    else if (world.cases.some((c) => !c.open && c.pos.distanceTo(me) < 2.4)) { prompt = `${key}Open the suitcase`; act = 'Open'; }
+    else if (world.items.some((it) => !it.taken && !inCase(it) && it.mesh.position.distanceTo(me) < 3)) { prompt = `${key}Pick up`; act = 'Take'; }
     else if (coop.on && inv[sel] && P.mode === 'ground' && giveTarget()) { prompt = `${key}Give ${ITEMS[inv[sel]].name} to ${giveTarget().name}`; act = 'Give'; }
     else if (roastable() && world.camps.some((c) => c.lit && c.pos.distanceTo(me) < 4)) { prompt = `${key}Roast ${ITEMS[inv[sel]].name.toLowerCase()} · ${isTouch ? '● Use' : '[F]'} eat`; act = 'Roast'; }
     else if (world.camps.some((c) => !c.lit && c.pos.distanceTo(me) < 3.6)) {
@@ -2750,6 +2840,7 @@ function applyLayout(items, camps) {
     const c = world.camps[i];
     if (c && !c.lit) { c.pos.set(p[0], p[1], p[2]); c.group.position.copy(c.pos); }
   });
+  hideCased();
 }
 
 function enterRoom(m) {
@@ -3137,6 +3228,7 @@ window.__highcrag = {
   gathered: (i) => gathered(world.camps[i]),
   giveUp: () => giveUp(),
   wakeUp: () => { P.wakeT = 0; },
+  get cases() { return world.cases.map((c) => ({ x: c.pos.x, y: c.pos.y, z: c.pos.z, open: c.open })); },
   say: (i) => say(i),
   get bubble() { return climber.userData.bubble ? climber.userData.bubble.visible : false; },
   get lava() { return { on: world.lava.on, y: world.lava.y }; },
