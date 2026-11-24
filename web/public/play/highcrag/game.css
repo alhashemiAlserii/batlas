@@ -418,3 +418,36 @@ body.touch #chatPanel kbd{display:none}
 /* knocked out: the view lurches sideways, blurs and darkens, then settles */
 #view.ko canvas{animation:ko 2.6s ease-out}
 @keyframes ko{0%{transform:none;filter:none}18%{transform:rotate(-9deg) scale(1.12) translateY(4%);filter:blur(3px) brightness(.55) saturate(.6)}70%{transform:rotate(-6deg) scale(1.08) translateY(3%);filter:blur(2px) brightness(.4)}100%{transform:none;filter:none}}
+
+/* ---------- loading screen: dark navy, thin outlines, hexagon emblem ---------- */
+@font-face{font-family:"HC Condensed";font-weight:500;font-display:swap;src:url("/fonts/barlow-condensed/latin-500-normal.woff2") format("woff2")}
+@font-face{font-family:"HC Condensed";font-weight:700;font-display:swap;src:url("/fonts/barlow-condensed/latin-700-normal.woff2") format("woff2")}
+#loading{--ln:rgba(214,226,255,.22);--tx:#e8edf9;--mut:#9aa6c4;background:radial-gradient(120% 80% at 50% 0%,#26304d 0%,#151b2e 55%,#0d111d 100%);color:var(--tx);font-family:"HC Condensed",var(--font)}
+#loading .ld-glow{position:absolute;left:50%;top:38%;width:620px;height:620px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,rgba(120,150,255,.14),transparent 62%);pointer-events:none}
+#loading .ld-ridge{position:absolute;left:0;right:0;bottom:0;width:100%;height:42vh;display:block}
+#loading .ld-ridge .r3{fill:#1b2238;stroke:var(--ln);stroke-width:1.2}
+#loading .ld-ridge .r2{fill:#151b2d;stroke:rgba(214,226,255,.14);stroke-width:1}
+#loading .ld-ridge .r1{fill:#0f1422}
+#loading .ld-ridge .peak{fill:none;stroke:#ffd23f;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 6px rgba(255,190,80,.7))}
+#loading .ld-center{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);width:min(520px,calc(100% - 40px));text-align:center}
+#loading .ld-emblem{width:84px;height:84px;display:block;margin:0 auto 14px;animation:ldHex 4s ease-in-out infinite}
+#loading .ld-emblem .hex{fill:#1d2540;stroke:rgba(222,232,255,.85);stroke-width:3}
+#loading .ld-emblem .hex2{fill:none;stroke:rgba(222,232,255,.25);stroke-width:1.5}
+#loading .ld-emblem .mtn{fill:#e8edf9}
+#loading .ld-emblem .snow{fill:#ffd23f}
+@keyframes ldHex{50%{filter:drop-shadow(0 0 12px rgba(150,175,255,.55))}}
+#loading .ld-kicker{font-weight:700;font-size:.8rem;letter-spacing:.32em;text-transform:uppercase;color:var(--mut)}
+#loading .ld-title{margin:4px 0 6px;font-weight:700;font-size:clamp(3rem,9vw,5.2rem);line-height:.92;letter-spacing:.04em;text-transform:uppercase;color:#f4f7ff}
+#loading .ld-sub{margin:0 0 22px;font-weight:500;font-size:1.08rem;color:var(--mut)}
+#loading .ld-card{border:1.5px solid var(--ln);border-radius:16px;background:rgba(21,27,46,.72);padding:14px 16px 12px;text-align:left;box-shadow:0 18px 40px rgba(0,0,0,.35);backdrop-filter:blur(6px)}
+#loading .ld-row{display:flex;justify-content:space-between;gap:12px;margin:0 0 9px;font-weight:700;font-size:1rem;letter-spacing:.04em;text-transform:uppercase;color:var(--tx);text-shadow:none}
+#loading #ldPct{color:#ffd23f;font-variant-numeric:tabular-nums}
+#loading .ld-bar{height:6px;border-radius:999px;background:rgba(214,226,255,.12);border:0;padding:0;box-shadow:none;overflow:hidden}
+#loading .ld-bar i{display:block;height:100%;width:0;min-width:0;border-radius:999px;background:linear-gradient(90deg,#8fa6ff,#ffd23f);box-shadow:0 0 10px rgba(255,210,63,.55)}
+#loading .ld-tip{margin:11px 0 0;min-height:2.6em;font-family:var(--font);font-weight:600;font-size:.88rem;line-height:1.35;color:var(--mut);text-align:left;text-shadow:none}
+#loading .ld-tip b{color:#e8edf9}
+#loading .ld-chip{display:inline-flex;align-items:center;gap:10px;margin-top:16px;padding:7px 8px 7px 14px;border:1.5px solid var(--ln);border-radius:12px;background:#1d2540;font-weight:700;font-size:.95rem;letter-spacing:.04em;color:var(--tx)}
+#loading .ld-chip b{padding:2px 8px;border-radius:7px;background:#dfe7ff;color:#1d2540;font-size:.8rem}
+#loading.failed .ld-bar i{background:#ff4f6d}
+@media (max-height:500px){#loading .ld-center{top:50%}#loading .ld-emblem{width:54px;height:54px;margin-bottom:6px}#loading .ld-title{font-size:2.8rem}#loading .ld-sub{margin-bottom:10px;font-size:.92rem}#loading .ld-card{padding:9px 12px 8px}#loading .ld-tip{min-height:0;font-size:.78rem;margin-top:7px}#loading .ld-chip{display:none}}
+@media (prefers-reduced-motion:reduce){#loading .ld-emblem{animation:none}}
