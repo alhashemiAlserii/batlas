@@ -403,6 +403,75 @@ function buildWorld(seed) {
     }
   }
 
+  // Rope bridges across gaps between jungle and lowland terraces (walkable: see floorAt).
+  const bridges = [];
+  const brng = makeRng((seed ^ 0xb1d93e) >>> 0);
+  const plankMat = new THREE.MeshStandardMaterial({ color: 0x9a6a3c, roughness: 0.9, flatShading: true });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xc8955a, roughness: 0.9 });
+  // Each bridge climbs from a terrace up to the next one across the cliff face: a walkable shortcut.
+  for (let tries = 0; tries < 1500 && bridges.length < 6; tries++) {
+    const A = T.flatSpot(brng, 6, 200, 0.88, 20);
+    if (!A) continue;
+    const ang = Math.atan2(-A.z, -A.x) + (brng() - 0.5) * 1.2, dir = new V3(Math.cos(ang), 0, Math.sin(ang));
+    for (let L = 9; L <= 18; L += 1) {
+      const B = A.clone().addScaledVector(dir, L);
+      B.y = T.height(B.x, B.z);
+      const dh = B.y - A.y;
+      if (dh < 2.5 || dh > 6 || T.normal(B.x, B.z, tmpN).y < 0.85) continue;
+      let gap = true;
+      for (let k = 1; k <= 9; k++) { const m = A.clone().lerp(B, k / 10); if (T.height(m.x, m.z) > A.y + dh * k / 10 - 0.4) { gap = false; break; } }
+      if (!gap || bridges.some((o) => Math.hypot(o.a.x - A.x, o.a.z - A.z) < 25)) continue;
+      const sag = 0.15 + L * 0.012;
+      const deckY = (t) => A.y + (B.y - A.y) * t - Math.sin(Math.PI * t) * sag + 0.05;
+      const g = new THREE.Group();
+      const n = Math.round(L / 0.45);
+      const yaw = Math.atan2(dir.x, dir.z);
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, p = A.clone().lerp(B, t);
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.07, 0.34), plankMat);
+        plank.position.set(p.x, deckY(t) - 0.03, p.z);
+        plank.rotation.y = yaw + (i % 2 ? 0.03 : -0.03);
+        g.add(plank);
+      }
+      for (const side of [-1, 1]) {
+        const off = new V3(dir.z, 0, -dir.x).multiplyScalar(0.7 * side);
+        let prev = null;
+        for (let i = 0; i <= 12; i++) {
+          const t = i / 12, p = A.clone().lerp(B, t).add(off);
+          const q = new V3(p.x, deckY(t) + 0.95 + Math.sin(Math.PI * t) * 0.1, p.z);
+          if (prev) {
+            const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, prev.distanceTo(q), 5), ropeMat);
+            seg.position.copy(prev).lerp(q, 0.5);
+            seg.quaternion.setFromUnitVectors(new V3(0, 1, 0), q.clone().sub(prev).normalize());
+            g.add(seg);
+          }
+          prev = q;
+        }
+        for (const end of [A, B]) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.4, 6), plankMat);
+          post.position.set(end.x + off.x, end.y + 0.6, end.z + off.z);
+          g.add(post);
+        }
+      }
+      g.traverse((o) => { if (o.isMesh) { o.castShadow = Q.shadows; o.receiveShadow = Q.shadows; } });
+      root.add(g);
+      bridges.push({ a: A.clone(), b: B.clone(), deckY });
+      break;
+    }
+  }
+  // Magma glow on the Ember Crown: a few flickering warm lights over the lava cracks.
+  const magma = [];
+  if (Q.standard) {
+    for (let i = 0; i < 4; i++) {
+      const p = T.flatSpot(brng, 222, 280, 0.75, 40);
+      if (!p) continue;
+      const l = new THREE.PointLight(0xff6a2a, 40, 22, 2);
+      l.position.set(p.x, p.y + 1.2, p.z);
+      root.add(l);
+      magma.push(l);
+    }
+  }
+
   const items = [];
   const counts = { shore: 28, moss: 28, frost: 24, crown: 16 };
   for (const band of BANDS) {
@@ -475,7 +544,7 @@ function buildWorld(seed) {
   scene.add(root);
   const lavaMesh = makeLava();
   root.add(lavaMesh);
-  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], cases, zones, cacti: trees.filter((t) => t.cactus), lava: { mesh: lavaMesh, y: -999, on: false }, smokes, gulls, grass, marks: marks.anim };
+  world = { seed, T, root, spawn, wreckOrigin, camps, beacon, items, trees, thorns, particles, pitonGroup, pitons: [], ropes: [], flares: [], vines: [], shelves: [], zips: [], cases, bridges, magma, zones, cacti: trees.filter((t) => t.cactus), lava: { mesh: lavaMesh, y: -999, on: false }, smokes, gulls, grass, marks: marks.anim };
   hideCased();
 }
 
@@ -523,6 +592,15 @@ function floorAt(x, z, y) {
   let g = gy(x, z);
   for (const sh of world.shelves) {
     if (sh.y > g && sh.y <= y + 0.35 && (x - sh.x) ** 2 + (z - sh.z) ** 2 < sh.r * sh.r) g = sh.y;
+  }
+  for (const b of world.bridges) {
+    const dx = b.b.x - b.a.x, dz = b.b.z - b.a.z, L2 = dx * dx + dz * dz;
+    const t = ((x - b.a.x) * dx + (z - b.a.z) * dz) / L2;
+    if (t < 0 || t > 1) continue;
+    const lat = Math.abs((x - b.a.x) * dz - (z - b.a.z) * dx) / Math.sqrt(L2);
+    if (lat > 0.75) continue;
+    const deck = b.deckY(t);
+    if (deck > g && deck <= y + 0.35) g = deck;
   }
   return g;
 }
@@ -942,6 +1020,8 @@ function addShelf(p, nx, nz, life = 90) {
 }
 /** Grow new shelves in, wither old ones away. */
 function updateGear(dt) {
+  const tt = performance.now() / 1000;
+  world.magma.forEach((l, i) => { l.intensity = 34 + Math.sin(tt * 3.1 + i * 1.7) * 8 + Math.sin(tt * 7.3 + i) * 4; });
   for (const c of world.cases) if (c.open && c.openT < 1) { c.openT = Math.min(1, c.openT + dt * 4); c.lid.rotation.x = -1.9 * Math.sin(c.openT * Math.PI * 0.5) - Math.sin(c.openT * Math.PI) * 0.25; }
   for (let i = world.shelves.length - 1; i >= 0; i--) {
     const sh = world.shelves[i];
@@ -1601,7 +1681,7 @@ function updatePlayer(dt) {
   }
   if (P.mode === 'ground') {
     const onShelf = P.pos.y > gy(P.pos.x, P.pos.z) + 0.2;
-    if (onShelf && world.shelves.length) badges.earn('fungus');
+    if (onShelf && world.shelves.some((k) => (P.pos.x - k.x) ** 2 + (P.pos.z - k.z) ** 2 < k.r * k.r)) badges.earn('fungus');
     runBadges.liftY = null; // back on solid footing
     const n = onShelf ? tmpN.set(0, 1, 0) : T.normal(P.pos.x, P.pos.z, tmpN);
     P.swimming = !onShelf && T.height(P.pos.x, P.pos.z) < -0.8;
@@ -2731,10 +2811,25 @@ const heldBalloons = (() => {
   g.position.set(0, -0.22, 0.04);
   return g;
 })();
+const heldOther = { type: null, mesh: null };
 function syncHeldItem() {
   const atAirport = state === 'lobby' || ((state === 'paused') && pausedFrom === 'lobby');
   const hand = climber.userData.armR?.el;
   const prop = onIsland() && hand && !P.isDown && (P.mode === 'ground' || P.mode === 'air') ? { umbrella: heldUmbrella, balloons: heldBalloons }[inv[sel]] : null;
+  // Any other selected item is carried in the right hand (a small copy of its pickup model).
+  const other = onIsland() && hand && !P.isDown && !P.ghost && (P.mode === 'ground' || P.mode === 'air') && inv[sel] && !prop && inv[sel] !== 'passport' ? inv[sel] : null;
+  if (heldOther.type !== other) {
+    if (heldOther.mesh) { heldOther.mesh.removeFromParent(); heldOther.mesh.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); heldOther.mesh = null; }
+    heldOther.type = other;
+    if (other) {
+      const m = itemMesh(other);
+      if (m.userData.halo) m.userData.halo.visible = false;
+      m.scale.setScalar(0.55);
+      m.position.set(0, -0.27, 0.05);
+      hand.add(m);
+      heldOther.mesh = m;
+    }
+  } else if (heldOther.mesh && heldOther.mesh.parent !== hand && hand) hand.add(heldOther.mesh);
   for (const m of [heldUmbrella, heldBalloons]) {
     if (m === prop && m.parent !== hand) hand.add(m);
     else if (m !== prop && m.parent) m.removeFromParent();
@@ -2766,6 +2861,9 @@ function applyLook() {
   heldBook.removeFromParent();
   heldUmbrella.removeFromParent();
   heldBalloons.removeFromParent();
+  if (heldOther.mesh) heldOther.mesh.removeFromParent();
+  heldOther.type = null;
+  heldOther.mesh = null;
   scene.remove(climber);
   disposeClimber(climber);
   climber = makeClimber(look, { shadows: Q.shadows, outline: Q.outline });
@@ -3312,6 +3410,7 @@ window.__highcrag = {
   gathered: (i) => gathered(world.camps[i]),
   giveUp: () => giveUp(),
   wakeUp: () => { P.wakeT = 0; },
+  get bridges() { return world.bridges.map((b) => ({ a: b.a.toArray(), b: b.b.toArray() })); },
   setFirstPerson: (on) => setFirstPerson(on),
   get cases() { return world.cases.map((c) => ({ x: c.pos.x, y: c.pos.y, z: c.pos.z, open: c.open })); },
   say: (i) => say(i),

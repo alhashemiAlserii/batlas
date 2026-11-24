@@ -757,6 +757,7 @@ export function poseClimber(model, mode, facing, phase, dt, moving = 0) {
   for (const [a, sx] of [[armL, -1], [armR, 1]]) { a.sh.rotation.set(0.05, 0, sx * 0.25); a.el.rotation.set(-0.2, 0, 0); }
   for (const l of [legL, legR]) { l.hip.rotation.set(0, 0, 0); l.knee.rotation.set(0.05, 0, 0); l.foot.rotation.set(0, 0, 0); }
   if (hat.userData.spin) hat.userData.spin.rotation.y += dt * (6 + moving * 14);
+  if (mode !== 'air') U.airT = 0;
 
   U.blinkT -= dt;
   eyes.scale.y = U.blinkT < 0.1 ? 0.15 : 1;
@@ -789,9 +790,14 @@ export function poseClimber(model, mode, facing, phase, dt, moving = 0) {
     armL.sh.rotation.set(-1.3 + Math.sin(f) * 0.6, 0, -1.2);
     armR.sh.rotation.set(-1.3 - Math.sin(f) * 0.6, 0, 1.2);
     armL.el.rotation.x = armR.el.rotation.x = -0.5;
-    legL.hip.rotation.x = -0.6 + Math.sin(f * 0.7) * 0.5;
-    legR.hip.rotation.x = -0.6 - Math.sin(f * 0.7) * 0.5;
-    legL.knee.rotation.x = legR.knee.rotation.x = 0.9;
+    // Mid-jump the knees tuck up; when a fall drags on, the legs start to kick.
+    const tuck = Math.max(0, 1 - (U.airT || 0) * 1.5);
+    U.airT = (U.airT || 0) + dt;
+    legL.hip.rotation.x = -0.6 + Math.sin(f * 0.7) * 0.5 * (1 - tuck) - 0.7 * tuck;
+    legR.hip.rotation.x = -0.6 - Math.sin(f * 0.7) * 0.5 * (1 - tuck) - 0.7 * tuck;
+    legL.knee.rotation.x = legR.knee.rotation.x = 0.9 + 0.9 * tuck;
+    armL.sh.rotation.x += 0.6 * tuck;
+    armR.sh.rotation.x += 0.6 * tuck;
     head.rotation.x = 0.2;
   } else if (mode === 'down') {
     model.rotation.set(-Math.PI / 2, facing, 0, 'YXZ');

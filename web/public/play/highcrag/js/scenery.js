@@ -696,6 +696,20 @@ export function dressMountain(root, T, rng, q, avoid, zones = { mid: 'moss', hig
   const bushGeo = cardCluster(9, new THREE.Vector3(0, 0.55, 0), 0.6, 1.0, rng, 0.7);
   const bushes = [...(fungal ? [] : scatter(420, 37, 124, 0.85, 1)), ...scatter(460, 3, 34, 0.88, 1)];
   instanced(root, bushGeo, sway(foliage(leafTex('leafBush', 100, 42, 28)), 0.08), bushes, place(), sh);
+  // Berry bushes: a third of the bushes carry clusters of red and blue berries.
+  const berryGeo = (() => {
+    const parts = [];
+    for (let k = 0; k < 14; k++) {
+      const a = rng() * Math.PI * 2, e = 0.2 + rng() * 0.9;
+      const b = new THREE.SphereGeometry(0.07, 6, 5);
+      b.translate(Math.cos(a) * Math.sin(e) * 0.62, 0.55 + Math.cos(e) * 0.5, Math.sin(a) * Math.sin(e) * 0.62);
+      parts.push(b);
+    }
+    return mergeGeometries(parts);
+  })();
+  const berryBushes = bushes.filter((_, i) => i % 3 === 0);
+  instanced(root, berryGeo, pbr(0xd8243a, { roughness: 0.35, emissive: 0x400008, emissiveIntensity: 0.4 }), berryBushes.filter((_, i) => i % 2), place(), false);
+  instanced(root, berryGeo, pbr(0x3b4ad8, { roughness: 0.35, emissive: 0x08104a, emissiveIntensity: 0.4 }), berryBushes.filter((_, i) => !(i % 2)), place(), false);
   const flowers = scatter(620, 3, fungal ? 34 : 124, 0.9, 1);
   const flowerGeo = crossedCards(0.6, 0.45, 2);
   instanced(root, flowerGeo, sway(foliage(flowerTex('flPink', 330)), 0.25), flowers.filter((_, i) => i % 3 === 0), place(), false);
@@ -764,6 +778,50 @@ export function dressMountain(root, T, rng, q, avoid, zones = { mid: 'moss', hig
   const vineGeo = new THREE.PlaneGeometry(0.8, 1);
   vineGeo.translate(0, -0.5, 0);
   instanced(root, vineGeo, foliage(fungal ? leafTex('vineF', 275, 40, 40) : leafTex('vine', 110, 45, 26)), vines, (d, v) => { d.position.set(v.x, v.y, v.z); d.scale.set(1, v.len, 1); d.rotation.set(0, v.r, 0); }, false);
+
+  // Mossy ruins on jungle terraces: broken stone columns and fallen blocks, capped with moss.
+  const ruinStone = pbr(0x9c9688, { roughness: 0.95, flatShading: true });
+  const ruinMoss = pbr(0x4f8a3e, { roughness: 1, flatShading: true });
+  for (const p of scatter(14, 40, 120, 0.9, 4)) {
+    const g = new THREE.Group();
+    g.position.copy(p);
+    g.rotation.y = p.userData.r;
+    const cols = 2 + Math.floor(rng() * 3);
+    for (let k = 0; k < cols; k++) {
+      const h = 1.2 + rng() * 2.4;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, h, 7), ruinStone);
+      col.position.set((k - cols / 2) * 1.5, h / 2, rng() * 0.6);
+      col.rotation.z = (rng() - 0.5) * 0.12;
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.34, 0.16, 7), ruinMoss);
+      cap.position.set(col.position.x, h + 0.04, col.position.z);
+      g.add(col, cap);
+      trees.push({ x: p.x + Math.cos(p.userData.r) * col.position.x, z: p.z - Math.sin(p.userData.r) * col.position.x, y: p.y, r: 0.4 });
+    }
+    const block = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 0.6), ruinStone);
+    block.position.set(0.4, 0.25, 1.4);
+    block.rotation.y = 0.5;
+    g.add(block);
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = sh; o.receiveShadow = sh; } });
+    root.add(g);
+  }
+
+  // Icicles hanging from the lips of Frostline ledges.
+  if (!canyon) {
+    const ice = [];
+    const nn = new THREE.Vector3();
+    for (let i = 0; i < 1600 && ice.length < 220 * q.decor; i++) {
+      const a = rng() * Math.PI * 2, d = rng() * R;
+      const x = Math.cos(a) * d, z = Math.sin(a) * d, y = T.height(x, z);
+      if (y < 130 || y > 212 || T.normal(x, z, nn).y < 0.85) continue;
+      const ox = x + Math.cos(a) * 1.4, oz = z + Math.sin(a) * 1.4;
+      if (T.height(ox, oz) > y - 2.5) continue;
+      for (let k = 0; k < 3; k++) ice.push({ x: x + Math.cos(a) * (0.55 + rng() * 0.2) + (rng() - 0.5) * 0.8, y: y - 0.05, z: z + Math.sin(a) * (0.55 + rng() * 0.2) + (rng() - 0.5) * 0.8, l: 0.4 + rng() * 0.9 });
+    }
+    const iceGeo = new THREE.ConeGeometry(0.07, 1, 5);
+    iceGeo.rotateX(Math.PI);
+    iceGeo.translate(0, -0.5, 0);
+    instanced(root, iceGeo, pbr(0xdff4ff, { roughness: 0.1, transparent: true, opacity: 0.85, emissive: 0x6fa8c8, emissiveIntensity: 0.15 }), ice, (dd, v) => { dd.position.set(v.x, v.y, v.z); dd.scale.set(1, v.l, 1); dd.rotation.set(0, 0, 0); }, false);
+  }
 
   return trees;
 }
