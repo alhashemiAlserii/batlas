@@ -1,10 +1,10 @@
 @import url("/css/fonts.css");
 
 :root {
-  --bg: #111316;
-  --bg2: #171b20;
-  --card: #1a1f25;
-  --raised: #252a30;
+  --bg: #13161e;
+  --bg2: #191d27;
+  --card: #1c212c;
+  --raised: #262c38;
   --text: #eef0f2;
   --muted: #aeb7be;
   --faint: #8b969e;
@@ -665,3 +665,37 @@ code { background: var(--bg2); padding: 1px 6px; border-radius: 4px; font-size: 
     filter: none;
   }
 }
+
+/* ---------- home: collection layout ---------- */
+.hero-edit .eyebrow { letter-spacing: 0.2em; }
+.hero-edit h1 { max-width: 11ch; line-height: 0.95; }
+.hero-side .micro.caps { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); line-height: 1.7; }
+.btn.outline-lg { background: transparent; border: 1.5px solid var(--hair-strong); color: var(--text); padding: 12px 18px; min-height: 48px; border-radius: var(--radius-btn); gap: 14px; }
+.btn.outline-lg:hover { border-color: var(--text); }
+.facts { margin-top: 34px; border: 1.5px solid var(--hair-strong); border-radius: 12px; padding: 16px 20px 18px; background: rgba(255, 255, 255, 0.02); }
+.facts-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.facts-head strong { font-size: 1.2rem; }
+.facts-head a { color: var(--text); font-size: 0.95rem; }
+.facts-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; }
+.facts-row > div { border-top: 1px solid var(--hair-strong); padding-top: 10px; min-width: 0; }
+.facts-row span { display: block; color: var(--muted); font-size: 0.95rem; }
+.facts-row b { display: block; margin-top: 4px; font-size: clamp(1.15rem, 2vw, 1.6rem); font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+@media (max-width: 860px) { .facts-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.collection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 760px) { .collection-grid { grid-template-columns: 1fr; } }
+.big-card { border: 1.5px solid var(--hair); border-radius: 10px; overflow: hidden; background: var(--card); transition: transform 0.45s ease, border-color 0.45s ease, box-shadow 0.45s ease; }
+.big-card:hover { transform: translateY(-4px); border-color: var(--hair-strong); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3); }
+.bc-media { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; background: #101318; }
+.bc-media img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.65s ease; }
+.bc-media.is-mark img { width: min(44%, 220px); height: auto; object-fit: contain; margin: 12% auto; display: block; }
+.big-card:hover .bc-media img { transform: scale(1.035); }
+img[src$="sky-crew-cover.jpg"] { object-position: center 38%; }
+.bc-no { position: absolute; top: 14px; left: 16px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7); }
+.bc-tag { position: absolute; top: 12px; right: 14px; padding: 5px 10px; border: 1.5px solid rgba(255, 255, 255, 0.85); border-radius: 4px; background: rgba(10, 12, 16, 0.55); color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.bc-overlay { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 56px 18px 14px; background: linear-gradient(180deg, transparent, rgba(8, 9, 11, 0.85)); }
+.bc-overlay h3 { margin: 0; font-size: clamp(1.9rem, 3.2vw, 2.8rem); line-height: 0.92; text-transform: uppercase; letter-spacing: -0.02em; color: #fff; }
+.bc-body { padding: 14px 18px 18px; }
+.bc-body p { margin: 0 0 12px; color: var(--muted); }
+.bc-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.facts { display: block; }
+.facts-head { width: 100%; }
