@@ -66,7 +66,7 @@ a{color:var(--accent);font-weight:800}
 /* ---------- HUD ---------- */
 #hud{position:fixed;inset:0;pointer-events:none}
 .chip{background:rgba(255,246,228,.92);color:var(--ink);border-radius:16px;padding:8px 14px;box-shadow:0 4px 0 rgba(107,82,51,.35),0 8px 20px rgba(0,0,0,.18)}
-#topleft{position:absolute;top:calc(12px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));min-width:150px}
+#topleft{position:absolute;top:max(14px, calc(10px + env(safe-area-inset-top)));left:max(16px, calc(10px + env(safe-area-inset-left)));min-width:150px}
 #zone{font-weight:900;font-size:.82rem;letter-spacing:.06em;text-transform:uppercase;color:var(--accent2)}
 #alt{font-size:1.6rem;font-weight:900;font-variant-numeric:tabular-nums;line-height:1.1}
 #timer{color:var(--ink2);font-weight:700;font-variant-numeric:tabular-nums;font-size:.85rem}

@@ -13,17 +13,17 @@ export const HMAX = 300;
 export const SEA = 0;
 
 export const BANDS = [
-  { id: 'shore', name: 'Saltwind Shore', y0: -40, y1: 36, T: 0, ground: 0xe6d3a3, rock: 0x9c8a70, fog: 0xc6dbe6, sky: 0x3a76c4 },
-  { id: 'moss', name: 'Tanglewood Jungle', y0: 36, y1: 126, T: 15, ground: 0x4a7f2e, rock: 0x6e6658, fog: 0xbfd6d0, sky: 0x3a74bd },
-  { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xeef3f8, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
+  { id: 'shore', name: 'Saltwind Shore', y0: -40, y1: 36, T: 0, ground: 0xe8c68e, rock: 0x7a746e, fog: 0xc6dbe6, sky: 0x3a76c4 },
+  { id: 'moss', name: 'Tanglewood Jungle', y0: 36, y1: 126, T: 15, ground: 0x3d8b4c, rock: 0x7a746e, fog: 0xbfd6d0, sky: 0x3a74bd },
+  { id: 'frost', name: 'Frostline Cliffs', y0: 126, y1: 216, T: 18, ground: 0xf4f7fa, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
   { id: 'crown', name: 'Ember Crown', y0: 216, y1: 400, T: 14, ground: 0x3b3230, rock: 0x2e2826, fog: 0xc9ab97, sky: 0x5c5a86 },
 ];
 // Each mountain picks one of two versions of the middle zones (it changes with the seed, so every
 // daily mountain can differ): jungle or a fungal hollow, then snowy cliffs or a red desert canyon.
 export const VARIANTS = {
-  moss: { id: 'moss', name: 'Tanglewood Jungle', ground: 0x4a7f2e, rock: 0x6e6658, fog: 0xbfd6d0, sky: 0x3a74bd },
+  moss: { id: 'moss', name: 'Tanglewood Jungle', ground: 0x3d8b4c, rock: 0x7a746e, fog: 0xbfd6d0, sky: 0x3a74bd },
   fungal: { id: 'fungal', name: 'Fungal Hollow', ground: 0x86809a, rock: 0x786e86, fog: 0xbcb2d4, sky: 0x4a5194 },
-  frost: { id: 'frost', name: 'Frostline Cliffs', ground: 0xeef3f8, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
+  frost: { id: 'frost', name: 'Frostline Cliffs', ground: 0xf4f7fa, rock: 0x7a8494, fog: 0xd9e2ea, sky: 0x5b7fb2 },
   canyon: { id: 'canyon', name: 'Red Canyon', ground: 0xd49a5e, rock: 0xa9533a, fog: 0xf1cfa6, sky: 0x4f8ad0 },
 };
 /** Set the zone versions for this seed. `force` (e.g. from ?zones=fungal,canyon) overrides. */
@@ -204,10 +204,10 @@ export class Terrain {
         if (band.id === 'shore' && y >= 2.6) {
           // Lowland meadows: lush green with dry golden patches and darker forest floor.
           const dry = smooth(0.15, 0.5, fbm(x * 0.02, z * 0.02, this.seed + 61, 3));
-          cg.setHex(0x4e8436).lerp(new THREE.Color(0x98935e), dry * 0.55).offsetHSL(0, -0.04, n * 0.05);
+          cg.setHex(0x3d8b4c).lerp(new THREE.Color(0x8fa255), dry * 0.4).offsetHSL(0, 0, n * 0.04);
           cr.setHex(0x8a7a5e);
         }
-        if (y < 2.6) cg.setHex(0xe8d7ac).lerp(new THREE.Color(0x4e8436), smooth(1.8, 2.6, y));
+        if (y < 2.6) cg.setHex(0xe8c68e).lerp(new THREE.Color(0x3d8b4c), smooth(1.8, 2.6, y));
         if (y < 0.35) cg.setHex(0xfffbf0); // surf foam along the waterline
         if (y < -0.6) cg.setHex(0x9fd8d0);
         if (y < -3) cg.setHex(0x4fa3b6);

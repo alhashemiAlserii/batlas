@@ -57,7 +57,7 @@ export class Post {
     this.final = new THREE.ShaderMaterial({
       uniforms: {
         tScene: { value: null }, tBloom1: { value: null }, tBloom2: { value: null },
-        exposure: { value: 1.05 }, bloom: { value: 0.55 }, saturation: { value: 1.06 }, contrast: { value: 1.07 },
+        exposure: { value: 0.97 }, bloom: { value: 0.55 }, saturation: { value: 1.06 }, contrast: { value: 1.07 },
         warmth: { value: new THREE.Vector3(1.03, 1.0, 0.95) }, vignette: { value: 0.32 }, time: { value: 0 }, grain: { value: 0.025 },
         sunUv: { value: new THREE.Vector2(0.5, 0.5) }, rays: { value: 0 },
       },
