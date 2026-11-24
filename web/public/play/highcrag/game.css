@@ -394,3 +394,13 @@ body.tablet #bCrouch{left:calc(40px + env(safe-area-inset-left));bottom:calc(345
 .lg.heat::before{background:#ff6a3a}
 #bHeat{background:repeating-linear-gradient(90deg,#ff6a3a 0 8px,#ffa05a 8px 10px)}
 #legend .lg.off{display:none}
+
+/* quick chat */
+#chatPanel{position:fixed;left:50%;bottom:calc(110px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;background:rgba(255,246,228,.96);color:var(--ink);border-radius:18px;padding:10px;box-shadow:0 6px 0 rgba(107,82,51,.35),0 14px 30px rgba(0,0,0,.25);width:min(440px,calc(100% - 32px));pointer-events:auto}
+#chatPanel .chat-row{display:flex;gap:6px;margin-bottom:8px}
+#chatPanel .chat-list{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+#chatPanel button{flex:1;border:0;border-radius:12px;background:#fff;color:var(--ink);font-family:inherit;font-weight:800;font-size:.9rem;padding:9px 8px;min-height:42px;cursor:pointer;box-shadow:0 3px 0 var(--line);text-align:left}
+#chatPanel .chat-row button{text-align:center}
+#chatPanel kbd{display:inline-block;min-width:1.3em;margin-right:6px;padding:0 4px;border-radius:6px;background:rgba(31,60,136,.1);color:#26324f;font:inherit;font-size:.75rem;text-align:center}
+body.touch #chatPanel kbd{display:none}
+@media (max-height:500px){#chatPanel{bottom:calc(64px + env(safe-area-inset-bottom));padding:7px}#chatPanel button{min-height:36px;padding:6px;font-size:.82rem}}

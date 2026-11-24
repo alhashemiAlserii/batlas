@@ -546,6 +546,7 @@ addEventListener('keydown', (e) => {
   if (state === 'flight' && (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape')) { skipFlight(); return; }
   if (state !== 'play' && state !== 'lobby') return;
   if (overlayOpen()) { if (e.code === 'Escape' || e.code === 'KeyE' || e.code === 'KeyF') closePassport(); return; }
+  if (chatOpen() && e.code === 'Escape') { closeChat(); return; }
   if (e.repeat) return;
   keys.add(e.code);
   if (e.code === 'Space') { jumpPressed = true; e.preventDefault(); }
@@ -557,6 +558,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') emote('wave');
   if (e.code === 'KeyG') emote('cheer');
   if (e.code === 'KeyY') emote('point');
+  if (e.code === 'KeyV') toggleChat();
+  if (/^Digit[4-9]$/.test(e.code)) say(Number(e.code.slice(5)) - 4);
   if (e.code === 'Enter' && P.isDown) giveUp();
   if (e.code.startsWith('Digit')) { const d = Number(e.code.slice(5)) - 1; if (d >= 0 && d < 3) { sel = d; renderInv(); } }
 });
@@ -584,7 +587,7 @@ addEventListener('wheel', (e) => {
   renderInv();
 }, { passive: true });
 document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement !== canvas && (state === 'play' || state === 'lobby') && !isTouch && !overlayOpen() && !P.isDown) pause();
+  if (document.pointerLockElement !== canvas && (state === 'play' || state === 'lobby') && !isTouch && !overlayOpen() && !chatOpen() && !P.isDown) pause();
 });
 
 if (isTouch) {
@@ -594,7 +597,7 @@ if (isTouch) {
     onUse: () => useItem(),
     onDrop: () => (coop.carrying || (coop.on && [...coop.remotes.values()].some((r) => r.st?.m === 'down' && r.pos.distanceTo(P.pos) < 2.8)) ? carryToggle() : dropItem()),
     onPing: () => ping(),
-    onEmote: () => emote(['wave', 'cheer', 'point'][Math.floor(Math.random() * 3)]),
+    onEmote: () => toggleChat(),
     onJump: () => { if (state === 'flight') skipFlight(); else jumpPressed = true; },
     onGrabToggle: () => sfx.click(),
   });
@@ -1293,6 +1296,49 @@ function dropItem() {
   renderInv();
   if (!inv.includes('binoculars')) setZoom(false);
 }
+
+// ---------------- quick chat ----------------
+// No voice chat: a few set phrases float above your head as speech bubbles (V or 👋 opens the list, 4-9 send directly).
+const SAYINGS = ['Over here!', 'Wait for me!', 'Help!', "Let's go up!", 'Nice one!', 'Anyone have food?'];
+function showBubble(model, text) {
+  if (model.userData.bubble) { scene.remove(model.userData.bubble); model.userData.bubble.material.map.dispose(); model.userData.bubble.material.dispose(); }
+  const b = makeTag(`💬 ${text}`, 'rgba(31,60,136,0.88)');
+  b.scale.set(2.1, 0.52, 1);
+  b.userData.ttl = 3.6;
+  scene.add(b);
+  model.userData.bubble = b;
+}
+function updateBubble(model, dt) {
+  const b = model.userData.bubble;
+  if (!b) return;
+  b.userData.ttl -= dt;
+  b.position.copy(model.position).add(new V3(0, 2.75, 0));
+  b.material.opacity = Math.min(1, b.userData.ttl * 2);
+  b.visible = model.visible;
+  if (b.userData.ttl <= 0) { scene.remove(b); b.material.map.dispose(); b.material.dispose(); model.userData.bubble = null; }
+}
+const chatOpen = () => !$('#chatPanel').classList.contains('hidden');
+function say(i) {
+  if (!SAYINGS[i] || (state !== 'play' && state !== 'lobby')) return;
+  showBubble(climber, SAYINGS[i]);
+  sfx.click();
+  if (coop.on) net.send({ t: 'say', i });
+  closeChat();
+}
+/** On desktop the panel frees the mouse (without pausing) so you can click a phrase; closing it locks the mouse again. */
+function openChat() {
+  if ((state !== 'play' && state !== 'lobby') || chatOpen()) return;
+  $('#chatPanel').classList.remove('hidden');
+  if (!isTouch) document.exitPointerLock?.();
+}
+function closeChat() {
+  if (!chatOpen()) return;
+  $('#chatPanel').classList.add('hidden');
+  if (!isTouch && (state === 'play' || state === 'lobby') && !overlayOpen()) canvas.requestPointerLock?.();
+}
+function toggleChat() { if (chatOpen()) closeChat(); else openChat(); }
+for (const b of document.querySelectorAll('#chatPanel [data-say]')) b.addEventListener('click', () => say(Number(b.dataset.say)));
+for (const b of document.querySelectorAll('#chatPanel [data-emote]')) b.addEventListener('click', () => { emote(b.dataset.emote); closeChat(); });
 
 function emote(e) {
   if ((state !== 'play' && state !== 'lobby') || P.isDown || P.mode === 'climb' || P.mode === 'rope') return;
@@ -2760,6 +2806,13 @@ net.addEventListener('msg', (e) => {
     case 'st': { const r = coop.remotes.get(m.cid); if (r) r.st = m; break; }
     case 'look': setRemoteLook(m.cid, m.look); break;
     case 'emote': { const r = coop.remotes.get(m.cid); if (r) playEmote(r.model, m.e); break; }
+    case 'say': {
+      const r = coop.remotes.get(m.cid);
+      if (!r || !SAYINGS[m.i]) break;
+      showBubble(r.model, SAYINGS[m.i]);
+      if (r.pos.distanceTo(P.pos) > 25 || !r.model.visible) toast(`💬 ${r.name}: ${SAYINGS[m.i]}`);
+      break;
+    }
     case 'layout': applyLayout(m.items, m.camps); break;
     case 'board':
       if (state === 'paused' && pausedFrom === 'lobby') { $('#pause').classList.add('hidden'); state = 'lobby'; }
@@ -3012,6 +3065,8 @@ function frame(now) {
     }
   }
   updateRemotes(dt);
+  updateBubble(climber, dt);
+  for (const r of coop.remotes.values()) updateBubble(r.model, dt);
   updatePings(dt);
   passport.update(dt);
   dust.update(dt);
@@ -3063,6 +3118,8 @@ window.__highcrag = {
   gathered: (i) => gathered(world.camps[i]),
   giveUp: () => giveUp(),
   wakeUp: () => { P.wakeT = 0; },
+  say: (i) => say(i),
+  get bubble() { return climber.userData.bubble ? climber.userData.bubble.visible : false; },
   get lava() { return { on: world.lava.on, y: world.lava.y }; },
   setLava: (y) => { world.lava.y = y; },
   get badges() { return [...badges.earned]; },
