@@ -463,7 +463,7 @@ function floorAt(x, z, y) {
 }
 
 // Things a badge needs to know about this climb.
-const runBadges = { roasted: 0, daily: false, liftY: null };
+const runBadges = { roasted: 0, daily: false, liftY: null, earned: [] };
 function resetRun(sameSeed, forceSeed) {
   const seed = forceSeed ?? (sameSeed && world ? world.seed : (Math.random() * 1e9) >>> 0);
   buildWorld(seed);
@@ -472,6 +472,7 @@ function resetRun(sameSeed, forceSeed) {
   Object.assign(S, { stamina: 1, hunger: 0, cold: 0, heat: 0, injury: 0, poison: 0, drowsy: 0, bonus: 0, boostT: 0, chalkT: 0 });
   runBadges.roasted = 0;
   runBadges.daily = false;
+  runBadges.earned = [];
   setZoom(false);
   elapsed = 0;
   stats = { falls: 0, blackouts: 0, eaten: 0, pitons: 0, ropes: 0, maxAlt: 0 };
@@ -2052,7 +2053,9 @@ function lightBeacon(by = null) {
     row('Blackouts', String(stats.blackouts));
     row('Snacks eaten', String(stats.eaten));
     row('Pitons · ropes', `${stats.pitons} · ${stats.ropes}`);
-    row('Mountain', `#${world.seed}`);
+    row('Mountain', `#${world.seed} · ${world.zones.mid === 'fungal' ? 'Fungal Hollow' : 'Tanglewood'} · ${world.zones.high === 'canyon' ? 'Red Canyon' : 'Frostline'}`);
+    row('Difficulty', D().name);
+    if (runBadges.earned.length) row('Badges this climb', runBadges.earned.map((b) => `${b.icon} ${b.name}`).join(', '), 'best');
     if (isBest) row('', '★ New personal best!', 'best');
     const team = [...coop.remotes.values()].map((r) => r.name);
     $('#resTeam').textContent = coop.on ? `${by ? `${by} lit the beacon. ` : ''}${team.length ? `Climbed with ${team.join(', ')}.` : ''}` : '';
@@ -2486,9 +2489,25 @@ function updateHud(dt) {
 
 // ---------------- passport (look editor) ----------------
 let myName = 'Climber';
-const badges = new Badges(store, (b) => {
+// Badge celebrations queue up so two at once don't overlap.
+const badgeQueue = [];
+let badgeShowing = false;
+function showBadgePop() {
+  if (badgeShowing || !badgeQueue.length) return;
+  const b = badgeQueue.shift();
+  badgeShowing = true;
+  const el = $('#badgePop');
+  el.querySelector('.bp-icon').textContent = b.icon;
+  el.querySelector('.bp-name').textContent = b.name;
+  el.querySelector('.bp-desc').textContent = b.desc + (b.hat !== undefined ? ' New hat in your passport!' : '');
+  el.classList.add('show');
   sfx.ding();
-  toast(`🏅 Badge earned: ${b.name}!${b.hat !== undefined ? ' A new hat is waiting in your passport.' : ''}`);
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => { badgeShowing = false; showBadgePop(); }, 400); }, 3600);
+}
+const badges = new Badges(store, (b) => {
+  runBadges.earned.push(b);
+  badgeQueue.push(b);
+  showBadgePop();
 });
 const passport = new Passport({
   badges,
