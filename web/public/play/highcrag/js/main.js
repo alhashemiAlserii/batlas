@@ -321,7 +321,7 @@ function hideCased() { for (const it of world.items) if (!it.taken) it.mesh.visi
 function openCase(c) {
   c.open = true;
   sfx.zip();
-  for (const it of world.items) if (!it.taken && Math.hypot(c.pos.x - it.mesh.position.x, c.pos.z - it.mesh.position.z) < 0.5) { it.mesh.visible = true; toast(`🧳 Popped it open: ${ITEMS[it.type].name}!`); }
+  for (const it of world.items) if (!it.taken && Math.hypot(c.pos.x - it.mesh.position.x, c.pos.z - it.mesh.position.z) < 0.5) { it.mesh.visible = true; it.unpacked = true; it.mesh.scale.setScalar(0.8); if (it.mesh.userData.halo) it.mesh.userData.halo.visible = false; toast(`🧳 Popped it open: ${ITEMS[it.type].name}!`); }
 }
 function spawnItem(root, type, pos) {
   const mesh = itemMesh(type);
@@ -2532,7 +2532,10 @@ function updateScene(dt, now) {
     for (const it of world.items) {
       if (it.taken) continue;
       if (Math.abs(it.pos.x - P.pos.x) > 120 || Math.abs(it.pos.z - P.pos.z) > 120) { it.mesh.visible = false; continue; }
+      // Still packed in a suitcase: hidden. Unpacked: resting in the open case, not floating.
+      if (inCase(it)) { it.mesh.visible = false; continue; }
       it.mesh.visible = true;
+      if (it.unpacked) { it.mesh.position.y = it.pos.y + 0.36; continue; }
       it.mesh.position.y = it.pos.y + 0.45 + Math.sin(now * 2 + it.phase) * 0.08;
       it.mesh.rotation.y += dt * 1.2;
     }
@@ -3323,14 +3326,22 @@ try {
   showTitle();
   LD.stage('Lighting the sky…', 0.93);
   await breathe();
-  // Draw one frame behind the loading screen so shaders are ready before the menu appears.
-  if (post) post.render(scene, camera, performance.now() / 1000); else renderer.render(scene, camera);
-  await breathe();
+  // The painting fades into the real 3D island (camera circling it) before the menu appears.
+  document.body.classList.add('booting');
+  $('#loading').classList.add('live');
+  const until = performance.now() + 1800;
+  while (performance.now() < until) {
+    updateCamera(1 / 30);
+    updateScene(1 / 30, performance.now() / 1000);
+    if (post) post.render(scene, camera, performance.now() / 1000); else renderer.render(scene, camera);
+    await new Promise((res) => requestAnimationFrame(res));
+  }
 } catch (err) {
   LD.fail();
   throw err;
 }
 LD.done();
+setTimeout(() => document.body.classList.remove('booting'), 700);
 
 let last = performance.now();
 function frame(now) {
