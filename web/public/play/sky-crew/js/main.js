@@ -115,6 +115,8 @@ const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.
 const DEFAULT_OUTFIT = { outfit: 'captain', hat: 'captain', color: 0, skin: 1 };
 let myOutfit = (() => { try { return { ...DEFAULT_OUTFIT, ...JSON.parse(localStorage.getItem('skycrew.outfit') || 'null') }; } catch { return { ...DEFAULT_OUTFIT }; } })();
 let myClass = null; // class for the next flight (server-checked in rooms)
+/** Set from GET /api/site when PUBLIC_BASE_URL is configured. Empty keeps invite text as a room code. */
+let publicBaseUrl = '';
 let myAvatar = makeCrew(myOutfit);
 ship.plane.add(myAvatar);
 let myCrew = null; // lobby pick: pilot | copilot | cabin | cargo (solo: null = do everything)
@@ -1423,7 +1425,7 @@ function roleTasks() {
 }
 
 // ---------------- menus ----------------
-function setPaused(v) { paused = v; UI.show('#pause', v); if (v) { keys.clear(); document.exitPointerLock?.(); $('#pauseRoom').textContent = net.inRoom ? `Co-op room ${net.room.code}: share this code with friends.` : 'Solo flight (the world keeps going in co-op).'; } }
+function setPaused(v) { paused = v; UI.show('#pause', v); if (v) { keys.clear(); document.exitPointerLock?.(); const url = net.inRoom ? inviteUrl(net.room.code) : ''; $('#pauseRoom').textContent = !net.inRoom ? 'Solo flight (the world keeps going in co-op).' : url ? `Co-op room ${net.room.code}. Send friends this link: ${url}` : `Co-op room ${net.room.code}: share this code with friends.`; $('#bCopyInvite')?.classList.toggle('hidden', !url); } }
 function togglePause() { if (!$('#admin').classList.contains('hidden')) return toggleAdmin(false); if (!$('#results').classList.contains('hidden')) return; setPaused(!paused); }
 const live = { rooms: null, hidden: false,
   async refresh() { try { live.rooms = (await net.rooms()).rooms; $('#admMsg').textContent = `${live.rooms.length} live room(s).`; } catch (e) { $('#admMsg').textContent = `Denied: ${e.message}`; } renderAdmin(); },
@@ -1540,8 +1542,36 @@ function renderLobby() {
     b.classList.toggle('taken', ['pilot', 'copilot'].includes(b.dataset.crew) && who.some((p) => p.cid !== myId()));
   }
   $('#lobPlayers').replaceChildren(...room.players.map((p) => UI.el('div', { class: 'pl' }, UI.rankBadge(p.role), UI.el('span', { class: `name-${p.role.toLowerCase()}` }, p.displayName || p.username), p.cid === room.hostCid ? ' (host)' : '', p.cid === myId() ? ' (you)' : '', p.klass ? UI.el('span', { class: 'klass', title: CLASS_INFO[p.klass]?.name }, `${CLASS_INFO[p.klass]?.icon} ${CLASS_INFO[p.klass]?.name}`) : '', UI.el('span', { class: 'crew' }, p.crew ? UI.CREW_LABEL[p.crew] : 'no job yet'))));
+  refreshInvite();
   refreshRouteUi();
 }
+function inviteUrl(code) {
+  if (!publicBaseUrl || !code) return '';
+  return `${publicBaseUrl}/play/sky-crew?room=${encodeURIComponent(code)}`;
+}
+function refreshInvite() {
+  const url = inviteUrl(net.room?.code);
+  const box = $('#lobInvite');
+  if (box) box.classList.toggle('hidden', !url);
+  const input = $('#lobInviteUrl');
+  if (input && url) input.value = url;
+  $('#bCopyInvite')?.classList.toggle('hidden', !url || $('#pause').classList.contains('hidden'));
+}
+async function copyInvite() {
+  const url = inviteUrl(net.room?.code);
+  if (!url) return;
+  const input = $('#lobInviteUrl');
+  if (input) input.value = url;
+  try {
+    await navigator.clipboard.writeText(url);
+    UI.toast('Invite link copied.');
+  } catch {
+    try { input?.focus(); input?.select(); } catch { /* the link is still on screen */ }
+    UI.toast('Select the invite link and copy it.');
+  }
+}
+$('#bInvite')?.addEventListener('click', () => { copyInvite(); });
+$('#bCopyInvite')?.addEventListener('click', () => { copyInvite(); });
 for (const b of document.querySelectorAll('.crewpick button')) b.addEventListener('click', () => { const role = myCrew === b.dataset.crew ? null : b.dataset.crew; net.send({ t: 'crew', role }); });
 $('#bBoard').addEventListener('click', () => start());
 $('#bLobLeave').addEventListener('click', () => quitToMenu());
@@ -1790,7 +1820,13 @@ net.addEventListener('error', (e) => {
   const m = errMsg[e.detail.code]; if (!m) return; if (classWait) { const w = classWait; classWait = null; w({ error: e.detail.message || m }); } else UI.toast(e.detail.message || m, 'warn');
 });
 
+const siteP = fetch('/api/site', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
 const user = await Net.me();
+try {
+  const site = await siteP;
+  const base = typeof site?.publicBaseUrl === 'string' ? site.publicBaseUrl.replace(/\/$/, '') : '';
+  if (/^https?:\/\//i.test(base)) publicBaseUrl = base;
+} catch { /* no public front door: keep sharing the room code */ }
 if (user) {
   myRole = user.role;
   const handle = user.handle || user.username;

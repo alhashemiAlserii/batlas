@@ -43,7 +43,25 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   if (config.trustProxy) app.set('trust proxy', 1);
 
   // Load-balancer health check (Render healthCheckPath): no cookies, no session lookup.
-  app.get('/healthz', async (_req, res) => {
+  // The Cloudflare Pages front door polls this from another origin. Only https://*.pages.dev
+  // (including preview hosts like https://<hash>.<project>.pages.dev) may read the response.
+  const pagesDevCors = (req: Request, res: Response) => {
+    res.set('Vary', 'Origin');
+    const origin = req.header('origin');
+    if (!origin || !/^https:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+pages\.dev$/i.test(origin)) return;
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Max-Age', '600');
+    // This route answers before Helmet. Set cross-origin explicitly so a pages.dev document can read the body.
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  };
+  app.options('/healthz', (req, res) => {
+    pagesDevCors(req, res);
+    res.set('Cache-Control', 'no-store');
+    res.status(204).end();
+  });
+  app.get('/healthz', async (req, res) => {
+    pagesDevCors(req, res);
     res.set('Cache-Control', 'no-store');
     try {
       await db.raw('select 1');
@@ -144,7 +162,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   api.use(csrfProtect(ctx));
   api.use(enforcePasswordChange);
   api.get('/health', (_req, res) => res.json({ ok: true }));
-  api.get('/site', (_req, res) => res.json({ studioName: config.studioName, emailEnabled: config.emailEnabled }));
+  api.get('/site', (_req, res) => res.json({ studioName: config.studioName, emailEnabled: config.emailEnabled, publicBaseUrl: config.publicBaseUrl }));
   api.use(authRoutes(ctx));
   api.use(meRoutes(ctx));
   api.use(adminRoutes(ctx));

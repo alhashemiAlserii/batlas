@@ -17,7 +17,7 @@ describe('editorial Batlas shell', () => {
     const home = fs.readFileSync(path.join(PUB, 'index.html'), 'utf8');
     const login = fs.readFileSync(path.join(PUB, 'login.html'), 'utf8');
     const sky = fs.readFileSync(path.join(PUB, 'play/sky-crew/index.html'), 'utf8');
-    expect(css).toContain('#111316');
+    expect(css).toContain('#13161e');
     expect(css).toContain('#eef0f2');
     expect(css).toContain('#1a1f25');
     expect(css).toContain('#f3f4f5');
@@ -59,7 +59,7 @@ describe('editorial assets are served', () => {
   it('serves the stylesheet and the self-hosted face', async () => {
     const css = await request(env.app).get('/css/site.css');
     expect(css.status).toBe(200);
-    expect(css.text).toContain('#111316');
+    expect(css.text).toContain('#13161e');
     expect((await request(env.app).get('/css/fonts.css')).status).toBe(200);
     const font = await request(env.app).get('/fonts/barlow-condensed/latin-600-normal.woff2');
     expect(font.status).toBe(200);

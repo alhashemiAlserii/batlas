@@ -29,6 +29,11 @@ export interface AppConfig {
   rateLimit: { windowMs: number; max: number };
   studioName: string;
   publicUrl: string;
+  /**
+   * Public front door (for example a Cloudflare Pages origin). Sky Crew invite links use this
+   * when set. Null keeps the current host: room codes are shared the way they are today.
+   */
+  publicBaseUrl: string | null;
   /** Email-based features (verification, forgot-password). Off by default: email is optional. */
   emailEnabled: boolean;
   outboxDir: string;
@@ -62,12 +67,28 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     rateLimit: { windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT ?? 20) },
     studioName: process.env.STUDIO_NAME ?? 'Batlas',
     publicUrl: (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT ?? 3000}`).replace(/\/$/, ''),
+    publicBaseUrl: parsePublicBaseUrl(process.env.PUBLIC_BASE_URL),
     emailEnabled: process.env.EMAIL_ENABLED === 'true',
     outboxDir: process.env.OUTBOX_DIR ?? path.join(SERVER_ROOT, 'data', 'outbox'),
     contactRateLimit: { windowMs: 60 * 60 * 1000, max: Number(process.env.CONTACT_RATE_LIMIT ?? 5) },
     developerPinBootstrapToken: (process.env.DEVELOPER_PIN_BOOTSTRAP_TOKEN ?? '').trim() || null,
     ...overrides,
   };
+}
+
+/**
+ * Origin for share and invite links (`PUBLIC_BASE_URL`). Empty means "not set".
+ * A path, query, or hash on the value is dropped so links stay `origin + /play/...`.
+ * Userinfo is rejected so a secret in the env value cannot leak into a copied link.
+ */
+export function parsePublicBaseUrl(raw: string | undefined | null): string | null {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return null;
+  let url: URL;
+  try { url = new URL(trimmed); } catch { return null; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.username || url.password) return null;
+  return url.origin;
 }
 
 /** What createDb() should open: Postgres when DATABASE_URL is set, else the SQLite file. */
