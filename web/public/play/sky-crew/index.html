@@ -119,6 +119,7 @@
       <div id="pauseRoom"></div>
       <div class="actions">
         <button id="bResume" class="primary" type="button">Resume</button>
+        <button id="bCopyInvite" type="button" class="hidden">Copy invite link</button>
         <button id="bCam" type="button">Toggle third person</button>
         <button id="bHowP" type="button">How to play</button>
         <button id="bShopP" type="button">👕 Change outfit</button>
@@ -150,6 +151,10 @@
     <div class="card">
       <h2>Crew room <span id="lobCode" class="code"></span></h2>
       <p class="muted small">Share the code (up to 8). Jobs score more when the right person does them. Anyone can still help, and one player can cover every job.</p>
+      <div id="lobInvite" class="invite hidden">
+        <p class="muted small">Or send this link. It opens Batlas, then this room.</p>
+        <div class="joinrow"><input id="lobInviteUrl" readonly aria-label="Invite link"><button id="bInvite" type="button">Copy</button></div>
+      </div>
       <div class="crewpick">
         <button type="button" data-crew="pilot">✈ Pilot<small>Fly, brace the cabin, land</small></button>
         <button type="button" data-crew="copilot">🧭 Co-pilot<small>Seatbelt, gear, calls</small></button>

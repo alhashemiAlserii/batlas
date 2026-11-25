@@ -1,11 +1,14 @@
 # Render Blueprint for Batlas (free plan). The website, API and the Sky Crew WebSocket game
 # server run in ONE Node process on $PORT (WebSocket upgrades on /ws/sky-crew, same port).
 #
-# When applying, Render asks for the two `sync: false` values:
+# When applying, Render asks for the `sync: false` values:
 #   BOOTSTRAP_DEVELOPER_PASSWORD  one-time password for the first Developer "abood" (created only
 #                                 while no Developer exists; must be changed at first sign-in).
 #                                 Delete the variable after signing in.
 #   PUBLIC_URL                    may stay empty at first; later https://<service>.onrender.com.
+#   PUBLIC_BASE_URL               optional. Set to the Cloudflare Pages front door
+#                                 (https://batlas-szpab.pages.dev) so Sky Crew invite links
+#                                 use that address. Leave empty to keep sharing on this host.
 # Free-plan notes: the web service sleeps after ~15 min idle (cold start ~1 min); its disk is
 # ephemeral (uploaded avatars/images are lost on redeploy/restart); the free Postgres expires
 # 30 days after creation unless upgraded. Back it up with `npm run backup` (see README).
@@ -37,6 +40,8 @@ services:
       - key: BOOTSTRAP_DEVELOPER_PASSWORD
         sync: false
       - key: PUBLIC_URL
+        sync: false
+      - key: PUBLIC_BASE_URL
         sync: false
 
 databases:
