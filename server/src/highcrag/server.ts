@@ -11,6 +11,7 @@
 import type http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { SiteBridge } from '../game-server/bridge.js';
+import { socketOriginAllowed, type ProxyTrust } from '../lib/public-host.js';
 
 export const HC_WS_PATH = '/ws/highcrag';
 export const HC_MAX_PLAYERS = 4;
@@ -70,7 +71,7 @@ const validLook = (l: any) => Object.fromEntries(Object.entries(LOOK_LIMITS).map
 
 export function attachHighcragServer(
   httpServer: http.Server,
-  opts: { bridge: SiteBridge; log?: (m: string) => void; maxRooms?: number },
+  opts: { bridge: SiteBridge; log?: (m: string) => void; maxRooms?: number; proxy?: ProxyTrust },
 ) {
   const log = opts.log ?? ((m: string) => console.log(`[highcrag] ${m}`));
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
@@ -325,11 +326,9 @@ export function attachHighcragServer(
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://x');
     if (url.pathname !== HC_WS_PATH) return;
-    const origin = req.headers.origin;
-    if (origin) {
-      try {
-        if (new URL(origin).host !== req.headers.host) { socket.destroy(); return; }
-      } catch { socket.destroy(); return; }
+    if (!socketOriginAllowed(req.headers.origin, req.headers, opts.proxy ?? { trustProxy: false, publicBaseUrl: null })) {
+      socket.destroy();
+      return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });

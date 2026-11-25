@@ -1,7 +1,7 @@
 /**
  * Box-side client for POST /api/internal/restore: streams a backup file to the site over HTTPS.
  *
- *   npx tsx scripts/restore-remote.ts --url https://batlas-2je9.onrender.com --file backups/<file>.json --preflight
+ *   npx tsx scripts/restore-remote.ts --url https://batlas-szpab.pages.dev --file backups/<file>.json --preflight
  *   npx tsx scripts/restore-remote.ts --url ... --file ... --dry-run
  *   npx tsx scripts/restore-remote.ts --url ... --file ...                       # real restore into an EMPTY database
  *   npx tsx scripts/restore-remote.ts --url ... --file ... --force --confirm <db>  # REPLACE a non-empty database

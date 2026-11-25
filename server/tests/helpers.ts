@@ -58,8 +58,10 @@ export async function setup(overrides: Partial<AppConfig> = {}) {
 
 export function cookieCsrf(res: request.Response): string | undefined {
   const set = ([] as string[]).concat((res.headers['set-cookie'] as unknown as string[]) ?? []);
-  const c = set.find((s) => s.startsWith('csrf='));
-  return c ? decodeURIComponent(c.split(';')[0].slice(5)) : undefined;
+  const c = set.find((s) => s.startsWith('csrf=') || s.startsWith('__Host-csrf='));
+  if (!c) return undefined;
+  const pair = c.split(';')[0];
+  return decodeURIComponent(pair.slice(pair.indexOf('=') + 1));
 }
 
 export async function getCsrf(agent: ReturnType<typeof request.agent>) {

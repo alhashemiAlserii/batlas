@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
-import { setup, testDb, getCsrf } from './helpers.js';
+import { setup, testDb, getCsrf, PW } from './helpers.js';
 import { bootstrapDeveloper } from '../src/lib/bootstrap.js';
 import { createApp } from '../src/app.js';
-import { parsePublicBaseUrl } from '../src/config.js';
+import { parsePublicBaseUrl, publicSiteOrigin } from '../src/config.js';
+import { hashPassword } from '../src/lib/crypto.js';
+import { insertId } from '../src/db/index.js';
 
 describe('deploy: health check', () => {
   it('GET /healthz answers without a session cookie', async () => {
@@ -54,6 +56,47 @@ describe('public front door', () => {
     expect(parsePublicBaseUrl('https://user:secret@batlas-szpab.pages.dev/play')).toBeNull();
     expect(parsePublicBaseUrl('https://batlas-szpab.pages.dev/play/sky-crew?room=ABCDE#x')).toBe('https://batlas-szpab.pages.dev');
     expect(parsePublicBaseUrl('http://localhost:3000/')).toBe('http://localhost:3000');
+    expect(publicSiteOrigin({ publicBaseUrl: 'https://batlas-szpab.pages.dev', publicUrl: 'https://example.test' })).toBe('https://batlas-szpab.pages.dev');
+    expect(publicSiteOrigin({ publicBaseUrl: null, publicUrl: 'http://test.local' })).toBe('http://test.local');
+  });
+
+  it('sets a host-only Secure session for the Pages front door and names that host in connect-src', async () => {
+    const env = await setup({ cookieSecure: true, trustProxy: true, publicBaseUrl: 'https://batlas-szpab.pages.dev' });
+    const username = 'proxy_pilot';
+    await insertId(env.db('users').insert({
+      username, username_lower: username, handle: username, handle_lower: username,
+      email: `${username}@test.dev`, email_lower: `${username}@test.dev`,
+      password_hash: await hashPassword(PW), pin_set: true, role: 'PLAYER', display_name: username,
+      created_at: new Date().toISOString(),
+    }));
+    const fwd = { 'X-Forwarded-Host': 'batlas-szpab.pages.dev', 'X-Forwarded-Proto': 'https', Origin: 'https://batlas-szpab.pages.dev' };
+    // Send the CSRF cookie by hand. Supertest will not store a Secure cookie for an http test URL.
+    const csrfRes = await request(env.app).get('/api/csrf').set(fwd);
+    const csrf = csrfRes.body.csrfToken as string;
+    const csrfSet = ([] as string[]).concat(csrfRes.headers['set-cookie'] as unknown as string[]).find((c) => c.startsWith('__Host-csrf='));
+    expect(csrfSet).toBeTruthy();
+    const login = await request(env.app).post('/api/auth/login').set(fwd).set('cookie', csrfSet!.split(';')[0]).set('x-csrf-token', csrf).send({ login: username, pin: PW });
+    expect(login.status).toBe(200);
+    const cookies = ([] as string[]).concat(login.headers['set-cookie'] as unknown as string[]);
+    const sid = cookies.find((c) => c.startsWith('__Host-sid='));
+    const csrfCookie = cookies.find((c) => c.startsWith('__Host-csrf='));
+    expect(sid).toMatch(/Secure/i);
+    expect(sid).toMatch(/HttpOnly/i);
+    expect(sid).toMatch(/SameSite=Lax/i);
+    expect(sid).toMatch(/Path=\//);
+    expect(sid!.toLowerCase()).not.toContain('domain=');
+    expect(csrfCookie).toMatch(/Secure/i);
+    expect(csrfCookie).toMatch(/SameSite=Strict/i);
+    expect(csrfCookie!.toLowerCase()).not.toContain('domain=');
+    const me = await request(env.app).get('/api/me').set(fwd).set('cookie', sid!.split(';')[0]);
+    expect(me.status).toBe(200);
+    expect(me.body.user.handle).toBe('proxy_pilot');
+
+    const page = await request(env.app).get('/').set({ Host: 'batlas-2je9.onrender.com', 'X-Forwarded-Host': 'batlas-szpab.pages.dev', 'X-Forwarded-Proto': 'https' });
+    const csp = String(page.headers['content-security-policy'] ?? '');
+    expect(csp).toContain('wss://batlas-szpab.pages.dev');
+    expect(csp).not.toContain('onrender');
+    await env.close();
   });
 
   it('omits a share origin until PUBLIC_BASE_URL is set', async () => {

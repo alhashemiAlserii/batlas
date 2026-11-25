@@ -45,10 +45,11 @@ if (config.restoreToken && config.restoreToken.length >= 32) {
 
 if (config.gameServerKey) {
   // The game server verifies players through the site's HTTP API (same as a separate process would).
-  gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey), isMaintenance: siteMaintenance(db) });
+  const proxy = { trustProxy: config.trustProxy, publicBaseUrl: config.publicBaseUrl };
+  gameServer = attachGameServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey), isMaintenance: siteMaintenance(db), proxy });
   console.log(`Sky Crew game server on ws://localhost:${port}${WS_PATH}`);
   // Highcrag co-op: its own rooms on its own path; only shares the site's sign-in check.
-  attachHighcragServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey) });
+  attachHighcragServer(server, { bridge: httpSiteBridge(process.env.SITE_URL ?? `http://127.0.0.1:${port}`, config.gameServerKey), proxy });
   console.log(`Highcrag co-op server on ws://localhost:${port}${HC_WS_PATH}`);
 } else console.log('GAME_SERVER_KEY not set: co-op game server disabled.');
 

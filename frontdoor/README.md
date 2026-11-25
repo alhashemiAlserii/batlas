@@ -1,37 +1,65 @@
 # Batlas front door
 
-A static page for [Cloudflare Pages](https://pages.cloudflare.com/). Visitors land here instead of on the sleeping Render service. The page shows Sky Crew sneak peeks, polls `https://batlas-2je9.onrender.com/healthz` until the studio answers, then opens the same path on Render.
+Cloudflare Pages project **batlas-szpab**, served at [https://batlas-szpab.pages.dev](https://batlas-szpab.pages.dev).
 
-`https://batlas-szpab.pages.dev/play/sky-crew` becomes `https://batlas-2je9.onrender.com/play/sky-crew`, including the query string. If the studio is already awake, the redirect happens in under a second and the loading screen stays hidden.
+`frontdoor/_worker.js` is an advanced-mode Pages worker. The browser stays on the Pages host for every page, API call, and WebSocket. The worker reverse-proxies the request to the Render studio at `https://batlas-2je9.onrender.com` and rewrites the response so that host never appears in the address bar:
 
-The Render address lives in one place: `TARGET_ORIGIN` at the top of `js/door.js`.
+- Method, path, query, and body are forwarded.
+- `Host` is the studio. `Origin` and `Referer` are rewritten when they name this front door, so the studio's same-host checks pass. `X-Forwarded-Host` and `X-Forwarded-Proto` carry the host the browser actually used.
+- `Location` and absolute studio URLs in HTML, JSON, CSS, and JavaScript are rewritten back to the Pages origin.
+- `Set-Cookie` loses any `Domain` attribute and keeps `Secure`, `HttpOnly`, and `SameSite`, so the session is host-only on pages.dev (including `__Host-` cookies).
 
-## Cloudflare Pages
+`/ws/sky-crew` and `/ws/highcrag` are proxied with the Workers fetch-upgrade pattern: the worker opens a WebSocket to the studio with `Upgrade: websocket`, then bridges it to the browser.
 
-1. In the Cloudflare dashboard, go to **Workers & Pages → Create → Pages → Connect to Git**.
-2. Choose the GitHub repository for Batlas and authorize Cloudflare.
-3. Production branch: **main**.
-4. Framework preset: **None**.
-5. Build command: leave it **empty**. There is no build step.
-6. Build output directory: **frontdoor**.
-7. Save and deploy.
+## Asleep studio
 
-Name the project **batlas-szpab** so the site is [https://batlas-szpab.pages.dev](https://batlas-szpab.pages.dev). `_redirects` sends every path to `index.html`, so shared links such as `/play/sky-crew?room=ABCDE` still show this page and then open that path on the studio.
+A free Render service can answer slowly, or with its own spin-up page, after it has been idle. For a top-level HTML navigation the worker asks the studio for `/healthz` and gives up after about 1.5 seconds. If that check is not `{ "ok": true }`, the worker serves this directory's loading page **without redirecting**. The address stays on pages.dev. The page polls same-origin `/healthz` (which the worker proxies) and, once the studio is healthy, reloads that same URL so the real page loads in place.
 
-On the Render service, set:
+Other requests (scripts, images, API calls) are proxied and waited on. They are not replaced with the loading page.
+
+Loading-page CSS, JavaScript, images, and fonts live under `/__door/` so they do not collide with the studio's `/css`, `/js`, `/img`, or `/fonts`.
+
+## Studio settings
+
+On the Render service:
 
 ```
 PUBLIC_BASE_URL=https://batlas-szpab.pages.dev
 ```
 
-Sky Crew room invites then copy that address. Leave `PUBLIC_BASE_URL` empty and invites stay on whatever host the game is open on. `/healthz` already allows `https://*.pages.dev` to read the health check.
+`TRUST_PROXY` is already on in production. The server allows this origin for WebSocket upgrades, and it trusts `X-Forwarded-Host` only when the value is exactly that host. Secure cookies are set because the browser only talks HTTPS to Pages; the worker does not add a `Domain`.
 
-## Wrangler
+Sky Crew builds its WebSocket URL from `location.host`, so co-op connects to `wss://batlas-szpab.pages.dev/ws/sky-crew`.
 
-From the repository root, after `npx wrangler login`:
+## Deploy
+
+The Pages project is Direct Upload. It has no Git connection, and a Direct Upload project cannot be switched to Git later.
+
+From the repository root:
 
 ```
 npx wrangler pages deploy frontdoor --project-name batlas-szpab --branch main
 ```
 
-The first run creates the project if it does not exist. Later deploys update it. This is the same folder Pages serves: no build command, output directory `frontdoor`.
+That needs:
+
+- `CLOUDFLARE_API_TOKEN` with Pages edit permission
+- `CLOUDFLARE_ACCOUNT_ID=0f815efd3bb1237f0a34ab980dd48494`
+
+The first run creates the project if it does not exist. Later runs update the production branch. This repository does not deploy itself.
+
+Dashboard drag-and-drop of the `frontdoor` folder does support `_worker.js`. Cloudflare's Direct Upload docs say a `_worker.js` file is deployed by both Wrangler and drag-and-drop. Drag-and-drop does **not** compile a `functions` folder of Pages Functions, which is why this proxy is a single `_worker.js` instead. Prefer the Wrangler command so the worker and the `/__door/` files go up together.
+
+While `_worker.js` is in place it handles every route. `_redirects` and `_headers` are not what sends traffic to the studio.
+
+## Local
+
+Run the studio, then:
+
+```
+npx wrangler pages dev frontdoor --binding UPSTREAM_ORIGIN=http://127.0.0.1:3000
+```
+
+Leave the binding unset to proxy the live Render origin. `UPSTREAM_ORIGIN` is only a local override; production uses `https://batlas-2je9.onrender.com`.
+
+Header, cookie, and location rewriting is covered by `node --test frontdoor/rewrite.test.js`.
