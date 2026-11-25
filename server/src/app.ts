@@ -23,6 +23,8 @@ import { audit } from './lib/audit.js';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
 import { siteRoutes, type LiveRoomsProvider } from './routes/site.js';
+import { passesRoutes } from './routes/passes.js';
+import { canOpenGame } from './lib/passes.js';
 import { serveMedia } from './lib/media.js';
 import { getMaintenance } from './lib/maintenance.js';
 import { mountRestoreEndpoint } from './routes/restore-endpoint.js';
@@ -155,6 +157,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   api.use(contactRoutes(ctx));
   api.use(statsRoutes(ctx));
   api.use(siteRoutes(ctx, { liveRooms: deps.liveRooms }));
+  api.use(passesRoutes(ctx));
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found')));
   api.use(errorHandler);
   app.use('/api', (req, res, next) => {
@@ -203,10 +206,25 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
   app.get('/forgot-password', page('forgot.html'));
   app.get('/reset-password', page('reset.html'));
   app.get('/verify-email', page('verify.html'));
-  app.get('/play/sky-crew', page('play/sky-crew/index.html'));
+  const playPage = (slug: string, file: string) => async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const g = await db('games').where({ slug }).first();
+      if (g && !(await canOpenGame(db, req.user, g))) {
+        res.set('Cache-Control', 'no-store');
+        issueCsrf(ctx, res, false, req);
+        return res.status(req.user ? 403 : 401).sendFile(path.join(pub, 'pass-needed.html'));
+      }
+      return page(file)(req, res);
+    } catch (e) { next(e); }
+  };
+  app.get('/play/sky-crew', playPage('sky-crew', 'play/sky-crew/index.html'));
   app.get('/play/sky-crew/', (_req, res) => res.redirect(301, '/play/sky-crew'));
-  app.get('/play/highcrag', page('play/highcrag/index.html'));
+  app.get('/play/highcrag', playPage('highcrag', 'play/highcrag/index.html'));
   app.get('/play/highcrag/', (_req, res) => res.redirect(301, '/play/highcrag'));
+  app.get('/leaderboard', page('leaderboard.html'));
+  app.get('/about', page('about.html'));
+  app.get('/terms', page('terms.html'));
+  app.get('/privacy', page('privacy.html'));
 
   app.get('/admin', gated('admin.panel', 'admin.html', false));
   app.get('/admin/app.js', gated('admin.panel', 'admin.js', true));

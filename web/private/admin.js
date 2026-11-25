@@ -1,5 +1,5 @@
 import { h, getMe, rankBadge } from '/js/common.js';
-import { usersPanel, logPanel, gameControls } from '/js/staff.js';
+import { usersPanel, logPanel, gameControls, passesPanel, feedbackPanel } from '/js/staff.js';
 const app = document.getElementById('app');
 const me = await getMe();
 const p = me.permissions;
@@ -13,6 +13,8 @@ const parts = [
 ];
 const gc = gameControls(p);
 if (gc) parts.push(h('div', { class: 'section-head' }), gc);
+if (p.has('passes.grant')) parts.push(h('div', { class: 'section-head' }), passesPanel());
+if (p.has('admin.panel')) parts.push(h('div', { class: 'section-head' }), feedbackPanel());
 if (p.has('players.view')) parts.push(h('div', { class: 'section-head' }), usersPanel(me.user, p));
 if (p.has('moderation.view')) parts.push(h('div', { class: 'section-head' }), logPanel('Moderation history', '/api/admin/moderation'));
 app.replaceChildren(...parts);

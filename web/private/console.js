@@ -1,13 +1,13 @@
 // Developer dashboard. Served only to DEVELOPER sessions (server-gated route); every API it
 // calls is also Developer-only on the server.
 import { api, h, getMe, rankBadge, showError, showOk, fmtDate, fmtDay, csrfToken, userChip } from '/js/common.js';
-import { usersPanel, logPanel, gameControls } from '/js/staff.js';
+import { usersPanel, logPanel, gameControls, passesPanel, feedbackPanel } from '/js/staff.js';
 
 const app = document.getElementById('app');
 const me = await getMe();
 const p = me.permissions;
 const view = h('div');
-const tabsDef = [['stats', 'Stats'], ['games', 'Games'], ['news', 'News'], ['inbox', 'Inbox'], ['users', 'Players & ranks'], ['online', 'Online'], ['events', 'Events'], ['media', 'Media'], ['site', 'Maintenance'], ['audit', 'Audit log'], ['rooms', 'Live rooms'], ['tools', 'Developer tools']];
+const tabsDef = [['stats', 'Stats'], ['games', 'Games'], ['passes', 'Passes'], ['feedback', 'Feedback'], ['news', 'News'], ['inbox', 'Inbox'], ['users', 'Players & ranks'], ['online', 'Online'], ['events', 'Events'], ['media', 'Media'], ['site', 'Maintenance'], ['audit', 'Audit log'], ['rooms', 'Live rooms'], ['tools', 'Developer tools']];
 const tabs = h('div', { class: 'tabs', role: 'tablist' }, ...tabsDef.map(([k, l]) => h('button', { dataset: { k }, role: 'tab', onclick: () => show(k) }, l)));
 app.replaceChildren(
   h('div', { class: 'card panel-dev' }, h('div', { class: 'panel-head' }, h('h1', {}, 'Developer dashboard'), rankBadge(me.role)),
@@ -20,6 +20,8 @@ function show(k) {
   if (k === 'users') view.replaceChildren(usersPanel(me.user, p, { roles: true }));
   if (k === 'audit') view.replaceChildren(logPanel('Audit log', '/api/admin/audit', { categories: ['moderation', 'roles', 'game', 'games', 'media', 'news', 'site', 'auth', 'admin'] }));
   if (k === 'games') view.replaceChildren(gamesPanel());
+  if (k === 'passes') view.replaceChildren(passesPanel());
+  if (k === 'feedback') view.replaceChildren(feedbackPanel());
   if (k === 'tools') view.replaceChildren(toolsPanel());
   if (k === 'stats') view.replaceChildren(statsPanel());
   if (k === 'news') view.replaceChildren(newsPanel());
@@ -91,6 +93,7 @@ const SETTINGS = [
   ['playEnabled', 'Play in browser enabled'],
   ['downloadEnabled', 'Downloads enabled'],
   ['showLeaderboard', 'Show leaderboard (Sky Crew)'],
+  ['earlyAccessOnly', 'Preview only (a preview pass, or staff, is required to open it)'],
 ];
 
 function gamesPanel() {

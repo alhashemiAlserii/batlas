@@ -52,7 +52,9 @@ export async function deleteOwnAccount(db: Knex, userId: number, opts: { ip?: st
     const anonymised: Record<string, number> = {};
 
     // Sky Crew economy + outfits too (explicit, so it never depends on FK cascades being enabled)
-    for (const t of ['sessions', 'game_tokens', 'auth_tokens', 'game_flights', 'game_profiles', 'owned_items', 'wallet_ledger', 'wallets']) removed[t] = await trx(t).where({ user_id: u.id }).delete();
+    for (const t of ['sessions', 'game_tokens', 'auth_tokens', 'game_flights', 'game_profiles', 'owned_items', 'wallet_ledger', 'wallets', 'passes']) removed[t] = await trx(t).where({ user_id: u.id }).delete();
+    anonymised.passes_granted = await trx('passes').where({ granted_by: u.id }).update({ granted_by: null });
+    anonymised.feedback = await trx('feedback').where({ user_id: u.id }).update({ user_id: null, handle: anon });
     const avatarId = mediaIdFromUrl(u.avatar_url);
     removed.avatars = await trx('media').where({ uploaded_by: u.id, kind: 'avatar' }).orWhere((w) => { if (avatarId) w.where({ id: avatarId, kind: 'avatar' }); else w.whereRaw('1 = 0'); }).delete();
     if (u.avatar_url?.startsWith('/uploads/avatars/') && opts.uploadDir) legacyAvatarFile = path.join(opts.uploadDir, 'avatars', path.basename(u.avatar_url));

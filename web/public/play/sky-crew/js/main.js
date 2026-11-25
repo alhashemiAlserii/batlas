@@ -1015,6 +1015,14 @@ function updateCamera() {
     return;
   }
   if (camOverride?.pos) { camera.position.set(...camOverride.pos); camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(...camOverride.at))); return; }
+  const menuUp = !playing && !$('#menu').classList.contains('hidden');
+  if (menuUp && !shopOpen()) {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const drift = reduce ? 0 : Math.sin(performance.now() * 0.00015);
+    camera.position.set(-22, 7.2, 16 + drift * 1.4);
+    camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(6, 1.6, -4)));
+    return;
+  }
   const seated = me.mode === 'pilot' || me.mode === 'copilot';
   if (seated && me.third) {
     camera.position.set(9, 6, 34); camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(0, 1, -8)));
@@ -1469,12 +1477,12 @@ function quitToMenu(msg) {
   if (net.inRoom) net.leave();
   syncRemotes(null); UI.roomInfo(null); UI.show('#lobby', false); myCrew = null; dressMe();
   audio.startMusic();
-  playing = false; setPaused(false); UI.show('#admin', false); UI.show('#results', false); UI.show('#hud', false); UI.show('#hudWallet', false); UI.show('#menu', true);
+  playing = false; setPaused(false); UI.show('#admin', false); UI.show('#results', false); UI.show('#hud', false); UI.show('#hudWallet', false); UI.show('#plan', false); UI.show('#credits', false); UI.show('#menu', true);
   sim.host = true; restartFlight(); respawn();
   if (msg) { $('#menuErr').textContent = msg; UI.show('#menuErr', true); }
 }
 function start() {
-  UI.show('#menu', false); UI.show('#lobby', false); releaseMenuFocus(); UI.show('#hud', true); UI.show('#menuErr', false);
+  UI.show('#menu', false); UI.show('#plan', false); UI.show('#lobby', false); releaseMenuFocus(); UI.show('#hud', true); UI.show('#menuErr', false);
   attachLocalShift();
   audio.stopMusic();
   playing = true; respawn(); updateWalletHud();
@@ -1498,6 +1506,29 @@ async function goOnline(code) {
 }
 $('#bCreate').addEventListener('click', () => goOnline());
 $('#bJoin').addEventListener('click', () => { const c = $('#joinCode').value.trim().toUpperCase(); if (c.length === 5) goOnline(c); else { $('#menuErr').textContent = 'Room codes have 5 letters.'; UI.show('#menuErr', true); } });
+const RECENT_KEY = 'skycrew.recent';
+function rememberRoom(code) {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { list = []; }
+  const name = ($('#roomName')?.value || 'Harbor hop').trim() || 'Harbor hop';
+  list = [{ code, name }, ...list.filter((r) => r.code !== code)].slice(0, 5);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* private mode */ }
+}
+function renderRecent() {
+  const box = $('#recentRooms'); if (!box) return;
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { list = []; }
+  box.replaceChildren(...(list.length ? list.map((r) => UI.el('button', { type: 'button', onclick: () => { $('#joinCode').value = r.code; } }, `${r.code} · ${r.name}`)) : [UI.el('p', { class: 'muted small' }, 'No recent rooms on this device.')]));
+}
+function openPlan(focus) {
+  UI.show('#menuErr', false); UI.show('#plan', true); renderRecent();
+  if (focus === 'join') setTimeout(() => $('#joinCode').focus(), 30);
+}
+$('#bStart')?.addEventListener('click', () => openPlan('new'));
+$('#bMulti')?.addEventListener('click', () => openPlan('join'));
+$('#planClose')?.addEventListener('click', () => UI.show('#plan', false));
+$('#bCredits')?.addEventListener('click', () => UI.show('#credits', true));
+$('#bCreditsClose')?.addEventListener('click', () => UI.show('#credits', false));
 $('#joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#bJoin').click(); });
 
 // ---------------- route select, lobby, settings ----------------
@@ -1526,7 +1557,7 @@ $('#lobContract').addEventListener('change', (e) => { if (net.inRoom && net.isHo
 $('#routeSel').addEventListener('change', (e) => { setRoute(e.target.value); refreshRouteUi(); });
 $('#lobRoute').addEventListener('change', (e) => { if (net.inRoom && !net.isHost) { refreshRouteUi(); return; } setRoute(e.target.value); refreshRouteUi(); });
 refreshRouteUi();
-function openLobby() { releaseMenuFocus(); UI.show('#menu', false); UI.show('#lobby', true); audio.startMusic(); renderLobby(); refreshRouteUi(); }
+function openLobby() { releaseMenuFocus(); if (net.room?.code) rememberRoom(net.room.code); UI.show('#menu', false); UI.show('#plan', false); UI.show('#lobby', true); audio.startMusic(); renderLobby(); refreshRouteUi(); }
 function renderLobby() {
   const room = net.room;
   if (!room || $('#lobby').classList.contains('hidden')) return;

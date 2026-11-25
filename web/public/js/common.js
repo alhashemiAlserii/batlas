@@ -135,34 +135,155 @@ export function fmtDate(s) {
   return isNaN(d) ? s : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function HEX() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '14');
+  svg.setAttribute('height', '14');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('hex');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', 'M7.2 3.2h9.6L21 12l-4.2 8.8H7.2L3 12z');
+  p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', 'currentColor');
+  p.setAttribute('stroke-width', '1.4');
+  svg.append(p);
+  return svg;
+}
+
+let passRoot = null;
+export async function openPasses() {
+  if (!passRoot) return;
+  passRoot.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  const body = passRoot.querySelector('.pass-body');
+  const tabs = passRoot.querySelectorAll('[data-tab]');
+  let tab = 'early_access';
+  const draw = (data) => {
+    tabs.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    if (!data?.signedIn) {
+      body.replaceChildren(h('p', { class: 'pass-empty' }, 'Sign in with your handle to see your passes.'));
+      return;
+    }
+    const rows = (data.passes || []).filter((p) => p.kind === tab);
+    const blurb = tab === 'early_access'
+      ? 'A preview pass is first boarding for a new game or a test build. Staff grant it. Nothing on this list has a price.'
+      : 'A crew card is a mark staff can pin on your account. It does not unlock a locked game by itself.';
+    body.replaceChildren(
+      h('p', { class: 'pass-blurb' }, blurb),
+      rows.length
+        ? h('ul', { class: 'pass-list' }, ...rows.map((p) => h('li', {},
+          h('strong', {}, p.gameTitle || 'All games'),
+          h('span', {}, p.active ? (p.expiresAt ? `Open until ${fmtDate(p.expiresAt)}` : 'Open, no expiry') : 'Closed'))))
+        : h('p', { class: 'pass-empty' }, tab === 'early_access' ? 'No preview pass on this handle yet.' : 'No crew card on this handle yet.'));
+  };
+  tabs.forEach((b) => b.onclick = () => { tab = b.dataset.tab; draw(passRoot._data); });
+  try {
+    const data = await api('GET', '/api/passes/mine');
+    passRoot._data = data;
+    draw(data);
+  } catch {
+    body.replaceChildren(h('p', { class: 'pass-empty' }, 'Passes are unavailable right now.'));
+  }
+}
+
+function mountPasses() {
+  if (document.getElementById('pass-modal')) return;
+  const body = h('div', { class: 'pass-body' });
+  passRoot = h('div', { id: 'pass-modal', class: 'pass-modal hidden', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pass-title' },
+    h('div', { class: 'pass-card' },
+      h('div', { class: 'pass-top' },
+        h('div', {}, h('p', { class: 'eyebrow' }, 'Batlas passes'), h('h2', { id: 'pass-title' }, 'Your passes')),
+        h('button', { class: 'pass-x', type: 'button', 'aria-label': 'Close', onclick: closePasses }, '×')),
+      h('div', { class: 'pass-tabs', role: 'tablist' },
+        h('button', { type: 'button', role: 'tab', dataset: { tab: 'early_access' }, class: 'active' }, 'Preview'),
+        h('button', { type: 'button', role: 'tab', dataset: { tab: 'crew' } }, 'Crew card')),
+      body));
+  passRoot.addEventListener('click', (e) => { if (e.target === passRoot) closePasses(); });
+  document.body.append(passRoot);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && passRoot && !passRoot.classList.contains('hidden')) closePasses(); });
+}
+function closePasses() {
+  passRoot?.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+function mountFeedback() {
+  if (document.getElementById('fb-fab')) return;
+  const box = h('form', { class: 'fb-panel hidden', id: 'fb-panel' });
+  const note = h('div');
+  const msg = h('textarea', { name: 'message', maxlength: '2000', required: true, placeholder: 'What should we know?', 'aria-label': 'Feedback' });
+  box.append(
+    h('p', { class: 'eyebrow' }, 'Feedback'),
+    h('p', { class: 'small muted' }, 'A note for the studio. Staff read these on the dashboard.'),
+    msg, note,
+    h('div', { class: 'hp' }, h('label', {}, 'Company', h('input', { name: 'company', tabindex: '-1', autocomplete: 'off' }))),
+    h('div', { class: 'inline' },
+      h('button', { class: 'btn primary small', type: 'submit' }, 'Send'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => box.classList.add('hidden') }, 'Close')));
+  box.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = msg.value.trim();
+    if (text.length < 4) { showError(note, new Error('Tell us a little more.')); return; }
+    try {
+      await api('POST', '/api/feedback', { message: text, page: location.pathname, company: box.company.value });
+      msg.value = '';
+      showOk(note, 'Sent. Thank you.');
+    } catch (err) { showError(note, err); }
+  });
+  const fab = h('button', { id: 'fb-fab', class: 'fb-fab', type: 'button', onclick: () => box.classList.toggle('hidden') }, 'Feedback');
+  document.body.append(fab, box);
+}
+
+async function gameCount() {
+  try {
+    const { games } = await api('GET', '/api/games');
+    const auto = new Set(['highcrag']);
+    const list = games.some((g) => g.slug === 'sky-crew' || !auto.has(g.slug)) ? games : [{ slug: 'sky-crew' }, ...games];
+    return list.length;
+  } catch { return 0; }
+}
+
 async function renderChrome() {
   const header = $('#site-header');
   const footer = $('#site-footer');
   let studio = 'Batlas';
   try { studio = (await api('GET', '/api/site')).studioName; } catch {}
   const path = location.pathname;
-  const link = (href, label) => h('a', { href, class: path === href || (href !== '/' && path.startsWith(href)) ? 'active' : '' }, label);
+  const link = (href, label, extra) => h('a', { href, class: path === href || (href !== '/' && path.startsWith(href)) ? 'active' : '' }, label, extra || null);
   if (header) {
+    const count = h('span', { class: 'count-badge', id: 'nav-game-count' }, '–');
+    const links = h('div', { class: 'nav-links' }, link('/games', 'Games', count), link('/leaderboard', 'Leaderboard'), link('/about', 'About'));
     const right = h('div', { class: 'nav-right' });
-    const links = h('div', { class: 'nav-links' }, link('/', 'Home'), link('/games', 'Games'), link('/news', 'News'), link('/contact', 'Contact'));
     const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
-      h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` }, h('img', { class: 'brand-mark', src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 }), h('span', { class: 'sr-only', 'data-studio-name': '' }, studio)),
-      h('button', { class: 'menu-btn', 'aria-label': 'Menu', 'aria-expanded': 'false', onclick: (e) => { const o = nav.classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); e.currentTarget.textContent = o ? 'Close' : 'Menu'; } }, 'Menu'),
-      links, right,
-      h('span', { class: 'nav-tag' }, h('i', { class: 'dot', 'aria-hidden': 'true' }), 'One handle, every game'));
+      h('a', { class: 'brand', href: '/', 'aria-label': `${studio} home` },
+        h('span', { class: 'mono' }, h('img', { src: '/img/batlas-mark.png', alt: '', width: 164, height: 120 })),
+        h('span', { class: 'wordmark' }, h('b', {}, 'BATLAS'), h('span', {}, 'GAMES'))),
+      h('button', { class: 'menu-btn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': 'false', onclick: (e) => { const o = nav.classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); e.currentTarget.textContent = o ? 'Close' : 'Menu'; } }, 'Menu'),
+      links,
+      right,
+      h('span', { class: 'nav-tag' }, h('i', { class: 'dot', 'aria-hidden': 'true' }), 'Plays in the browser'));
     header.replaceChildren(nav);
+    mountPasses();
+    mountFeedback();
+    right.append(
+      h('span', { id: 'nav-account' }),
+      h('button', { class: 'pass-pill', id: 'open-passes', type: 'button', onclick: () => openPasses() }, HEX(), 'Preview'));
+    gameCount().then((n) => { count.textContent = String(n); });
     try {
       const me = await getMe();
+      const slot = document.getElementById('nav-account');
       if (me.user) {
         if ((me.user.mustChangePin || me.user.mustChangePassword) && location.pathname !== '/settings') { location.href = '/settings?force=1'; return; }
-        if (me.permissions.has('admin.panel')) links.append(link('/admin', 'Admin'));
-        right.append(
-          h('a', { href: '/profile' }, userChip(me.user, false)),
-          h('a', { class: 'btn small', href: '/settings' }, 'Settings'),
-          h('button', { class: 'btn small', onclick: async () => { await api('POST', '/api/auth/logout'); location.href = '/'; } }, 'Log out'),
-        );
+        const menu = h('div', { class: 'avatar-menu hidden' },
+          h('a', { href: '/profile' }, 'Profile'),
+          h('a', { href: '/settings' }, 'Settings'),
+          me.permissions.has('admin.panel') ? h('a', { href: '/admin' }, 'Staff desk') : null,
+          h('button', { type: 'button', onclick: async () => { await api('POST', '/api/auth/logout'); location.href = '/'; } }, 'Log out'));
+        const btn = h('button', { class: 'nav-avatar', type: 'button', 'aria-label': 'Account', 'aria-expanded': 'false', onclick: () => { const o = menu.classList.toggle('hidden'); btn.setAttribute('aria-expanded', String(!o)); } }, avatar(me.user, 'sm'));
+        slot.replaceChildren(h('span', { class: 'avatar-wrap' }, btn, menu));
       } else {
-        right.append(h('a', { class: 'btn small', href: '/login' }, 'Log in'), h('a', { class: 'btn small primary', href: '/register' }, 'Create account'));
+        slot.replaceChildren(h('a', { class: 'nav-avatar', href: '/login', 'aria-label': 'Sign in' }, h('span', { class: 'avatar avatar-sm', 'aria-hidden': 'true' })));
       }
       await renderBanners(header, me);
     } catch { renderBanners(header, null); }
@@ -172,14 +293,13 @@ async function renderChrome() {
     footer.replaceChildren(
       h('div', { class: 'inner' },
         h('div', { class: 'foot-brand' },
-          h('img', { src: '/img/batlas-mark.png', alt: studio, width: 164, height: 120 }),
-          h('p', {}, 'Independent games, played in the browser.')),
-        h('nav', { 'aria-label': 'Footer' },
-          h('a', { href: '/games' }, 'Games'),
-          h('a', { href: '/news' }, 'News'),
-          h('a', { href: '/contact' }, 'Contact'),
-          h('a', { href: '/play/sky-crew' }, 'Play Sky Crew')),
-        h('span', { class: 'legal' }, `© ${new Date().getFullYear()} ${studio}`)));
+          h('p', { class: 'foot-word' }, 'BATLAS'),
+          h('p', {}, 'Games for a crew on iPad, iPhone and Mac.')),
+        h('div', { class: 'foot-right' },
+          h('nav', { 'aria-label': 'Footer' },
+            h('a', { href: '/terms' }, 'Terms'),
+            h('a', { href: '/privacy' }, 'Privacy')),
+          h('span', { class: 'legal' }, `© ${new Date().getFullYear()} ${studio}`))));
   }
 }
 

@@ -10,6 +10,7 @@ import * as m005 from './migrations/005_website.js';
 import * as m006 from './migrations/006_sky_crew_outfits.js';
 import * as m007 from './migrations/007_sky_crew_economy.js';
 import * as m008 from './migrations/008_handle_pin.js';
+import * as m009 from './migrations/009_passes_feedback.js';
 
 /** Migrations are registered in code so they run the same under tsx, tests and builds. */
 const MIGRATIONS: Record<string, { up: (k: Knex) => Promise<void>; down: (k: Knex) => Promise<void>; config?: { transaction?: boolean } }> = {
@@ -21,6 +22,7 @@ const MIGRATIONS: Record<string, { up: (k: Knex) => Promise<void>; down: (k: Kne
   '006_sky_crew_outfits': m006,
   '007_sky_crew_economy': m007,
   '008_handle_pin': m008,
+  '009_passes_feedback': m009,
 };
 
 const migrationSource: Knex.MigrationSource<string> = {
