@@ -25,7 +25,7 @@ beforeAll(async () => {
   const bridge = httpSiteBridge(`http://127.0.0.1:${port}`, KEY);
   // Both game servers share one HTTP server, exactly like production.
   sky = attachGameServer(server, { bridge, log: () => {} });
-  hc = attachHighcragServer(server, { bridge, log: () => {} });
+  hc = attachHighcragServer(server, { bridge, log: () => {}, proxy: { trustProxy: true, publicBaseUrl: 'https://batlas-szpab.pages.dev' } });
 });
 afterAll(async () => { hc.close(); sky.close(); await new Promise((r) => server.close(r)); await db.destroy(); });
 
@@ -88,6 +88,12 @@ describe('Highcrag co-op server', () => {
   it('refuses cross-origin browsers', async () => {
     const c = new TC(HC_WS_PATH, { origin: 'https://evil.example' });
     await expect(c.open()).rejects.toBeTruthy();
+  });
+
+  it('accepts the Pages front door', async () => {
+    const c = new TC(HC_WS_PATH, { origin: 'https://batlas-szpab.pages.dev', 'x-forwarded-host': 'batlas-szpab.pages.dev' });
+    await c.open();
+    c.close();
   });
 
   it('runs alongside the Sky Crew server without touching it', async () => {

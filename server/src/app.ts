@@ -1,9 +1,11 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
+import type { IncomingHttpHeaders } from 'node:http';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import type { Knex } from 'knex';
 import { loadConfig, WEB_ROOT, type AppConfig } from './config.js';
+import { browserHost } from './lib/public-host.js';
 import type { Ctx } from './lib/types.js';
 import { errorHandler, HttpError } from './lib/http.js';
 import { csrfProtect, loadUser, issueCsrf, enforcePasswordChange } from './lib/session.js';
@@ -113,7 +115,7 @@ export function createApp(db: Knex, configOverrides: Partial<AppConfig> = {}, de
           connectSrc: [
             "'self'",
             (req) => {
-              const host = String((req as { headers: { host?: string } }).headers.host ?? '');
+              const host = browserHost((req as { headers: IncomingHttpHeaders }).headers, config);
               return /^[a-z0-9.\-]+(:\d{1,5})?$/i.test(host) ? `${config.cookieSecure ? 'wss' : 'ws'}://${host}` : "'self'";
             },
           ],

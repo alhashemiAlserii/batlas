@@ -24,7 +24,7 @@ beforeAll(async () => {
   server = http.createServer(app);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   port = (server.address() as any).port;
-  gs = attachGameServer(server, { bridge: httpSiteBridge(`http://127.0.0.1:${port}`, KEY), log: () => {}, isMaintenance: siteMaintenance(db) });
+  gs = attachGameServer(server, { bridge: httpSiteBridge(`http://127.0.0.1:${port}`, KEY), log: () => {}, isMaintenance: siteMaintenance(db), proxy: { trustProxy: true, publicBaseUrl: 'https://batlas-szpab.pages.dev' } });
 });
 afterAll(async () => { gs.close(); await new Promise((r) => server.close(r)); await db.destroy(); });
 
@@ -100,6 +100,13 @@ describe('game server auth', () => {
   it('rejects cross-origin browser connections', async () => {
     const c = new TC({ Origin: 'http://evil.example' });
     await expect(c.open()).rejects.toBeTruthy();
+  });
+  it('accepts the Pages front door and ignores a spoofed forwarded host', async () => {
+    const ok = new TC({ Origin: 'https://batlas-szpab.pages.dev', 'X-Forwarded-Host': 'batlas-szpab.pages.dev', 'X-Forwarded-Proto': 'https' });
+    await ok.open();
+    ok.close();
+    const spoofed = new TC({ Origin: 'https://evil.example', 'X-Forwarded-Host': 'evil.example', 'X-Forwarded-Proto': 'https' });
+    await expect(spoofed.open()).rejects.toBeTruthy();
   });
   it('banned players cannot join (token revoked)', async () => {
     const u = await tokenFor('PLAYER');

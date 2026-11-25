@@ -62,7 +62,10 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     restoreRateLimit: Number(process.env.RESTORE_RATE_LIMIT ?? 10), // per IP per hour
     restoreMaxBytes: Number(process.env.RESTORE_MAX_BYTES ?? 2 * 1024 * 1024 * 1024),
     restoreTmpDir: process.env.RESTORE_TMP_DIR || null,
-    // Behind Render's (or any) HTTPS proxy, so req.ip / secure cookies see the real client.
+    // Behind Render and the Cloudflare Pages front door, so req.ip / req.protocol see the
+    // browser (X-Forwarded-For / X-Forwarded-Proto). X-Forwarded-Host is trusted only when
+    // it matches PUBLIC_BASE_URL — see lib/public-host.ts. Secure cookies are a config
+    // flag (COOKIE_SECURE): the browser only ever talks HTTPS to the front door.
     trustProxy: process.env.TRUST_PROXY ? process.env.TRUST_PROXY === 'true' : prod,
     rateLimit: { windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT ?? 20) },
     studioName: process.env.STUDIO_NAME ?? 'Batlas',
@@ -89,6 +92,11 @@ export function parsePublicBaseUrl(raw: string | undefined | null): string | nul
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   if (url.username || url.password) return null;
   return url.origin;
+}
+
+/** Origin for emails and other absolute links. The public front door wins when it is set. */
+export function publicSiteOrigin(config: Pick<AppConfig, 'publicBaseUrl' | 'publicUrl'>): string {
+  return config.publicBaseUrl || config.publicUrl;
 }
 
 /** What createDb() should open: Postgres when DATABASE_URL is set, else the SQLite file. */

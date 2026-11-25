@@ -1,5 +1,5 @@
-/** Render origin this page wakes, then opens. One place to change it. */
-const TARGET_ORIGIN = 'https://batlas-2je9.onrender.com';
+/** Loading-page files. The studio itself is served on this same host by the worker. */
+const DOOR = '/__door';
 
 const PING_EVERY_MS = 2500;
 const PING_TIMEOUT_MS = 8000;
@@ -8,14 +8,14 @@ const GIVE_UP_MS = 90000;
 const SLIDE_MS = 4800;
 
 const SLIDES = [
-  { src: '/img/cabin.webp', caption: 'Serve your passengers' },
-  { src: '/img/cockpit.webp', caption: 'Take the yoke' },
-  { src: '/img/airport.webp', caption: 'Harbor Field is boarding' },
-  { src: '/img/storm.webp', caption: 'Fly through the storm' },
-  { src: '/img/birds.webp', caption: 'Birds off the nose' },
-  { src: '/img/landing.webp', caption: 'Stick the landing' },
-  { src: '/img/ramp.webp', caption: 'Load the hold' },
-  { src: '/img/cover.webp', caption: 'Bring the crew' },
+  { src: `${DOOR}/img/cabin.webp`, caption: 'Serve your passengers' },
+  { src: `${DOOR}/img/cockpit.webp`, caption: 'Take the yoke' },
+  { src: `${DOOR}/img/airport.webp`, caption: 'Harbor Field is boarding' },
+  { src: `${DOOR}/img/storm.webp`, caption: 'Fly through the storm' },
+  { src: `${DOOR}/img/birds.webp`, caption: 'Birds off the nose' },
+  { src: `${DOOR}/img/landing.webp`, caption: 'Stick the landing' },
+  { src: `${DOOR}/img/ramp.webp`, caption: 'Load the hold' },
+  { src: `${DOOR}/img/cover.webp`, caption: 'Bring the crew' },
 ];
 
 const LINES = [
@@ -60,11 +60,6 @@ function setStatus(text) {
   statusEl.textContent = text;
 }
 
-function destination() {
-  const path = location.pathname && location.pathname.startsWith('/') ? location.pathname : `/${location.pathname || ''}`;
-  return TARGET_ORIGIN + path + location.search + location.hash;
-}
-
 function ready() {
   if (stopped) return;
   stopped = true;
@@ -74,7 +69,8 @@ function ready() {
   setStatus('Ready');
   live.textContent = 'Ready. Opening Batlas.';
   bar.style.transform = 'scaleX(1)';
-  location.replace(destination());
+  // Stay on this host. The worker serves the real page once /healthz is ok.
+  location.replace(location.pathname + location.search + location.hash);
 }
 
 function showSlide(next) {
@@ -124,9 +120,9 @@ async function ping() {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PING_TIMEOUT_MS);
   try {
-    const res = await fetch(`${TARGET_ORIGIN}/healthz`, {
+    const res = await fetch('/healthz', {
       method: 'GET',
-      mode: 'cors',
+      mode: 'same-origin',
       cache: 'no-store',
       credentials: 'omit',
       signal: ctrl.signal,

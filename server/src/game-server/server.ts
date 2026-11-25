@@ -22,6 +22,7 @@ import { canActOn, ITEM_TIERS, type ItemTier, type Permission } from '../lib/per
 import { checkStep, newTerm, type TermState } from './terminal.js';
 import { DEV_ITEMS, DEV_CATEGORIES, devItem, MAX_EQUIPPED, WEATHERS, SCENARIOS, TELEPORT_SPOTS, NPC_ACTIONS, ROOM_EVENTS, DIFFICULTIES, MUTE_MINUTES_MAX, BAN_MINUTES_MAX } from './catalog.js';
 import { envMaintenance, MAINTENANCE_MESSAGE, type MaintenanceCheck } from './maintenance.js';
+import { socketOriginAllowed, type ProxyTrust } from '../lib/public-host.js';
 
 export { WEATHERS, SCENARIOS, TELEPORT_SPOTS, NPC_ACTIONS } from './catalog.js';
 export const WS_PATH = '/ws/sky-crew';
@@ -124,6 +125,8 @@ export interface GameServerOptions {
   maintenancePollMs?: number;
   /** clock (tests) */
   now?: () => number;
+  /** Front door in front of this process. Its origin may open a WebSocket. */
+  proxy?: ProxyTrust;
 }
 
 export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions) {
@@ -899,12 +902,10 @@ export function attachGameServer(httpServer: HttpServer, opts: GameServerOptions
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://x');
     if (url.pathname !== WS_PATH) return;
-    // Same-origin browsers only (plus non-browser clients that send no Origin, e.g. tests/servers).
-    const origin = req.headers.origin;
-    if (origin) {
-      try {
-        if (new URL(origin).host !== req.headers.host) { socket.destroy(); return; }
-      } catch { socket.destroy(); return; }
+    // Same-origin browsers, or the configured front door (plus clients that send no Origin).
+    if (!socketOriginAllowed(req.headers.origin, req.headers, opts.proxy ?? { trustProxy: false, publicBaseUrl: null })) {
+      socket.destroy();
+      return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });

@@ -154,7 +154,7 @@ Games are stored in the database, so publishing or editing a game in the dashboa
 1. Render Dashboard → **New → Blueprint** → pick this repo → Apply. Render asks for the `sync: false` values:
    - `BOOTSTRAP_DEVELOPER_PASSWORD` — a strong password (10+ chars). On boot, if no Developer exists yet, the server creates **abood** with it (no email; optional `BOOTSTRAP_DEVELOPER_USERNAME` / `BOOTSTRAP_DEVELOPER_EMAIL`) and forces a password change at first sign-in. Once a Developer exists the variable is ignored — delete it afterwards.
    - `PUBLIC_URL` — can be left empty at first; then set it to `https://<service>.onrender.com` (or your domain). Only used for links in emails.
-   - `PUBLIC_BASE_URL` — optional. Set to the Cloudflare Pages front door (`https://batlas-szpab.pages.dev`) so Sky Crew room invites copy that address. Leave it empty and invites stay on whatever host the game is open on. See `frontdoor/README.md`.
+   - `PUBLIC_BASE_URL` — the public site (`https://batlas-szpab.pages.dev`). The Pages worker proxies the studio, so the address bar stays on that host, and Sky Crew room invites copy it. Leave it empty and invites stay on whatever host the game is open on. See `frontdoor/README.md`.
 2. Wait for the deploy to go live (`/healthz` returns `{"ok":true}`), sign in as abood, choose the new password, then delete `BOOTSTRAP_DEVELOPER_PASSWORD` from the service's Environment.
 3. Backups: copy the database's **External Database URL** and run `DATABASE_URL='<external url>' npm run backup` from `server/` on your computer (TLS is switched on automatically for non-internal hosts; override with `DATABASE_SSL=true|false`).
 

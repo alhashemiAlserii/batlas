@@ -18,6 +18,7 @@ import { IMAGE_TYPES } from './games.js';
 import { storeMedia, mediaIdFromUrl } from '../lib/media.js';
 import { deleteOwnAccount } from '../lib/account-delete.js';
 import { cookieNames } from '../lib/session.js';
+import { publicSiteOrigin } from '../config.js';
 
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -27,7 +28,7 @@ export async function sendVerificationEmail(ctx: Ctx, user: UserRow) {
   await ctx.mailer.send({
     to: user.email,
     subject: 'Confirm your Batlas account email',
-    text: `Hi ${user.display_name || handleOf(user)},\n\nConfirm your email address for your Batlas account:\n${ctx.config.publicUrl}/verify-email?token=${token}\n\nThis link expires in 24 hours. If you didn't add an email on Batlas, you can ignore this email.\n\n— Batlas`,
+    text: `Hi ${user.display_name || handleOf(user)},\n\nConfirm your email address for your Batlas account:\n${publicSiteOrigin(ctx.config)}/verify-email?token=${token}\n\nThis link expires in 24 hours. If you didn't add an email on Batlas, you can ignore this email.\n\n— Batlas`,
   });
 }
 
@@ -79,7 +80,7 @@ export function accountRoutes(ctx: Ctx) {
       await ctx.mailer.send({
         to: u.email!,
         subject: 'Reset your Batlas PIN',
-        text: `Hi ${u.display_name || handleOf(u)},\n\nSomeone asked to reset the PIN for your Batlas account. Choose a new PIN here:\n${ctx.config.publicUrl}/reset-password?token=${token}\n\nThis link expires in 1 hour and can only be used once. If you didn't ask for this, ignore this email. Most players reset a forgotten PIN by asking a Batlas admin.\n\n— Batlas`,
+        text: `Hi ${u.display_name || handleOf(u)},\n\nSomeone asked to reset the PIN for your Batlas account. Choose a new PIN here:\n${publicSiteOrigin(ctx.config)}/reset-password?token=${token}\n\nThis link expires in 1 hour and can only be used once. If you didn't ask for this, ignore this email. Most players reset a forgotten PIN by asking a Batlas admin.\n\n— Batlas`,
       });
       await audit(ctx.db, req, { action: 'auth.password_reset_requested', category: 'auth', targetType: 'user', targetId: u.id, targetLabel: u.username }, u);
     }
