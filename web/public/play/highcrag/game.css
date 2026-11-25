@@ -469,3 +469,8 @@ body.touch #chatPanel kbd{display:none}
 #loading.ld-scene.failed .ld-bar i{background:#ff4f6d}
 @media (max-height:500px){#loading.ld-scene .ld-foot{bottom:calc(14px + env(safe-area-inset-bottom))}#loading.ld-scene .ld-name{font-size:2.8rem;margin-bottom:8px}#loading.ld-scene .ld-row{margin-top:7px;font-size:.95rem}#loading.ld-scene .ld-tip{display:none}}
 @media (prefers-reduced-motion:reduce){#loading.ld-scene .ld-pan,#loading.ld-scene .ld-art *{animation:none!important}}
+/* end of loading: the painting fades away and the live 3D island shows behind the title text */
+#loading.ld-scene.live{background:transparent}
+#loading.ld-scene.live .ld-pan{opacity:0;transition:opacity 1.2s ease}
+#loading.ld-scene.live .ld-shade{background:linear-gradient(0deg,rgba(8,10,24,.5),transparent 45%)}
+body.booting #title{visibility:hidden}
