@@ -29,7 +29,9 @@ describe('editorial Batlas shell', () => {
     expect(game).toContain('#fhud');
     expect(game).toContain('#joy');
     expect(game).toContain('prefers-reduced-motion');
-    expect(home).toContain('Bring the crew.');
+    expect(home).toContain('Your crew');
+    expect(home).toContain('is boarding.');
+    expect(home).toContain('Pick a game');
     expect(home).toContain('id="hero-play"');
     expect(home).toContain('name="theme-color" content="#111316"');
     expect(login).toContain('name="login"');

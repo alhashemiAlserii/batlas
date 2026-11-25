@@ -1,4 +1,4 @@
-import { api, h, fmtDay, rankBadge, safeUrl, timeUntil } from './common.js';
+import { api, h, fmtDay, safeUrl, timeUntil, openPasses } from './common.js';
 import { openLightbox } from './lightbox.js';
 import { coverOf, builtinSkyCrew } from './ui.js';
 
@@ -50,7 +50,11 @@ function actions(g) {
   const row = h('div', { class: 'game-actions' });
   const play = safeUrl(g.playUrl);
   const live = g.status === 'published' || g.status === 'upcoming';
-  if (play && live && g.settings.playEnabled !== false) row.append(h('a', { class: 'btn primary lg go', href: play, id: 'play-btn' }, g.status === 'upcoming' ? 'Play early build' : `Play ${g.title}`));
+  if (play && live && g.settings.playEnabled !== false) {
+    if (g.settings.earlyAccessOnly && g.youCanPlay === false) {
+      row.append(h('button', { class: 'btn primary lg play-wide', type: 'button', id: 'play-btn', onclick: () => openPasses() }, 'Preview pass needed'));
+    } else row.append(h('a', { class: 'btn primary lg play-wide', href: play, id: 'play-btn' }, g.status === 'upcoming' ? 'Play the test build' : `Play ${g.title}`));
+  }
   // The server only fills `download` when the file exists and downloads are enabled.
   const dl = safeUrl(g.download);
   if (dl) row.append(h('a', { class: 'btn lg', href: dl, id: 'download-btn', rel: 'noopener', download: dl.startsWith('/') ? '' : null }, g.latestVersion ? `Download v${g.latestVersion.version}` : 'Download'));
@@ -60,38 +64,55 @@ function actions(g) {
 
 const shots = (g) => g.screenshots.map(safeUrl).filter(Boolean).map((src, i) => ({ src, alt: `${g.title} screenshot ${i + 1}` }));
 
+function titleLines(title) {
+  return title.trim().split(/\s+/).map((w) => h('span', {}, w));
+}
+const SKY_FEATURES = [
+  ['The cabin', 'Bags, passengers and a galley that does not stay tidy. Anyone can answer a call. The matching job scores more.'],
+  ['The flight', 'A short hop from Harbor Field. One person flies. The rest of the crew can still reach the yoke.'],
+  ['Your account', 'The same handle and PIN you use on the rest of Batlas. No email. Up to eight people in a room.'],
+];
+function featuresFor(g) {
+  if (g.slug === 'sky-crew') return SKY_FEATURES;
+  const bits = String(g.description || g.tagline || '').split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  const cols = [
+    ['The game', bits[0] || g.tagline || 'More about this game is on the way.'],
+    ['Where it runs', (g.platforms || []).join(', ') || 'In the browser.'],
+    ['Your account', 'Handle and PIN. The same Batlas sign-in as every other game.'],
+  ];
+  return cols;
+}
+function metaFor(g) {
+  if (g.slug === 'sky-crew') return [['Crew', '1–8'], ['Plays on', 'iPad, iPhone, Mac'], ['Account', 'Handle + PIN']];
+  return [
+    ['Status', g.status === 'upcoming' ? 'Coming soon' : 'Out now'],
+    ['Version', g.version ? `v${g.version}` : '—'],
+    ['Plays on', (g.platforms || []).slice(0, 3).join(', ') || 'Browser'],
+  ];
+}
+
 async function renderGame(g) {
   document.title = `${g.title} · Batlas`;
   const until = g.releaseDate ? timeUntil(g.releaseDate + 'T00:00:00') : '';
-  const play = safeUrl(g.playUrl);
-  const live = (g.status === 'published' || g.status === 'upcoming') && g.settings.playEnabled !== false && play;
-  const top = h('section', { class: 'game-sheet' },
+  const top = h('section', { class: 'game-sheet rise' },
     h('a', { class: 'back-link', href: '/games' }, '← All games'),
     h('div', { class: 'game-split' },
       h('div', { class: 'game-art' }, mediaBox(g)),
       h('div', { class: 'game-intro' },
-        h('p', { class: 'eyebrow' }, g.status === 'upcoming' ? 'In development' : 'In the browser'),
-        h('h1', {}, g.title),
+        h('p', { class: 'eyebrow' }, g.settings?.earlyAccessOnly ? 'Preview build' : g.status === 'upcoming' ? 'In development' : 'In the browser'),
+        h('h1', {}, ...titleLines(g.title)),
         h('p', { class: 'tagline' }, g.tagline || ''),
-        h('div', { class: 'meta-row' },
-          h('span', { class: `pill ${g.status}`, id: 'status-pill' }, g.status === 'upcoming' ? 'Upcoming' : 'Out now'),
-          g.version ? h('span', { class: 'meta-chip' }, `v${g.version}`) : null,
-          g.platforms?.length ? h('span', { class: 'meta-chip' }, g.platforms.join(' · ')) : null,
-          g.status === 'upcoming' ? h('span', { class: 'release', id: 'release-date' }, g.releaseDate ? `Releases ${fmtDay(g.releaseDate)}${until ? ` · ${until}` : ''}` : 'Release date TBA') : null),
+        h('p', { class: 'desc' }, g.description || ''),
+        h('div', { class: 'meta-labels' }, ...metaFor(g).map(([k, v]) => h('div', {}, h('span', {}, k), h('b', {}, v)))),
+        g.status === 'upcoming' ? h('p', { class: 'release', id: 'release-date' }, g.releaseDate ? `Releases ${fmtDay(g.releaseDate)}${until ? ` · ${until}` : ''}` : 'Release date TBA') : null,
         g.settings.playEnabled === false ? h('p', { class: 'notice', id: 'play-notice' }, g.settings.maintenanceMessage || 'Playing is paused for a moment while we update the game.') : null,
-        actions(g),
-        live ? h('p', { class: 'micro' }, 'Opens in this browser. Your handle stays signed in.') : null,
-        h('dl', { class: 'facts' },
-          g.version ? [h('dt', {}, 'Version'), h('dd', {}, `v${g.version}`)] : null,
-          g.latestVersion ? [h('dt', {}, 'Updated'), h('dd', {}, fmtDay(g.latestVersion.releasedAt))] : null,
-          g.platforms?.length ? [h('dt', {}, 'Where'), h('dd', {}, g.platforms.join(', '))] : null,
-          g.status === 'upcoming' ? [h('dt', {}, 'Release'), h('dd', {}, g.releaseDate ? fmtDay(g.releaseDate) : 'TBA')] : null))));
+        actions(g))));
 
   const gallery = shots(g).length ? h('section', { id: 'screenshots' }, h('h2', {}, 'Screenshots'),
     h('div', { class: 'gallery' }, shots(g).map((s, i) => h('button', { type: 'button', 'aria-label': `Open screenshot ${i + 1}`, onclick: (e) => openLightbox(shots(g), i, e.currentTarget) }, h('img', { src: s.src, alt: s.alt, loading: 'lazy' }))))) : null;
 
   const main = h('div', {},
-    h('section', { class: 'about' }, h('h2', {}, 'About'), h('p', { class: 'desc' }, g.description || 'More details soon.')),
+    h('section', { class: 'feature-cols' }, ...featuresFor(g).map(([t, d]) => h('article', {}, h('h3', {}, t), h('p', {}, d)))),
     gallery,
     g.versions && g.versions.length > 1 ? h('section', {}, h('h2', {}, 'Version history'), h('div', { class: 'version-list' }, g.versions.slice(1).map((v) =>
       h('div', { class: 'version' }, h('strong', {}, `v${v.version}`), h('span', { class: 'small muted' }, ' · ', fmtDay(v.releasedAt)), v.changelog ? h('div', { class: 'changelog small' }, v.changelog) : null)))) : null);
@@ -105,7 +126,9 @@ async function renderGame(g) {
       h('a', { class: 'version', href: `/news/${encodeURIComponent(n.slug)}` }, h('strong', {}, n.title), h('div', { class: 'small muted' }, fmtDay(n.publishedAt)))))) : null);
 
   root.replaceChildren(top, h('div', { class: 'game-cols' }, main, side));
-  if (g.slug === 'sky-crew' && g.settings.showLeaderboard !== false) root.append(await leaderboard());
+  if (g.slug === 'sky-crew' && g.settings.showLeaderboard !== false) {
+    root.append(h('p', { class: 'leaderboard' }, h('a', { href: '/leaderboard' }, 'This week’s flights →')));
+  }
 }
 
 try {
@@ -116,19 +139,3 @@ try {
   else root.replaceChildren(h('div', { class: 'card center-box' }, h('p', { class: 'eyebrow' }, 'Batlas'), h('h1', {}, 'Game not found'), h('a', { class: 'btn', href: '/games' }, 'All games')));
 }
 
-async function leaderboard() {
-  const sec = h('section', { class: 'leaderboard' }, h('div', { class: 'section-head' }, h('h2', {}, 'Leaderboard'), h('span', { class: 'small muted' }, 'Best single-flight payout per pilot (airline credits)')));
-  try {
-    const { leaderboard: rows } = await api('GET', '/api/games/sky-crew/leaderboard');
-    if (!rows.length) { sec.append(h('p', { class: 'muted' }, 'No flights recorded yet. Sign in, fly a route and get paid to be first!')); return sec; }
-    sec.append(h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Player'), h('th', {}, 'Best payout'), h('th', {}, 'Flights'))),
-      h('tbody', {}, rows.map((r) => h('tr', {},
-        h('td', {}, String(r.rank)),
-        h('td', {}, h('a', { href: `/u/${encodeURIComponent(r.username)}`, class: `name-${r.role.toLowerCase()}` }, r.displayName), ' ', rankBadge(r.role)),
-        h('td', {}, h('strong', {}, `₵${Number(r.bestScore).toLocaleString('en-US')}`)),
-        h('td', {}, String(r.flights))))))));
-    sec.append(h('p', { class: 'small muted' }, 'Scores are reported by the game in your browser.'));
-  } catch { sec.append(h('p', { class: 'muted' }, 'Leaderboard unavailable right now.')); }
-  return sec;
-}

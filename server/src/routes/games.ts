@@ -11,6 +11,7 @@ import { randomToken } from '../lib/crypto.js';
 import { insertId } from '../db/index.js';
 import { storeMedia, mediaIdFromUrl, IMAGE_MAX_BYTES } from '../lib/media.js';
 import { WEB_ROOT } from '../config.js';
+import { canOpenGame } from '../lib/passes.js';
 
 /** Public per-game settings, editable in the Developer dashboard. */
 export const settingsSchema = z.object({
@@ -21,9 +22,10 @@ export const settingsSchema = z.object({
   maintenanceMessage: z.string().trim().max(200).optional(), // shown instead of Play when play is off
   accentColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, '#rrggbb').or(z.literal('')).optional(),
   sortOrder: z.number().int().min(-1000).max(1000).optional(),
+  earlyAccessOnly: z.boolean().optional(), // only a preview pass, or staff, may open the game
 }).strict();
 export type GameSettings = z.infer<typeof settingsSchema>;
-const DEFAULT_SETTINGS: Required<GameSettings> = { featured: false, playEnabled: true, downloadEnabled: true, showLeaderboard: true, maintenanceMessage: '', accentColor: '', sortOrder: 0 };
+const DEFAULT_SETTINGS: Required<GameSettings> = { featured: false, playEnabled: true, downloadEnabled: true, showLeaderboard: true, maintenanceMessage: '', accentColor: '', sortOrder: 0, earlyAccessOnly: false };
 export const parseSettings = (s: unknown): Required<GameSettings> => {
   try { return { ...DEFAULT_SETTINGS, ...(typeof s === 'string' && s ? JSON.parse(s) : {}) }; } catch { return { ...DEFAULT_SETTINGS }; }
 };
@@ -142,7 +144,8 @@ export function gamesRoutes(ctx: Ctx) {
     const candidate = vs[0]?.downloadUrl || out.downloadUrl;
     const download = out.settings.downloadEnabled && candidate && (await downloadExists(candidate)) ? candidate : '';
     const news = await ctx.db('news_posts').where({ game_id: g.id, status: 'published' }).orderBy('published_at', 'desc').limit(5).select('slug', 'title', 'summary', 'published_at');
-    res.json({ game: { ...out, versions: vs, latestVersion: vs[0] ?? null, download, news: news.map((n) => ({ slug: n.slug, title: n.title, summary: n.summary ?? '', publishedAt: n.published_at })) } });
+    const youCanPlay = await canOpenGame(ctx.db, req.user, g);
+    res.json({ game: { ...out, versions: vs, latestVersion: vs[0] ?? null, download, youCanPlay, news: news.map((n) => ({ slug: n.slug, title: n.title, summary: n.summary ?? '', publishedAt: n.published_at })) } });
   });
 
   async function downloadExists(u: string): Promise<boolean> {

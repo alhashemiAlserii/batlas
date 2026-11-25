@@ -50,6 +50,7 @@ export const PERMISSIONS = [
   'media.upload', // upload images / trailers to the database (Developer only)
   'site.events', // schedule site-wide event banners (Developer only)
   'site.maintenance', // switch maintenance mode (Developer only)
+  'passes.grant', // grant or revoke a preview pass or a crew card (Admin and Developer)
   // roles
   'roles.grant.trusted',
   'roles.grant.admin',
@@ -67,6 +68,7 @@ const ADMIN_PERMS: Permission[] = [
   'players.reset_password',
   'players.edit',
   'players.online',
+  'passes.grant',
   'moderation.view',
   'weather.change',
   'emergency.trigger',

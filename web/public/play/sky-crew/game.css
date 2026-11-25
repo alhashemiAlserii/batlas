@@ -353,7 +353,84 @@ body.ctl-editing .ctl-force.ctl-sel { outline: 3px solid #ffd23f; }
   body.touch #fhud { top: calc(8px + env(safe-area-inset-top)); bottom: auto; left: calc(224px + env(safe-area-inset-left)); transform: none; max-width: calc(100vw - 240px); justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .load-bar i, .toast, .gp-gear, html.phone-portrait .rotate-hint .rot-icon, #obj .o.fresh { animation: none; }
+  .load-bar i, .toast, .gp-gear, html.phone-portrait .rotate-hint .rot-icon, #obj .o.fresh, .menu-left { animation: none; }
   .load-bar i { transform: none; width: 100%; }
   .chatline { transition: none; }
+}
+
+/* Main menu: the live scene stays visible, controls sit on the left. */
+#menu.menu-shell {
+  background: linear-gradient(90deg, rgba(8,9,11,.55), rgba(8,9,11,.05) 58%, transparent 72%);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  justify-content: flex-start; align-items: flex-start;
+  pointer-events: none;
+  overflow: auto;
+  padding: calc(22px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(22px + env(safe-area-inset-left));
+}
+/* On-screen sticks stay for the flight. The menu is see-through, so they must not sit on the buttons. */
+body.touch:has(#menu:not(.hidden)) #touch,
+body.touch:has(#plan:not(.hidden)) #touch,
+body.touch:has(#lobby:not(.hidden)) #touch,
+body.touch:has(#pause:not(.hidden)) #touch,
+body.touch:has(#results:not(.hidden)) #touch,
+body.touch:has(#howto:not(.hidden)) #touch,
+body.touch:has(#settings:not(.hidden)) #touch,
+body.touch:has(#credits:not(.hidden)) #touch,
+body.touch:has(#shop:not(.hidden)) #touch,
+body.touch:has(#loading:not(.hidden)) #touch { display: none !important; }
+.menu-left { pointer-events: auto; width: min(380px, 72vw); animation: menu-rise .6s ease both; }
+@keyframes menu-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.menu-kicker { margin: 0 0 6px; letter-spacing: .28em; text-transform: uppercase; font-size: 12px; font-weight: 600; color: #d5dde4; }
+.menu-title {
+  margin: 0 0 18px; font-size: clamp(72px, 11vw, 120px); line-height: .8; letter-spacing: -0.04em;
+  text-transform: uppercase; font-weight: 600; text-shadow: 0 12px 40px rgba(0,0,0,.45);
+}
+.menu-actions { display: grid; gap: 8px; width: min(280px, 100%); }
+.menu-actions button, .menu-actions .menu-back {
+  display: flex; align-items: center; width: 100%; min-height: 46px; padding: 8px 14px;
+  text-align: left; text-decoration: none; color: var(--text);
+  background: rgba(17, 19, 22, .38); border: 1px solid rgba(238, 240, 242, .55); border-radius: 8px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  font-size: 20px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
+}
+.menu-actions button:hover, .menu-actions .menu-back:hover { background: rgba(238, 240, 242, .12); }
+.menu-status {
+  position: fixed; left: calc(28px + env(safe-area-inset-left)); bottom: calc(16px + env(safe-area-inset-bottom));
+  pointer-events: auto; max-width: min(420px, calc(100vw - 40px));
+  color: #d5dde4; font-size: 14px; letter-spacing: .02em;
+  text-shadow: 0 2px 10px rgba(0,0,0,.6);
+}
+#plan { background: rgba(8,9,11,.28); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); overflow: auto; }
+.plan-card {
+  width: min(860px, 100%); background: rgba(17, 19, 22, .62); border: 1px solid rgba(238,240,242,.32);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-radius: 16px;
+}
+.plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.plan-head h2 { margin: 0; font-size: clamp(32px, 5vw, 48px); letter-spacing: -0.03em; text-transform: uppercase; }
+#planClose { width: 40px; height: 40px; border-radius: 50%; }
+.plan-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 22px; margin-top: 8px; }
+.plan-grid h3 { margin: 0 0 8px; letter-spacing: .12em; text-transform: uppercase; font-size: 13px; color: var(--muted); }
+.recent { display: grid; gap: 6px; margin-top: 12px; }
+.recent button { text-align: left; letter-spacing: .12em; }
+@media (max-width: 800px) {
+  .plan-grid { grid-template-columns: 1fr; }
+  .menu-title { font-size: 64px; }
+  .menu-left { width: min(260px, 78vw); }
+  .menu-actions button, .menu-actions .menu-back { font-size: 17px; min-height: 42px; }
+}
+@media (max-height: 640px) {
+  #plan.overlay { align-items: flex-start; padding: 8px; }
+  .plan-card { padding: 12px 14px; }
+  .plan-head h2 { font-size: 28px; }
+  .plan-grid { gap: 12px; margin-top: 4px; }
+  #plan .actions { gap: 4px; margin-top: 6px; }
+  #plan button { min-height: 32px; padding: 4px 10px; }
+  #plan .routepick { margin: 4px 0; }
+}
+@media (max-height: 520px) {
+  .menu-title { font-size: 48px; margin-bottom: 8px; }
+  .menu-kicker { margin-bottom: 2px; }
+  .menu-actions { gap: 4px; }
+  .menu-actions button, .menu-actions .menu-back { min-height: 32px; font-size: 15px; padding: 4px 10px; }
+  #menu .menu-status { position: static; margin-top: 6px; font-size: 12px; max-width: 260px; }
 }

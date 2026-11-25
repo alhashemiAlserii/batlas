@@ -27,6 +27,7 @@ import { canActOn, hasPermission, ITEM_TIERS, permissionsFor } from '../lib/perm
 import { insertId } from '../db/index.js';
 import { findUserByHandle } from '../lib/identity.js';
 import { getMaintenance, maintenanceBlocks } from '../lib/maintenance.js';
+import { canOpenGame, weekWindow } from '../lib/passes.js';
 
 const GAME_TOKEN_TTL_MS = 10 * 60 * 1000;
 
@@ -39,6 +40,12 @@ export function gameRoutes(ctx: Ctx) {
   r.post('/game/token', requireAuth, async (req, res) => {
     if (req.authVia !== 'session') throw new HttpError(403, 'Game tokens must be requested with a website session');
     const { game } = parse(z.object({ game: z.string().trim().max(64).optional() }), req.body ?? {});
+    if (game) {
+      const listed = await ctx.db('games').where({ slug: game.toLowerCase() }).first();
+      if (listed && !(await canOpenGame(ctx.db, req.user, listed))) {
+        throw new HttpError(403, 'This game is in preview. A preview pass, or a staff rank, is required.', 'preview_locked');
+      }
+    }
     const token = randomToken(32);
     const expires = new Date(Date.now() + GAME_TOKEN_TTL_MS);
     await ctx.db('game_tokens').insert({ token_hash: sha256(token), user_id: req.user!.id, game_slug: game ?? null, expires_at: expires.toISOString(), created_at: new Date().toISOString() });
@@ -272,6 +279,25 @@ export function gameRoutes(ctx: Ctx) {
         return { rank: i + 1, handle, username: handle, displayName: x.display_name || handle, role: x.role, avatarUrl: x.avatar_url || null, bestScore: Number(x.best), flights: Number(x.flights) };
       }),
       note: 'Scores are reported by players\' browsers.',
+    });
+  });
+
+  r.get('/games/sky-crew/weekly', async (req, res) => {
+    const { start, resetsAt } = weekWindow();
+    const rows = await ctx.db('game_flights as f')
+      .join('users as u', 'u.id', 'f.user_id')
+      .where('f.game_slug', 'sky-crew').andWhere('u.banned', false).andWhere('f.created_at', '>=', start)
+      .groupBy('f.user_id', 'u.username', 'u.handle', 'u.display_name', 'u.role', 'u.avatar_url')
+      .select('u.username', 'u.handle', 'u.display_name', 'u.role', 'u.avatar_url')
+      .count({ flights: '*' }).sum({ stars: 'f.stars' })
+      .orderBy('flights', 'desc').orderBy('stars', 'desc').limit(50);
+    res.json({
+      start, resetsAt, signedIn: !!req.user,
+      metric: rows.length ? 'flights' : 'none',
+      rows: rows.map((x: any, i: number) => {
+        const handle = x.handle || x.username;
+        return { rank: i + 1, handle, displayName: x.display_name || handle, role: x.role, flights: Number(x.flights), stars: Number(x.stars ?? 0) };
+      }),
     });
   });
 

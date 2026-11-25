@@ -136,3 +136,58 @@ export function gameControls(perms) {
   if (!cards.length) return null;
   return h('section', {}, h('h2', {}, 'Game controls'), h('p', { class: 'small muted' }, 'These connect to live game sessions once the airplane game is online. For now each request is permission-checked and recorded in the audit log.'), msg, h('div', { class: 'controls' }, cards));
 }
+
+/** Grant or revoke a preview pass or a crew card. The server checks rank again. */
+export function passesPanel() {
+  const msg = h('div', { 'aria-live': 'polite' });
+  const list = h('div');
+  const handle = h('input', { placeholder: 'Handle', 'aria-label': 'Handle', maxlength: '32' });
+  const kind = h('select', { 'aria-label': 'Pass type' }, h('option', { value: 'early_access' }, 'Preview pass'), h('option', { value: 'crew' }, 'Crew card'));
+  const game = h('input', { placeholder: 'Game slug, or blank for every game', 'aria-label': 'Game slug' });
+  const exp = h('input', { type: 'date', 'aria-label': 'Expiry date' });
+  const note = h('input', { placeholder: 'Note (optional)', 'aria-label': 'Note', maxlength: '200' });
+  async function load() {
+    try {
+      const { passes } = await api('GET', '/api/admin/passes');
+      list.replaceChildren(h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, ...['Handle', 'Pass', 'Game', 'State', ''].map((c) => h('th', {}, c)))),
+        h('tbody', {}, ...(passes.length ? passes.map((p) => h('tr', {},
+          h('td', {}, p.handle),
+          h('td', {}, p.kind === 'early_access' ? 'Preview' : 'Crew card'),
+          h('td', {}, p.gameTitle || 'All games'),
+          h('td', {}, p.active ? (p.expiresAt ? `Until ${fmtDate(p.expiresAt)}` : 'Open') : 'Closed'),
+          h('td', {}, p.active ? h('button', { class: 'btn small', type: 'button', onclick: async () => {
+            try { await api('DELETE', `/api/admin/passes/${p.id}`); showOk(msg, `Closed the pass for ${p.handle}.`); load(); } catch (e) { showError(msg, e); }
+          } }, 'Revoke') : null))) : [h('tr', {}, h('td', { colspan: 5, class: 'muted' }, 'No passes yet.'))])))));
+    } catch (e) { showError(msg, e); }
+  }
+  const form = h('form', { class: 'inline', onsubmit: async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/admin/passes', { handle: handle.value.trim(), kind: kind.value, gameSlug: game.value.trim() || undefined, expiresAt: exp.value || null, note: note.value.trim() || undefined });
+      showOk(msg, `Pass granted to ${handle.value.trim()}.`);
+      handle.value = ''; note.value = '';
+      load();
+    } catch (err) { showError(msg, err); }
+  } }, handle, kind, game, exp, note, h('button', { class: 'btn primary', type: 'submit' }, 'Grant'));
+  load();
+  return h('section', { class: 'card', id: 'passes-panel' },
+    h('h2', {}, 'Passes'),
+    h('p', { class: 'small muted' }, 'A preview pass lets that player open games marked preview-only. A crew card is only a mark. Developer accounts cannot be changed here. There is no price.'),
+    form, msg, list);
+}
+
+export function feedbackPanel() {
+  const list = h('div');
+  const msg = h('div');
+  async function load() {
+    try {
+      const { feedback } = await api('GET', '/api/admin/feedback');
+      list.replaceChildren(...(feedback.length ? feedback.map((f) => h('article', { class: 'card' },
+        h('div', { class: 'panel-head' }, h('strong', {}, f.handle || 'Guest'), h('span', { class: 'small muted' }, fmtDate(f.createdAt), f.page ? ` · ${f.page}` : '')),
+        h('p', { class: 'msg-body' }, f.message))) : [h('p', { class: 'muted' }, 'No notes yet.')]));
+    } catch (e) { showError(msg, e); }
+  }
+  load();
+  return h('section', { id: 'feedback-panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Feedback'), h('button', { class: 'btn small', type: 'button', onclick: load }, 'Refresh')), msg, list);
+}
