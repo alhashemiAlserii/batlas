@@ -16,8 +16,29 @@ export const Z_NOSE = -16, Z_TAIL = 17.6, Z_COCKPIT = -13;
 export const Z_HOLD0 = -13, Z_HOLD1 = -8; // forward cargo hold
 export const Z_CARGO = Z_HOLD0; // legacy name: start of the cargo hold
 export const CARGO_DOOR = { x: HALF_W, z0: -11.9, z1: -9.9 };
-/** Main aft cargo door: a hull-sized side door on the rear fuselage, hinged along its top edge. */
-export const AFT_DOOR = { side: -1, z0: 6.2, z1: 15.2, y0: -0.05, y1: 2.42 };
+/**
+ * Rear cargo ramp. Hinged on the floor sill at the back of the fuselage.
+ * Stowed, it is the upswept underside of the tail. Open, the far end rests on the ground.
+ */
+export const AFT_DOOR = {
+  width: 2.7,
+  length: 5.4,
+  hingeY: -0.85,
+  hingeZ: Z_TAIL + 0.35,
+  bayZ0: Z_TAIL + 0.45,
+  bayZ1: Z_TAIL + 3.6,
+};
+/** Closed and open hinge angles, and where the far end sits. Used by the mesh and the tests. */
+export function aftRampAngles() {
+  const beta = Math.asin(Math.min(0.98, (GEAR_H + AFT_DOOR.hingeY) / AFT_DOOR.length));
+  const open = Math.PI / 2 + beta;
+  const closed = 1.32;
+  const tip = (theta) => ({
+    y: AFT_DOOR.hingeY + AFT_DOOR.length * Math.cos(theta),
+    z: AFT_DOOR.hingeZ + AFT_DOOR.length * Math.sin(theta),
+  });
+  return { beta, open, closed, down: tip(open), stowed: tip(closed) };
+}
 /** Main entrance / exit: a plug door in the rear wall, opening outward and swinging to the right. */
 export const REAR_DOOR = { z: Z_TAIL, x0: -0.6, x1: 0.6, h: 2.1 };
 /** Tail cargo ramp: a folding ramp in the rear-right wall. It counts as a cargo door. */
@@ -106,58 +127,57 @@ export function buildPlane({ quality = 'high' } = {}) {
   const wsRings = nose.filter((r) => r.z > Z_NOSE - 2.1 && r.z < Z_NOSE - 0.5).map((r) => ({ ...r, rx: r.rx * 1.006, ry: r.ry * 1.006 }));
   ext.add(loft(wsRings, 14, Math.PI - 0.95, 1.9), C.glassOut);
   for (const t0 of [Math.PI - 1.35, Math.PI + 1.03]) ext.add(loft([ring(Z_NOSE - 1.0, 0.985 * 1.006), ring(Z_NOSE + 0.6, 1.006)], 6, t0, 0.32), C.glassOut);
-  // tube: forward cargo door on the right, main aft cargo door on the left rear fuselage
+  // tube: one hole for the forward cargo door (right side). The rear ramp is part of the tail.
   const cdoor = thetaSpan(-0.05, 2.0, 1);
-  const adoor = thetaSpan(AFT_DOOR.y0, AFT_DOOR.y1, AFT_DOOR.side);
-  const segs = [
-    [Z_NOSE, CARGO_DOOR.z0, null, 0],
-    [CARGO_DOOR.z0, CARGO_DOOR.z1, cdoor, 1],
-    [CARGO_DOOR.z1, AFT_DOOR.z0, null, 0],
-    [AFT_DOOR.z0, AFT_DOOR.z1, adoor, AFT_DOOR.side],
-    [AFT_DOOR.z1, Z_TAIL, null, 0],
-  ];
-  for (const [z0, z1, hole, holeSide] of segs) {
+  const segs = [[Z_NOSE, CARGO_DOOR.z0, null], [CARGO_DOOR.z0, CARGO_DOOR.z1, cdoor], [CARGO_DOOR.z1, Z_TAIL, null]];
+  for (const [z0, z1, hole] of segs) {
     const rr = [ring(z0), ring(z1)];
     if (!hole) ext.add(loft(rr, 36), C.hull);
     else ext.add(loft(rr, 30, hole[1], Math.PI * 2 - (hole[1] - hole[0])), C.hull);
     const big = rr.map((r) => ({ ...r, rx: r.rx * 1.004, ry: r.ry * 1.004 }));
     ext.add(loft(big, 10, -0.8, 1.6), C.navy);
     for (const side of [1, -1]) {
-      if (hole && side === holeSide) continue;
+      if (hole && side > 0) continue;
       const t = side > 0 ? [1.36, 1.47] : [Math.PI * 2 - 1.47, Math.PI * 2 - 1.36];
       ext.add(loft(big, 2, t[0], t[1] - t[0]), C.teal);
       const t2 = side > 0 ? [1.2, 1.32] : [Math.PI * 2 - 1.32, Math.PI * 2 - 1.2];
       ext.add(loft(big, 2, t2[0], t2[1] - t2[0]), C.blue);
     }
   }
-  // Upswept tail boom: starts ABOVE the rear door so the rear wall (with the main door) faces aft.
-  const tailL = 8.6, tail = [];
-  const TOP = CY + R, DOOR_TOP = REAR_DOOR.h + 0.35;
-  for (const s of [0, 0.7, 1.6, 2.8, 4.1, 5.4, 6.6, 7.6, 8.3, 8.6]) {
-    const k = s / tailL;
-    const top = TOP - 0.5 * Math.pow(k, 1.5), bottom = DOOR_TOP + 0.95 * Math.pow(k, 0.85);
-    tail.push({ z: Z_TAIL + s, cy: (top + bottom) / 2, ry: Math.max(0.1, (top - bottom) / 2), rx: Math.max(0.1, 2.3 * (1 - 0.93 * Math.pow(k, 1.05))) });
+  // Upswept tailcone. A short full collar closes the tube end, the crown and sides
+  // taper back, and a solid tip finishes it. The underside slot is the cargo ramp.
+  const RAMP_SLOT = 0.32;
+  const tail = [];
+  for (const s of [0, 0.7, 1.8, 3.1, 4.4, 5.5, 6.3]) {
+    const k = s / 6.3;
+    const bottom = -1.72 + 1.7 * Math.pow(k, 0.85);
+    const top = (CY + R) - 0.35 * k;
+    const rx = 2.92 - 0.42 * k;
+    tail.push({ z: Z_TAIL + s, cy: (top + bottom) / 2, ry: Math.max(0.25, (top - bottom) / 2), rx: Math.max(0.4, rx) });
   }
-  ext.add(loft(tail, 32), C.hull);
-  ext.add(loft(tail.slice(0, 6).map((r) => ({ ...r, rx: r.rx * 1.004, ry: r.ry * 1.004 })), 10, -0.7, 1.4), C.navy);
-  // rear bulkhead (outside face): the full hull cross-section with the door opening
+  // Collar: full section so the tube does not end in a raw ring, then the slotted tail continues from that same ring.
+  const collarEnd = { ...tail[1], z: Z_TAIL + 0.55 };
+  ext.add(loft([tail[0], collarEnd], 28), C.hull);
+  ext.add(loft([ring(Z_TAIL), ring(Z_TAIL + 1.05)], 14, Math.PI * 2 - 0.7, 1.4), C.hull);
+  ext.add(loft([collarEnd, ...tail.slice(1)], 26, RAMP_SLOT, Math.PI * 2 - RAMP_SLOT * 2), C.hull);
+  const tailBig = tail.map((r) => ({ ...r, rx: r.rx * 1.004, ry: r.ry * 1.004 }));
+  ext.add(loft(tailBig.slice(1), 8, 1.15, 0.55), C.navy);
+  ext.add(loft(tailBig.slice(1), 8, Math.PI * 2 - 1.7, 0.55), C.navy);
+  const tip0 = tail[tail.length - 1];
+  const tip = [0, 0.45, 0.95, 1.45].map((s) => {
+    const k = s / 1.45;
+    return { z: tip0.z + s, cy: tip0.cy + 0.25 * k, rx: Math.max(0.04, tip0.rx * (1 - k)), ry: Math.max(0.04, tip0.ry * (1 - k)) };
+  });
+  ext.add(loft(tip, 18), C.hull);
+  glow.box(0.22, 0.1, 0.05, 0xffffff, 0, tip[tip.length - 1].cy + 0.05, tip[tip.length - 1].z - 0.05);
+  // passenger-door frame only (the old full rear disk read as a cut-off fuselage)
   {
-    const sh = new THREE.Shape(); sh.absarc(0, CY, R * 1.002, 0, Math.PI * 2, false);
-    const hole = new THREE.Path(); rrect(hole, 0, REAR_DOOR.h / 2 + 0.02, REAR_DOOR.x1 - REAR_DOOR.x0 + 0.04, REAR_DOOR.h + 0.04, 0.14); sh.holes.push(hole);
-    const rampHole = new THREE.Path(); rrect(rampHole, (RAMP.x0 + RAMP.x1) / 2, RAMP.h / 2, RAMP.x1 - RAMP.x0 + 0.04, RAMP.h + 0.04, 0.08); sh.holes.push(rampHole);
-    const g = new THREE.ShapeGeometry(sh, 40);
-    ext.add(g, C.hull, [0, 0, Z_TAIL + 0.002]);
-    // navy lower band + teal stripe continue round the back
-    const band = new THREE.Shape(); band.absarc(0, CY, R * 1.003, Math.PI * 1.22, Math.PI * 1.78, false); band.lineTo(Math.cos(Math.PI * 1.22) * R, CY + Math.sin(Math.PI * 1.22) * R);
-    ext.add(new THREE.ShapeGeometry(band, 16), C.navy, [0, 0, Z_TAIL + 0.004]);
-    // door frame with yellow/black warning stripes (own textured mesh), and the tail light
     const frame = new THREE.Shape(); rrect(frame, 0, REAR_DOOR.h / 2 + 0.02, 1.6, REAR_DOOR.h + 0.36, 0.22);
     const fh = new THREE.Path(); rrect(fh, 0, REAR_DOOR.h / 2 + 0.02, REAR_DOOR.x1 - REAR_DOOR.x0 + 0.04, REAR_DOOR.h + 0.04, 0.14); frame.holes.push(fh);
     const fg = new THREE.ShapeGeometry(frame, 12);
     const stripes = canvasTexture(128, 128, (g2, w, h) => { g2.fillStyle = '#ffc61a'; g2.fillRect(0, 0, w, h); g2.fillStyle = '#1b1b1b'; for (let i = -4; i < 8; i++) { g2.beginPath(); g2.moveTo(i * 32, 0); g2.lineTo(i * 32 + 16, 0); g2.lineTo(i * 32 + 16 + h, h); g2.lineTo(i * 32 + h, h); g2.fill(); } }, { repeat: [3, 3] });
-    const fm = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: stripes })); fm.position.z = Z_TAIL + 0.012; plane.add(fm);
+    const fm = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: stripes })); fm.position.z = Z_TAIL + 0.02; plane.add(fm);
     const fmIn = fm.clone(); fmIn.rotation.y = Math.PI; fmIn.position.z = Z_TAIL - T - 0.012; plane.add(fmIn);
-    glow.box(0.25, 0.12, 0.04, 0xffffff, 0, TOP - 0.25, Z_TAIL + 7.4); // tail light
   }
   // wing-body fairing
   ext.add(loft([{ z: -4.5, cy: -0.75, rx: 1.2, ry: 0.4 }, { z: -3.2, cy: -0.95, rx: 2.55, ry: 0.8 }, { z: 3.8, cy: -0.95, rx: 2.65, ry: 0.82 }, { z: 6.0, cy: -0.7, rx: 1.4, ry: 0.4 }], 20, -Math.PI / 2 - 0.1, Math.PI + 0.2), C.panel2);
@@ -165,7 +185,6 @@ export function buildPlane({ quality = 'high' } = {}) {
   const winX = Math.sqrt(R * R - (WIN_Y - CY) ** 2) + 0.012;
   const winGlow = new Batch();
   for (const side of [-1, 1]) for (const z of WIN_Z) {
-    if (side < 0 && z > AFT_DOOR.z0 - 0.2 && z < AFT_DOOR.z1 + 0.2) continue;
     const g = new THREE.CircleGeometry(0.2, 12); g.scale(0.85, 1.25, 1);
     ext.add(g, C.glassOut, [side * winX, WIN_Y, z], [0, side * Math.PI / 2, 0]);
     const frame = new THREE.TorusGeometry(0.2, 0.028, 5, 12); frame.scale(0.9, 1.28, 1);
@@ -176,7 +195,7 @@ export function buildPlane({ quality = 'high' } = {}) {
   // dorsal antenna and the little APU cone on the tail cone
   ext.add(new THREE.CylinderGeometry(0.02, 0.02, 0.65, 6), C.steel, [0, CY + R + 0.28, -1.2]);
   ext.add(new THREE.SphereGeometry(0.055, 8, 6), C.teal, [0, CY + R + 0.62, -1.2]);
-  ext.add(new THREE.ConeGeometry(0.16, 0.5, 8), C.dark, [0.42, 2.2, Z_TAIL + 6.2], [Math.PI / 2, 0, 0.5]);
+  ext.add(new THREE.ConeGeometry(0.12, 0.42, 8), C.dark, [0, tip[tip.length - 1].cy, tip[tip.length - 1].z], [Math.PI / 2, 0, 0]);
   // cargo door seams
   { const span = thetaSpan(-0.1, 2.08, 1); for (const zz of [CARGO_DOOR.z0 - 0.04, CARGO_DOOR.z1 + 0.04]) ext.add(loft([ring(zz - 0.03, 1.005), ring(zz + 0.03, 1.005)], 6, span[0], span[1] - span[0]), C.grey); }
   for (const side of [-1, 1]) {
@@ -294,21 +313,12 @@ export function buildPlane({ quality = 'high' } = {}) {
     const x = side * HALF_W;
     // passenger cabin: one panel per side with all the window holes
     const sh = new THREE.Shape(); sh.moveTo(-Z_CAB0, 0.32); sh.lineTo(-Z_CAB1, 0.32); sh.lineTo(-Z_CAB1, BIN_Y); sh.lineTo(-Z_CAB0, BIN_Y); sh.closePath();
-    for (const wz of WIN_Z) {
-      if (side < 0 && wz > AFT_DOOR.z0 - 0.15 && wz < AFT_DOOR.z1 + 0.15) continue;
-      const h = new THREE.Path(); rrect(h, -wz, WIN_Y, 0.36, 0.5, 0.15); sh.holes.push(h);
-    }
-    if (side < 0) {
-      const h = new THREE.Path();
-      rrect(h, -(AFT_DOOR.z0 + AFT_DOOR.z1) / 2, (AFT_DOOR.y0 + AFT_DOOR.y1) / 2, AFT_DOOR.z1 - AFT_DOOR.z0, AFT_DOOR.y1 - AFT_DOOR.y0, 0.08);
-      sh.holes.push(h);
-    }
+    for (const wz of WIN_Z) { const h = new THREE.Path(); rrect(h, -wz, WIN_Y, 0.36, 0.5, 0.15); sh.holes.push(h); }
     const g = new THREE.ShapeGeometry(sh, 8); g.rotateY(Math.PI / 2);
     int.add(g, C.panel, [x, 0, 0]);
     B(int, 0.04, 0.32, Z_CAB1 - Z_CAB0, C.panel2, x - side * 0.02, 0.16, (Z_CAB0 + Z_CAB1) / 2); // dado
     B(int, 0.05, 0.035, Z_CAB1 - Z_CAB0, 0x9aa6bb, x - side * 0.04, 0.33, (Z_CAB0 + Z_CAB1) / 2); // dado rail
     for (const wz of WIN_Z) {
-      if (side < 0 && wz > AFT_DOOR.z0 - 0.15 && wz < AFT_DOOR.z1 + 0.15) continue;
       // reveal tunnel from the wall out to the hull, frame ring, half-drawn shade
       const tun = new THREE.Shape(); rrect(tun, 0, 0, 0.44, 0.58, 0.19); const th = new THREE.Path(); rrect(th, 0, 0, 0.36, 0.5, 0.15); tun.holes.push(th);
       const ring2 = new THREE.ExtrudeGeometry(tun, { depth: 0.38, bevelEnabled: false, curveSegments: 6 });
@@ -317,16 +327,9 @@ export function buildPlane({ quality = 'high' } = {}) {
       const shade = rbox(0.03, 0.18, 0.34, 0.012); int.add(shade, 0xb9c2d3, [x + side * 0.05, WIN_Y + 0.15, wz]);
       const gl = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.5), glassMat); gl.position.set(x + side * 0.3, WIN_Y, wz); gl.rotation.y = side * Math.PI / 2; plane.add(gl);
     }
-    // cockpit & hold walls (plain). The left rear fuselage is open for the main cargo door.
-    if (side > 0) {
-      colliders.push(aabb(x, 0, Z_NOSE, x + side * T, CEIL, CARGO_DOOR.z0));
-      colliders.push(aabb(x, 0, CARGO_DOOR.z1, x + side * T, CEIL, Z_TAIL));
-    } else {
-      colliders.push(aabb(x, 0, Z_NOSE, x + side * T, CEIL, AFT_DOOR.z0));
-      colliders.push(aabb(x, 0, AFT_DOOR.z1, x + side * T, CEIL, Z_TAIL));
-      colliders.push(aabb(x, AFT_DOOR.y1, AFT_DOOR.z0, x + side * T, CEIL, AFT_DOOR.z1));
-      colliders.push(aabb(x, 0, AFT_DOOR.z0, x + side * T, Math.max(0.05, AFT_DOOR.y0), AFT_DOOR.z1));
-    }
+    // cockpit & hold walls (plain)
+    colliders.push(aabb(x, 0, Z_NOSE, x + side * T, CEIL, side > 0 ? CARGO_DOOR.z0 : Z_TAIL));
+    if (side > 0) colliders.push(aabb(x, 0, CARGO_DOOR.z1, x + side * T, CEIL, Z_TAIL));
     const holdSegs = side > 0 ? [[Z_HOLD0, CARGO_DOOR.z0], [CARGO_DOOR.z1, Z_HOLD1]] : [[Z_HOLD0, Z_HOLD1]];
     for (const [a, b] of holdSegs) B(int, T, CEIL, b - a, C.cargo, x + side * T / 2, CEIL / 2, (a + b) / 2);
     // Cockpit side wall, split around the sliding window so the pane looks out at the sky.
@@ -395,8 +398,8 @@ export function buildPlane({ quality = 'high' } = {}) {
   }
   // tail cargo ramp: the door leaf folds down into a two-section ramp on the rear-right
   const rampSteps = buildTailRamp(plane, makeDoor, colliders);
-  // main aft cargo door: the rear-fuselage skin swings up on a top hinge
-  buildAftCargoDoor(plane, makeDoor, colliders, int);
+  // rear cargo ramp: the underside of the tail, hinged at the floor
+  buildAftRamp(plane, makeDoor, colliders, int);
 
   // ---- end walls / bulkheads / partitions
   B(int, HALF_W * 2, 1.05, T, C.dark, 0, 0.525, Z_NOSE - T / 2);
@@ -462,7 +465,6 @@ export function buildPlane({ quality = 'high' } = {}) {
     const z = rowZ(r);
     const [cu, bk] = SEAT_COLORS[Math.floor(r / 2) % SEAT_COLORS.length];
     SEAT_X.forEach((sx, i) => {
-      if (sx < 0 && z > AFT_DOOR.z0 - 0.35 && z < AFT_DOOR.z1 + 0.2) return;
       cabinSeat(int, sx, z, cu, bk, i === 0 || i === 3 ? 'wall' : 'aisle');
       colliders.push(aabb(sx - 0.3, 0, z - 0.27, sx + 0.3, 0.5, z + 0.22), aabb(sx - 0.3, 0, z + 0.2, sx + 0.3, 1.2, z + 0.34));
       seats.push({ x: sx, z, row: r + 1, letter: 'ABCD'[i] });
@@ -604,9 +606,9 @@ export function buildPlane({ quality = 'high' } = {}) {
   interact.push({ id: 'door_cargo', kind: 'door', door: 'cargo', label: 'cargo door', pos: new THREE.Vector3(HALF_W - 0.15, 1.2, CARGO_DOOR.z0 - 0.35) });
   interact.push({ id: 'door_ramp', kind: 'door', door: 'ramp', label: 'tail ramp', pos: new THREE.Vector3((RAMP.x0 + RAMP.x1) / 2, 1.15, Z_TAIL - 0.55) });
   interact.push({ id: 'door_ramp_out', kind: 'door', door: 'ramp', label: 'tail ramp', pos: new THREE.Vector3((RAMP.x0 + RAMP.x1) / 2, -1.15, Z_TAIL + 1.35) });
-  interact.push({ id: 'door_aft', kind: 'door', door: 'aft', label: 'main cargo door', pos: new THREE.Vector3(-1.35, 1.15, AFT_DOOR.z0 + 0.45) });
-  interact.push({ id: 'door_aft_out', kind: 'door', door: 'aft', label: 'main cargo door', pos: new THREE.Vector3(-HALF_W - 0.55, 1.15, (AFT_DOOR.z0 + AFT_DOOR.z1) / 2) });
-  interact.push({ id: 'door_aft_cockpit', kind: 'door', door: 'aft', label: 'main cargo door', pos: new THREE.Vector3(-0.28, 0.95, -14.82) });
+  interact.push({ id: 'door_aft', kind: 'door', door: 'aft', label: 'rear cargo ramp', pos: new THREE.Vector3(0.95, 1.15, Z_TAIL - 0.45) });
+  interact.push({ id: 'door_aft_out', kind: 'door', door: 'aft', label: 'rear cargo ramp', pos: new THREE.Vector3(AFT_DOOR.width / 2 + 0.45, -1.1, AFT_DOOR.hingeZ + 2.2) });
+  interact.push({ id: 'door_aft_cockpit', kind: 'door', door: 'aft', label: 'rear cargo ramp', pos: new THREE.Vector3(-0.28, 0.95, -14.82) });
   RB(int, 0.04, 0.34, 0.24, 0.02, 0x2b2f3a, -0.69, 1.2, Z_TAIL - 0.45); glow.box(0.02, 0.1, 0.1, 0xff3b4a, -0.665, 1.25, Z_TAIL - 0.45); glow.box(0.02, 0.05, 0.1, 0x3ddc84, -0.665, 1.1, Z_TAIL - 0.45);
   RB(int, 0.06, 0.3, 0.2, 0.02, 0x2b2f3a, HALF_W - 0.03, 1.2, CARGO_DOOR.z0 - 0.35); glow.box(0.02, 0.1, 0.1, 0xff3b4a, HALF_W - 0.07, 1.25, CARGO_DOOR.z0 - 0.35);
   // ---- air-stairs (ground-only colliders): the main stair truck behind the REAR DOOR, a belt-loader ramp at the cargo door
@@ -680,7 +682,7 @@ export function buildPlane({ quality = 'high' } = {}) {
   beacon(0xff3344, -18.75, -0.82, 4.9, 'nav');
   beacon(0x3dff7a, 18.75, -0.82, 4.9, 'nav');
   beacon(0xfff4ea, 0, CY + R + 0.08, -2.2, 'beacon');
-  beacon(0xffffff, 0, TOP - 0.15, Z_TAIL + 6.8, 'strobe');
+  beacon(0xffffff, 0, tip[tip.length - 1].cy + 0.08, tip[tip.length - 1].z - 0.08, 'strobe');
   beacon(0xfff1c8, 0, -1.55, Z_NOSE + 0.4, 'land');
   // ---- lighting: warm fills, a cockpit light, a red warning light and an overhead cabin KEY light with soft shadows
   const cabinLight = new THREE.PointLight(0xfff1dc, 10, 16, 1.5); cabinLight.position.set(0, 2.3, -2); plane.add(cabinLight);
@@ -751,70 +753,84 @@ export function buildPlane({ quality = 'high' } = {}) {
 const glassMat = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
 
 /**
- * Main aft cargo door. The rear-fuselage skin is cut for most of its length and
- * hinged along the top, so the section swings up the way a large freighter door does.
- * The bay behind it is a walk-in hold: frames, rails and containers.
+ * Rear cargo ramp. The leaf extends along local +Y from the floor hinge.
+ * Closed, that direction runs up the upswept tail. Open, it runs down to the ground.
+ * The outer skin faces local +Z; the walkway, ribs and liner face local -Z.
  */
-function buildAftCargoDoor(plane, makeDoor, colliders, int) {
+function buildAftRamp(plane, makeDoor, colliders, int) {
   const d = AFT_DOOR;
-  const span = thetaSpan(d.y0, d.y1, d.side);
-  const cz = (d.z0 + d.z1) / 2;
-  const th = span[0];
-  const hx = Math.sin(th) * R * 1.01;
-  const hy = CY - Math.cos(th) * R * 1.01;
+  const ang = aftRampAngles();
+  const L = d.length, W = d.width;
   const hinge = new THREE.Group();
-  hinge.position.set(hx, hy, cz);
+  hinge.position.set(0, d.hingeY, d.hingeZ);
   plane.add(hinge);
-  const skinGeo = loft([ring(d.z0, 1.006), ring(d.z1, 1.006)], 14, span[0], Math.max(0.2, span[1] - span[0]));
-  skinGeo.translate(-hx, -hy, -cz);
-  const skinMat = new THREE.MeshStandardMaterial({ color: C.hull, roughness: 0.42, metalness: 0.18, side: THREE.DoubleSide });
-  const skin = new THREE.Mesh(skinGeo, skinMat);
+  const leaf = new THREE.Group();
+  hinge.add(leaf);
+  const skin = new THREE.Mesh(new THREE.BoxGeometry(W, L, 0.07), new THREE.MeshStandardMaterial({ color: C.hull, roughness: 0.42, metalness: 0.18 }));
+  skin.position.set(0, L / 2, 0.035);
   skin.castShadow = true;
-  hinge.add(skin);
-  const tm = (span[0] + span[1]) / 2;
-  const mx = Math.sin(tm) * R - hx;
-  const my = CY - Math.cos(tm) * R - hy;
-  const linerMat = new THREE.MeshStandardMaterial({ color: C.cargo, roughness: 0.78, metalness: 0.04, side: THREE.DoubleSide });
-  const liner = new THREE.Mesh(new THREE.BoxGeometry(0.08, (d.y1 - d.y0) * 0.9, (d.z1 - d.z0) * 0.97), linerMat);
-  liner.position.set(mx + 0.28, my, 0);
-  hinge.add(liner);
-  const ribMat = new THREE.MeshStandardMaterial({ color: C.steel, roughness: 0.45, metalness: 0.4 });
-  for (let i = 0; i < 7; i++) {
-    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.05, (d.y1 - d.y0) * 0.82, 0.06), ribMat);
-    rib.position.set(mx + 0.22, my, -((d.z1 - d.z0) * 0.42) + i * ((d.z1 - d.z0) * 0.84) / 6);
-    hinge.add(rib);
+  skin.receiveShadow = true;
+  leaf.add(skin);
+  const liner = new THREE.Mesh(new THREE.BoxGeometry(W - 0.16, L - 0.2, 0.04), new THREE.MeshStandardMaterial({ color: C.cargo, roughness: 0.8, metalness: 0.05 }));
+  liner.position.set(0, L / 2, -0.025);
+  liner.receiveShadow = true;
+  leaf.add(liner);
+  const ribMat = new THREE.MeshStandardMaterial({ color: C.steel, roughness: 0.45, metalness: 0.45 });
+  for (let i = 0; i < 8; i++) {
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(W - 0.28, 0.07, 0.05), ribMat);
+    rib.position.set(0, 0.4 + i * ((L - 0.8) / 7), -0.055);
+    leaf.add(rib);
   }
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, (d.z1 - d.z0) * 0.96), new THREE.MeshStandardMaterial({ color: 0xe0b01a, roughness: 0.55, metalness: 0.1 }));
-  stripe.position.set(mx + 0.02, my - (d.y1 - d.y0) * 0.38, 0);
-  hinge.add(stripe);
-  const label = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.28), new THREE.MeshStandardMaterial({ map: textTexture('CARGO', { w: 512, h: 96, font: 'bold 72px -apple-system, Segoe UI, sans-serif', color: '#0a1f5c' }), transparent: true, roughness: 0.5 }));
-  label.position.set(mx - 0.02, my, 0);
-  label.rotation.y = -Math.PI / 2;
-  hinge.add(label);
+  const stripe = new THREE.MeshStandardMaterial({ color: 0xe0b01a, roughness: 0.55, metalness: 0.12 });
+  for (const x of [-W / 2 + 0.05, W / 2 - 0.05]) {
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.1, L - 0.08, 0.09), stripe);
+    edge.position.set(x, L / 2, 0.02);
+    leaf.add(edge);
+  }
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.3), new THREE.MeshStandardMaterial({ map: textTexture('CARGO', { w: 512, h: 96, font: 'bold 72px -apple-system, Segoe UI, sans-serif', color: '#0a1f5c' }), transparent: true, roughness: 0.5 }));
+  label.position.set(0, L * 0.62, 0.075);
+  leaf.add(label);
 
-  // Hold the door closes onto: end frames, floor rails, containers, a lamp.
+  // Cargo bay just aft of the rear wall, seen when the ramp is down.
   const box = (w, h, dep, c, x, y, z) => int.add(new THREE.BoxGeometry(w, h, dep), c, [x, y, z]);
-  for (const z of [d.z0 + 0.04, d.z1 - 0.04]) box(0.16, d.y1 - d.y0, 0.1, C.steel, -HALF_W + 0.04, (d.y0 + d.y1) / 2, z);
-  box(0.12, 0.08, d.z1 - d.z0, C.steel, -HALF_W + 0.02, d.y1 - 0.04, cz);
-  box(0.05, 0.04, d.z1 - d.z0 - 0.5, 0xd5dbe4, -1.85, 0.03, cz);
-  box(0.05, 0.04, d.z1 - d.z0 - 0.5, 0xd5dbe4, -1.1, 0.03, cz);
+  box(W - 0.2, 0.06, d.bayZ1 - d.bayZ0, C.cargoFloor, 0, 0.03, (d.bayZ0 + d.bayZ1) / 2);
+  box(0.08, 1.7, d.bayZ1 - d.bayZ0, C.cargo, -W / 2 + 0.08, 0.9, (d.bayZ0 + d.bayZ1) / 2);
+  box(0.08, 1.7, d.bayZ1 - d.bayZ0, C.cargo, W / 2 - 0.08, 0.9, (d.bayZ0 + d.bayZ1) / 2);
+  box(0.04, 0.04, d.bayZ1 - d.bayZ0 - 0.3, 0xd5dbe4, -0.7, 0.08, (d.bayZ0 + d.bayZ1) / 2);
+  box(0.04, 0.04, d.bayZ1 - d.bayZ0 - 0.3, 0xd5dbe4, 0.7, 0.08, (d.bayZ0 + d.bayZ1) / 2);
   const cans = [0xc4a46a, 0x8a93a3, 0xb7c4b0];
-  [8.1, 10.7, 13.2].forEach((z, i) => {
-    int.add(rbox(1.2, 1.15, 1.45, 0.05), cans[i], [-1.5, 0.62, z]);
-    box(0.9, 0.06, 0.16, 0x2a3140, -1.5, 1.15, z);
-    colliders.push(aabb(-2.12, 0, z - 0.74, -0.88, 1.22, z + 0.74));
+  [[-0.95, d.bayZ0 + 0.7], [0.95, d.bayZ0 + 1.5], [-0.85, d.bayZ0 + 2.4]].forEach(([x, z], i) => {
+    int.add(rbox(0.85, 0.9, 0.95, 0.04), cans[i], [x, 0.5, z]);
+    colliders.push(aabb(x - 0.44, 0, z - 0.5, x + 0.44, 0.95, z + 0.5));
   });
-  const lamp = new THREE.PointLight(0xfff4e0, 6, 12, 1.6);
-  lamp.position.set(-1.4, 2.15, cz);
+  const lamp = new THREE.PointLight(0xfff4e0, 5, 9, 1.6);
+  lamp.position.set(0, 2.05, (d.bayZ0 + d.bayZ1) / 2);
   plane.add(lamp);
-  // Cockpit switch, low on the pedestal so it stays under the runway sight line.
   int.add(rbox(0.08, 0.1, 0.12, 0.02), 0x2b2f3a, [-0.28, 0.95, -14.82]);
   const sw = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.035, 0.04), new THREE.MeshBasicMaterial({ color: 0xffc61a }));
   sw.position.set(-0.33, 0.95, -14.82);
   plane.add(sw);
 
-  const col = aabb(-HALF_W - 0.2, d.y0, d.z0, -HALF_W + 0.08, d.y1, d.z1, 'door:aft');
-  makeDoor('aft', hinge, col, (k) => { hinge.rotation.z = -k * 2.15; }, 2.15);
+  // Treads follow the lowered ramp. Solid only while it is down on the ground.
+  const N = 10;
+  for (let i = 0; i < N; i++) {
+    const s0 = (L * i) / N, s1 = (L * (i + 1)) / N, s = (s0 + s1) / 2;
+    const y = d.hingeY + s * Math.cos(ang.open);
+    const z = d.hingeZ + s * Math.sin(ang.open);
+    if (y < -GEAR_H + 0.18) continue;
+    const half = Math.max(0.22, (s1 - s0) * 0.65);
+    colliders.push(aabb(-W / 2 + 0.12, y - 0.55, z - half, W / 2 - 0.12, y + 0.02, z + half, 'aftramp'));
+  }
+
+  // Short stair from the cabin floor down to the ramp hinge, always there.
+  for (let i = 0; i < 3; i++) {
+    const y = -0.28 * (i + 1);
+    const z0 = Z_TAIL + 0.08 + i * 0.18;
+    box(1.6, 0.06, 0.2, C.steel, 0, y, z0 + 0.08);
+    colliders.push(aabb(-0.8, y - 0.25, z0, 0.8, y + 0.02, z0 + 0.2));
+  }
+  const col = aabb(-W / 2, -1.75, d.hingeZ - 0.08, W / 2, 0.35, d.hingeZ + 1.35, 'door:aft');
+  makeDoor('aft', hinge, col, (k) => { hinge.rotation.x = ang.closed + k * (ang.open - ang.closed); }, 2.2);
 }
 
 /**

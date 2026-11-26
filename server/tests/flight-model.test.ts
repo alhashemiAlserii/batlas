@@ -5,6 +5,8 @@ import {
   newFlight, stepFlight, dynamicPressure, thrustMoments, aeroMoments, engineFractions,
   INERTIA, MASS, PHYS_DT, WING,
 } from '../../web/public/play/sky-crew/js/flight.js';
+// @ts-expect-error plain browser ES module without types
+import { aftRampAngles, GEAR_H } from '../../web/public/play/sky-crew/js/world.js';
 
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) < eps;
 
@@ -171,6 +173,18 @@ describe('fixed-step handling', () => {
     expect(peak).toBeLessThan(0.25);
     expect(Math.abs(f.bank)).toBeLessThan(0.02);
     expect(Math.abs(f.yaw)).toBeLessThan(0.05);
+  });
+
+  it('lowers the rear ramp onto the ground and stows it up the tail', () => {
+    const a = aftRampAngles();
+    expect(a.down.y).toBeCloseTo(-GEAR_H, 2);
+    expect(a.down.z).toBeGreaterThan(17);
+    expect(a.stowed.z).toBeGreaterThan(a.down.z - 1);
+    expect(a.stowed.y).toBeGreaterThan(-0.5);
+    expect(a.stowed.y).toBeLessThan(2.2);
+    expect(a.open).toBeGreaterThan(a.closed);
+    expect(a.beta).toBeGreaterThan(0.2);
+    expect(a.beta).toBeLessThan(0.5);
   });
 
   it('one dead engine yaws; matched throttle does not', () => {

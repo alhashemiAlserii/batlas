@@ -201,14 +201,18 @@ export class Sim {
   setDoor(name, open, instant = false) {
     const d = this.ship.doors[name]; if (!d) return;
     const statics = this.statics.filter((b) => b.userData.collider === d.collider);
-    d.onPassable = (p) => { for (const b of statics) b.collisionResponse = !p; if (name === 'ramp') this.syncRamp(); };
+    d.onPassable = (p) => { for (const b of statics) b.collisionResponse = !p; if (name === 'ramp' || name === 'aft') this.syncRamp(); };
     d.apply(open, instant);
     if (instant) d.onPassable(d.passable);
   }
   /** Ramp treads are solid only while the tail ramp is open and the aircraft is on the ground. */
   syncRamp() {
     const live = !!this.groundOn && !!this.ship.doors.ramp?.passable;
-    for (const b of this.statics) if (b.userData.tag === 'rampstep') b.collisionResponse = live;
+    const aft = !!this.groundOn && !!this.ship.doors.aft?.passable;
+    for (const b of this.statics) {
+      if (b.userData.tag === 'rampstep') b.collisionResponse = live;
+      if (b.userData.tag === 'aftramp') b.collisionResponse = aft;
+    }
   }
   setGround(on) {
     this.groundOn = on;
@@ -218,7 +222,7 @@ export class Sim {
   }
   inCargo(p) {
     const forward = p.z > Z_HOLD0 + 0.05 && p.z < Z_HOLD1 - 0.05 && Math.abs(p.x) < HALF_W && p.y > -0.2 && p.y < CEIL;
-    const aft = p.z > AFT_DOOR.z0 + 0.15 && p.z < AFT_DOOR.z1 - 0.15 && p.x < -0.7 && p.x > -HALF_W - 0.3 && p.y > -0.2 && p.y < CEIL;
+    const aft = p.z > AFT_DOOR.bayZ0 && p.z < AFT_DOOR.bayZ1 && Math.abs(p.x) < AFT_DOOR.width / 2 && p.y > -0.2 && p.y < CEIL;
     return forward || aft;
   }
   inCabin(p) { return p.z > Z_NOSE && p.z < Z_TAIL && Math.abs(p.x) < HALF_W + 0.05 && p.y > -0.4 && p.y < CEIL + 0.2; }
@@ -248,10 +252,10 @@ export class Sim {
   /** Where a body at plane-local `pos` would leave through an open door (or null). */
   openDoorAt(pos) {
     const dd = this.ship.doors;
-    if (dd.rear.passable && pos.z > Z_TAIL - 0.6 && pos.x > REAR_DOOR.x0 + 0.05 && pos.x < REAR_DOOR.x1 - 0.05 && pos.y < REAR_DOOR.h - 0.25) return 'rear';
-    if (dd.ramp?.passable && pos.z > Z_TAIL - 0.75 && pos.x > RAMP.x0 + 0.02 && pos.x < RAMP.x1 - 0.02 && pos.y < RAMP.h - 0.15 && pos.y > -0.5) return 'ramp';
+    if (dd.rear.passable && pos.z > Z_TAIL - 0.6 && pos.z < Z_TAIL + 0.7 && pos.x > REAR_DOOR.x0 + 0.05 && pos.x < REAR_DOOR.x1 - 0.05 && pos.y < REAR_DOOR.h - 0.25) return 'rear';
+    if (dd.ramp?.passable && pos.z > Z_TAIL - 0.75 && pos.z < Z_TAIL + 0.9 && pos.x > RAMP.x0 + 0.02 && pos.x < RAMP.x1 - 0.02 && pos.y < RAMP.h - 0.15 && pos.y > -0.5) return 'ramp';
     if (dd.cargo.passable && pos.x > 0 && pos.z > CARGO_DOOR.z0 - 0.1 && pos.z < CARGO_DOOR.z1 + 0.1 && pos.y < 2.0) return 'cargo';
-    if (dd.aft?.passable && pos.x < -0.55 && pos.z > AFT_DOOR.z0 - 0.1 && pos.z < AFT_DOOR.z1 + 0.1 && pos.y < AFT_DOOR.y1 && pos.y > AFT_DOOR.y0 - 0.3) return 'aft';
+    if (dd.aft?.passable && pos.z > AFT_DOOR.hingeZ - 0.45 && Math.abs(pos.x) < AFT_DOOR.width / 2 - 0.05 && pos.y < 2.3 && pos.y > -GEAR_H - 0.3) return 'aft';
     return null;
   }
   /** Crew classes (from the server's room list, via main.js). */
@@ -266,7 +270,7 @@ export class Sim {
     if (inside) {
       const lim = HALF_W - 0.3, door = this.openDoorAt(pos);
       if (Math.abs(pos.x) > lim && door !== 'cargo' && door !== 'aft') { pos.x = Math.sign(pos.x) * lim; v.x *= -0.3; }
-      pos.z = Math.max(Z_NOSE + 0.6, door === 'rear' || door === 'ramp' ? pos.z : Math.min(Z_TAIL - 0.5, pos.z));
+      pos.z = Math.max(Z_NOSE + 0.6, door === 'rear' || door === 'ramp' || door === 'aft' ? pos.z : Math.min(Z_TAIL - 0.5, pos.z));
       if (pos.y > CEIL - 1.0) { pos.y = CEIL - 1.0; v.y = Math.min(0, v.y); }
       if (pos.y <= 0) { pos.y = 0; this.landPax(p, true); }
       return;

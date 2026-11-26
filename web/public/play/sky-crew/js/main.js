@@ -313,7 +313,8 @@ if (isTouch) setupTouch();
 function solids() {
   const ta = terminalActive(), si = stepIdx(myStep());
   const rampLive = sim.groundOn && ship.doors.ramp?.passable;
-  return ship.colliders.filter((c) => !(c.tag === 'ground' && !sim.groundOn) && !(c.tag === 'rampstep' && !rampLive) && !(c.tag && c.tag.endsWith(':open'))
+  const aftLive = sim.groundOn && ship.doors.aft?.passable;
+  return ship.colliders.filter((c) => !(c.tag === 'ground' && !sim.groundOn) && !(c.tag === 'rampstep' && !rampLive) && !(c.tag === 'aftramp' && !aftLive) && !(c.tag && c.tag.endsWith(':open'))
     && !(c.tag === 'term:arch' && (!ta || si >= 2 || termLocal.bag)) && !(c.tag === 'term:gate' && (!ta || si >= 3)));
 }
 function overlaps(p, c, hgt = H) {
@@ -635,7 +636,7 @@ function dropPax(dist, speed) {
   const at = me.pos.clone().add(new THREE.Vector3(dir.x, 0, dir.z).normalize().multiplyScalar(dist)); at.y = me.pos.y + 0.9;
     if (sim.inCabin(me.pos)) { // an OPEN door lets a passenger out: rear door, tail ramp, forward cargo door, or the main aft hold
     const door = sim.openDoorAt(at);
-    at.z = Math.max(Z_NOSE + 0.6, door === 'rear' || door === 'ramp' ? at.z : Math.min(Z_TAIL - 0.45, at.z));
+    at.z = Math.max(Z_NOSE + 0.6, door === 'rear' || door === 'ramp' || door === 'aft' ? at.z : Math.min(Z_TAIL - 0.45, at.z));
     if (door !== 'cargo' && door !== 'aft') at.x = Math.max(-HALF_W + 0.35, Math.min(HALF_W - 0.35, at.x));
   }
   const v = dir.clone().multiplyScalar(speed); v.y += speed ? 2.2 : 0;
