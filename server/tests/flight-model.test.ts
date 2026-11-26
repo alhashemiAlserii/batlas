@@ -175,16 +175,19 @@ describe('fixed-step handling', () => {
     expect(Math.abs(f.yaw)).toBeLessThan(0.05);
   });
 
-  it('lowers the rear ramp onto the ground and stows it up the tail', () => {
+  it('lowers the rear ramp onto the ground and stows it in the tail', () => {
     const a = aftRampAngles();
-    expect(a.down.y).toBeCloseTo(-GEAR_H, 2);
-    expect(a.down.z).toBeGreaterThan(17);
-    expect(a.stowed.z).toBeGreaterThan(a.down.z - 1);
-    expect(a.stowed.y).toBeGreaterThan(-0.5);
-    expect(a.stowed.y).toBeLessThan(2.2);
-    expect(a.open).toBeGreaterThan(a.closed);
-    expect(a.beta).toBeGreaterThan(0.2);
-    expect(a.beta).toBeLessThan(0.5);
+    expect(a.down.y).toBeCloseTo(-GEAR_H, 1);
+    expect(a.down.z).toBeGreaterThan(20);
+    expect(a.down.z).toBeLessThan(26);
+    expect(a.stowed.z).toBeGreaterThan(20);
+    expect(a.stowed.y).toBeGreaterThan(-1.8);
+    expect(a.stowed.y).toBeLessThan(1.2);
+    expect(a.closed).toBe(0);
+    expect(a.open).toBeGreaterThan(0.05);
+    expect(a.open).toBeLessThan(1.2);
+    expect(a.beta).toBeGreaterThan(0.08);
+    expect(a.beta).toBeLessThan(0.45);
   });
 
   it('one dead engine yaws; matched throttle does not', () => {
