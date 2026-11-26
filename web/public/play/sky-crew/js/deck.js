@@ -125,46 +125,225 @@ function paintNav(ctx, w, h, f) {
   ctx.fillText('BATLAS', 16, h - 16);
 }
 
+const YOKE_METAL = metal();
+const YOKE_GRIP = grip();
+const YOKE_HUB = plastic(0x9aa3b0, 0.38);
+const YOKE_BOOT = plastic(0x161b24, 0.92);
+const YOKE_DARK = plastic(0x2a303c, 0.7);
+const YOKE_RED = plastic(0xc23b3b, 0.45);
+
+function clockFace() {
+  const tex = canvasTexture(128, 128, (g, w, h) => {
+    g.fillStyle = '#e7edf4';
+    g.beginPath(); g.arc(w / 2, h / 2, w / 2 - 2, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#1c2430'; g.lineWidth = 4; g.stroke();
+    g.fillStyle = '#1c2430';
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      g.fillRect(w / 2 + Math.sin(a) * 46 - 1.5, h / 2 - Math.cos(a) * 46 - 4, 3, i % 3 === 0 ? 10 : 6);
+    }
+    g.strokeStyle = '#1c2430'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(w / 2, h / 2); g.lineTo(w / 2 + 8, h / 2 - 28); g.stroke();
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(w / 2, h / 2); g.lineTo(w / 2 + 22, h / 2 + 6); g.stroke();
+    g.fillStyle = '#19d3c5'; g.beginPath(); g.arc(w / 2, h / 2, 3.5, 0, Math.PI * 2); g.fill();
+  });
+  return new THREE.MeshBasicMaterial({ map: tex });
+}
+let CLOCK_MAT = null;
+function clockMat() { if (!CLOCK_MAT) CLOCK_MAT = clockFace(); return CLOCK_MAT; }
+
+/** One ram's horn, from the hub out to a rubber grip. sign +1 is the right horn. */
+function addHorn(wheel, sign) {
+  const pts = [
+    [0.03, -0.01, 0.012],
+    [0.09, -0.045, 0.02],
+    [0.16, -0.05, 0.028],
+    [0.21, -0.01, 0.03],
+    [0.2, 0.055, 0.026],
+    [0.175, 0.1, 0.018],
+  ].map(([x, y, z]) => new THREE.Vector3(sign * x, y, z));
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.016, 7, false), YOKE_METAL);
+  tube.castShadow = true;
+  wheel.add(tube);
+  const gripMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.024, 0.11, 10), YOKE_GRIP);
+  gripMesh.position.set(sign * 0.188, 0.078, 0.024);
+  gripMesh.rotation.z = sign * 0.22;
+  gripMesh.castShadow = true;
+  wheel.add(gripMesh);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), YOKE_GRIP);
+  cap.position.set(sign * 0.176, 0.128, 0.016);
+  wheel.add(cap);
+  return gripMesh;
+}
+
+/**
+ * Boeing-style ram's-horn yoke, original geometry. The column is rooted on the
+ * cockpit floor; the wheel stays below the captain's sight line to the runway.
+ */
 function makeYoke(parent, x) {
   const root = new THREE.Group();
-  // Below the sight line. A polished column here used to catch a white highlight across the glass.
-  root.position.set(x, 1.0, -15.12);
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.048, 0.42, 12), plastic(0x2a303c, 0.84));
-  column.position.set(0, -0.22, 0.04);
-  column.rotation.x = 0.55;
-  column.castShadow = true;
-  root.add(column);
-  const boot = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), plastic(0x242a38, 0.7));
-  boot.scale.set(1, 0.55, 1.2);
-  boot.position.set(0, -0.78, 0.16);
-  root.add(boot);
-  const wheel = new THREE.Group();
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.028, 10, 28), grip());
-  ring.castShadow = true;
-  wheel.add(ring);
-  for (let i = 0; i < 3; i++) {
-    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
-    const sp = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.026, 0.024), plastic(0x3a4250, 0.7));
-    sp.position.set(Math.cos(a) * 0.08, Math.sin(a) * 0.08, 0);
-    sp.rotation.z = a;
-    wheel.add(sp);
+  root.position.set(x, 0, -15.22);
+  const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.025, 14), YOKE_DARK);
+  plate.position.y = 0.012;
+  root.add(plate);
+  // Rubber boot where the column comes out of the floor, so it reads as attached.
+  for (let i = 0; i < 4; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055 + i * 0.006, 0.014, 6, 12), YOKE_BOOT);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, 0.04 + i * 0.028, 0.01 + i * 0.008);
+    root.add(ring);
   }
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.05, 14), plastic(0x121820, 0.4));
+  const pitchPivot = new THREE.Group();
+  pitchPivot.position.set(0, 0.06, 0.02);
+  pitchPivot.rotation.x = 0.14;
+  root.add(pitchPivot);
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.062, 1.22, 12), YOKE_DARK);
+  column.position.y = 0.62;
+  column.castShadow = true;
+  pitchPivot.add(column);
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.04, 12), YOKE_METAL);
+  collar.position.y = 1.2;
+  pitchPivot.add(collar);
+
+  const wheel = new THREE.Group();
+  wheel.position.set(0, 1.36, 0);
+  pitchPivot.add(wheel);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.045, 14), YOKE_HUB);
   hub.rotation.x = Math.PI / 2;
+  hub.castShadow = true;
   wheel.add(hub);
-  const hornL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.04), grip());
-  hornL.position.set(-0.16, 0.12, 0.02);
-  const hornR = hornL.clone();
-  hornR.position.x = 0.16;
-  wheel.add(hornL, hornR);
-  const hit = new THREE.Mesh(new THREE.CircleGeometry(0.34, 16), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  const face = new THREE.Mesh(rbox(0.09, 0.11, 0.012, 0.012), YOKE_HUB);
+  face.position.z = 0.028;
+  wheel.add(face);
+  const clock = new THREE.Mesh(new THREE.CircleGeometry(0.028, 16), clockMat());
+  clock.position.set(0, 0.012, 0.036);
+  wheel.add(clock);
+  const card = new THREE.Mesh(rbox(0.05, 0.028, 0.004, 0.004), plastic(0xf4f1e8, 0.8));
+  card.position.set(0, -0.032, 0.036);
+  wheel.add(card);
+  const clip = new THREE.Mesh(rbox(0.032, 0.008, 0.008, 0.002), YOKE_METAL);
+  clip.position.set(0, -0.02, 0.04);
+  wheel.add(clip);
+
+  const leftGrip = addHorn(wheel, -1);
+  const rightGrip = addHorn(wheel, 1);
+  // Trim rocker on the left grip, push-to-talk and a red autopilot disconnect on the right.
+  const trim = new THREE.Mesh(rbox(0.012, 0.028, 0.01, 0.003), YOKE_DARK);
+  trim.position.set(-0.02, 0.01, 0.03);
+  leftGrip.add(trim);
+  const ptt = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.008, 8), YOKE_DARK);
+  ptt.rotation.x = Math.PI / 2;
+  ptt.position.set(0.01, -0.01, 0.03);
+  rightGrip.add(ptt);
+  const ap = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.008, 8), YOKE_RED);
+  ap.rotation.x = Math.PI / 2;
+  ap.position.set(-0.012, 0.03, 0.02);
+  rightGrip.add(ap);
+
+  const hit = new THREE.Mesh(new THREE.CircleGeometry(0.28, 14), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
   hit.name = 'yokeHit';
   wheel.add(hit);
-  root.add(wheel);
   root.userData.wheel = wheel;
+  root.userData.pitchPivot = pitchPivot;
   root.userData.hit = hit;
   parent.add(root);
   return root;
+}
+
+const FRAME_MAT = plastic(0x2c3442, 0.48);
+const GLASS_MAT = new THREE.MeshStandardMaterial({
+  color: 0xc5d8ea, transparent: true, opacity: 0.18, roughness: 0.05, metalness: 0.62,
+  envMapIntensity: 0.85, depthWrite: false, side: THREE.DoubleSide,
+});
+let REFL_MAT = null;
+function reflMat() {
+  if (REFL_MAT) return REFL_MAT;
+  const tex = canvasTexture(64, 128, (g, w, h) => {
+    const grd = g.createLinearGradient(0, 0, w, h);
+    grd.addColorStop(0, 'rgba(255,255,255,0.55)');
+    grd.addColorStop(0.45, 'rgba(190,220,235,0.08)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+  });
+  REFL_MAT = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+  return REFL_MAT;
+}
+
+/** One window: thin rounded frame, tinted glass, a faint reflection. ry swings the pane to follow the nose. */
+function windowPane(parent, { x, y, z, w, h, ry = 0 }) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  const t = 0.026;
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(w - t, h - t), GLASS_MAT);
+  const ref = new THREE.Mesh(new THREE.PlaneGeometry((w - t) * 0.92, (h - t) * 0.92), reflMat());
+  ref.position.z = 0.006;
+  const bar = (bw, bh, px, py) => {
+    const m = new THREE.Mesh(rbox(bw, bh, 0.032, 0.01), FRAME_MAT);
+    m.position.set(px, py, 0);
+    return m;
+  };
+  g.add(
+    glass, ref,
+    bar(w + t, t, 0, h / 2),
+    bar(w + t, t, 0, -h / 2),
+    bar(t, h + t, -w / 2, 0),
+    bar(t, h + t, w / 2, 0),
+  );
+  parent.add(g);
+  return g;
+}
+
+/**
+ * Classic six-pane flight-deck glazing set into the nose: two front panes, two
+ * angled quarter panes and two sliding side windows. The surround is solid, so
+ * the sky shows only through the glass. Posts are vertical and mirrored.
+ */
+function buildWindshield(plane) {
+  const shell = plastic(0xd5dce6, 0.78);
+  const zF = -16.22;
+  // Front bulkhead. Bars leave two equal openings around a centre post.
+  const post = (x) => {
+    const m = new THREE.Mesh(rbox(0.04, 0.98, 0.05, 0.012), FRAME_MAT);
+    m.position.set(x, 1.7, zF);
+    plane.add(m);
+  };
+  post(-1.02); post(0); post(1.02);
+  const rail = (y, w, x, z, ry = 0) => {
+    const m = new THREE.Mesh(rbox(w, 0.04, 0.05, 0.012), FRAME_MAT);
+    m.position.set(x, y, z);
+    m.rotation.y = ry;
+    plane.add(m);
+  };
+  rail(2.17, 2.08, 0, zF);
+  rail(1.23, 2.08, 0, zF);
+  const glass = (x) => {
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(0.94, 0.88), GLASS_MAT);
+    const ref = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.8), reflMat());
+    g.position.set(x, 1.7, zF + 0.01);
+    ref.position.set(x, 1.7, zF + 0.02);
+    plane.add(g, ref);
+  };
+  glass(-0.51); glass(0.51);
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.28, 0.06), shell);
+  brow.position.set(0, 2.38, -16.16);
+  plane.add(brow);
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.1, 0.08), shell);
+  sill.position.set(0, 1.16, -16.16);
+  plane.add(sill);
+  // Angled quarter panes, folded back along the nose, mirrored.
+  windowPane(plane, { x: -1.42, y: 1.68, z: -15.98, w: 0.56, h: 0.86, ry: 0.48 });
+  windowPane(plane, { x: 1.42, y: 1.68, z: -15.98, w: 0.56, h: 0.86, ry: -0.48 });
+  // Sliding side windows in the cockpit wall.
+  for (const s of [-1, 1]) {
+    windowPane(plane, { x: s * 2.16, y: 1.59, z: -15.48, w: 0.52, h: 0.62, ry: s * Math.PI / 2 });
+    const track = new THREE.Mesh(rbox(0.5, 0.014, 0.016, 0.004), FRAME_MAT);
+    track.position.set(s * 2.14, 1.93, -15.48);
+    track.rotation.y = s * Math.PI / 2;
+    plane.add(track);
+  }
 }
 
 /** Two thrust levers, a flap lever and a trim wheel on the centre pedestal. Forward of the seats. */
@@ -389,6 +568,7 @@ export function buildDeck(plane) {
   guideMesh.rotation.x = -0.85;
   plane.add(guideMesh);
 
+  buildWindshield(plane);
   const yokes = [makeYoke(plane, -0.58), makeYoke(plane, 0.58)];
   const quad = makeQuadrant(plane);
   overhead(plane);

@@ -146,7 +146,7 @@ const myId = () => (net.inRoom ? net.cid : 'solo');
 
 // ---------------- input ----------------
 const keys = new Set();
-const touch = { mx: 0, my: 0, thr: 0, run: false };
+const touch = { mx: 0, my: 0, thr: 0, run: false, rud: 0 };
 /** Yoke drag (mouse or the on-screen wheel). Springs back to centre when you let go. */
 const yokeIn = { pitch: 0, roll: 0, hold: false };
 const pad = { lx: 0, ly: 0, thr: 0, sprint: false, rt: false, space: false };
@@ -260,6 +260,13 @@ function setupTouch() {
   tap('#tPri', () => { if (heldItem() || heldPax()) throwHeld(); });
   const hold = (id, v) => { const b = $(id); b.addEventListener('pointerdown', () => { touch.thr = v; }); b.addEventListener('pointerup', () => { touch.thr = 0; }); b.addEventListener('pointercancel', () => { touch.thr = 0; }); };
   hold('#tThrDn', -1);
+  const rudder = (id, v) => {
+    const b = $(id); if (!b) return;
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); if (playing && !paused) touch.rud = v; });
+    const up = () => { if (touch.rud === v) touch.rud = 0; };
+    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
+  };
+  rudder('#tRudL', -1); rudder('#tRudR', 1);
   const dial = $('#tDial');
   let dialOn = false;
   dial.addEventListener('pointerdown', (e) => {
@@ -626,10 +633,10 @@ function dropPax(dist, speed) {
   const p = heldPax(); if (!p) return;
   const dir = lookDir();
   const at = me.pos.clone().add(new THREE.Vector3(dir.x, 0, dir.z).normalize().multiplyScalar(dist)); at.y = me.pos.y + 0.9;
-  if (sim.inCabin(me.pos)) { // only an OPEN door lets a passenger out: the rear door (aft wall) or the cargo door (hold, right side)
+    if (sim.inCabin(me.pos)) { // an OPEN door lets a passenger out: rear door, tail ramp, forward cargo door, or the main aft hold
     const door = sim.openDoorAt(at);
     at.z = Math.max(Z_NOSE + 0.6, door === 'rear' || door === 'ramp' ? at.z : Math.min(Z_TAIL - 0.45, at.z));
-    if (door !== 'cargo') at.x = Math.max(-HALF_W + 0.35, Math.min(HALF_W - 0.35, at.x));
+    if (door !== 'cargo' && door !== 'aft') at.x = Math.max(-HALF_W + 0.35, Math.min(HALF_W - 0.35, at.x));
   }
   const v = dir.clone().multiplyScalar(speed); v.y += speed ? 2.2 : 0;
   audio.play(speed ? 'drop' : 'click');
@@ -687,7 +694,7 @@ function applyAct(cid, a) {
       if (sim.serve(Number(a.pax), it ? it.type : null, classOf(cid)) && it) sim.removeItem(it.id);
       break;
     }
-    case 'door': if (['rear', 'cargo', 'ramp'].includes(a.d) && ship.doors[a.d] && sim.phase !== 'taxi') sim.setDoor(a.d, !ship.doors[a.d].open); break;
+    case 'door': if (['rear', 'cargo', 'ramp', 'aft'].includes(a.d) && ship.doors[a.d] && sim.phase !== 'taxi') sim.setDoor(a.d, !ship.doors[a.d].open); break;
     case 'bin': { const b = ship.bins.find((x) => x.id === a.id); if (b) b.set(!b.open); break; }
     case 'fix': sim.fixPanel(); break;
     case 'disp': {
@@ -722,7 +729,7 @@ async function takeSeat() {
     net.send({ t: 'pilot', on: true });
   }
   me.mode = 'pilot'; me.yaw = 0; me.pitch = -0.28;
-  UI.toast(isTouch ? 'Helm · drag the yoke · throttle dial · G gear · C flaps · E leave' : 'Helm · drag the yoke · W/S pitch · A/D steer · R/F throttle · G gear · C flaps · E leave', 'keys', 7000);
+  UI.toast(isTouch ? 'Helm · drag the yoke · rudder pedals · throttle dial · G gear · C flaps · E leave' : 'Helm · drag the yoke · W/S pitch · A/D roll · , / . rudder · R/F throttle · G gear · C flaps · E leave', 'keys', 7000);
 }
 function systemAct(w) { act({ k: 'sys', w, seat: me.mode }); }
 const copilotTaken = () => [...remotes.values()].some((r) => r.mode === 'copilot');
@@ -988,6 +995,7 @@ function updateFlight(dt) {
       pitch: clamp1((keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - pad.ly + yokeIn.pitch),
       roll: clamp1((keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + pad.lx + yokeIn.roll),
       throttleDelta: clamp1((keys.has('KeyR') || keys.has('PageUp') ? 1 : 0) - (keys.has('KeyF') || keys.has('PageDown') ? 1 : 0) + touch.thr + pad.thr),
+      yaw: clamp1((keys.has('Period') ? 1 : 0) - (keys.has('Comma') ? 1 : 0) + (touch.rud || 0)),
     };
     f.stickP = inp.pitch; f.stickR = inp.roll;
     f.tailwind = tailwind(crewInfo().map((c) => c.cls));
@@ -1362,7 +1370,7 @@ function buildDuty() {
     const reqs = sim.pax.filter((p) => p.request).length;
     if (!reqs) tasks.push({ id: 'calm', label: 'Passengers are content', state: 'done', track: true });
     if (c.lost) tasks.push({ id: 'lost', label: `${c.lost} passenger${c.lost > 1 ? 's' : ''} left by parachute`, state: 'warn' });
-    if (!f.onGround && (ship.doors.rear.open || ship.doors.cargo.open || ship.doors.ramp?.open)) tasks.push({ id: 'door-open', label: 'A door is open in flight', state: 'warn' });
+    if (!f.onGround && (ship.doors.rear.open || ship.doors.cargo.open || ship.doors.ramp?.open || ship.doors.aft?.open)) tasks.push({ id: 'door-open', label: 'A door is open in flight', state: 'warn' });
     if (c.loose) tasks.push({ id: 'loose', label: `${c.loose} loose bag${c.loose > 1 ? 's' : ''} in the cabin`, state: 'warn' });
     const evs = sim.host ? sim.events.filter((e) => !e.done).map((e) => [e.id]) : sim.activeEvents || [];
     for (const [id] of evs) {
@@ -1913,13 +1921,13 @@ if (qs.get('room') && user) $('#joinCode').value = qs.get('room').toUpperCase().
 if (qs.get('devjoin') && user) setTimeout(() => devJoin(qs.get('devjoin').toUpperCase().slice(0, 5), qs.get('hidden') === '1'), 50);
 
 // ---------------- sound per frame ----------------
-const lastDoors = { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, ramp: ship.doors.ramp.open };
+const lastDoors = { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, ramp: ship.doors.ramp.open, aft: !!ship.doors.aft?.open };
 let lastTd = null;
 function updateAudio() {
   const f = sim.flight;
   const inside = me.mode !== 'walk' || sim.inCabin(me.pos);
   audio.update({ engines: sim.phase !== 'boarding' || f.throttle > 0, throttle: Math.max(f.throttle, sim.phase === 'boarding' ? 0 : 0.15), speed: f.speed, onGround: f.onGround, inside, storm: sim.weather === 'storm', turb: sim.turb });
-  for (const n of ['rear', 'cargo', 'ramp']) if (ship.doors[n] && ship.doors[n].open !== lastDoors[n]) { lastDoors[n] = ship.doors[n].open; audio.play('door'); }
+  for (const n of ['rear', 'cargo', 'ramp', 'aft']) if (ship.doors[n] && ship.doors[n].open !== lastDoors[n]) { lastDoors[n] = ship.doors[n].open; audio.play('door'); }
   if (f.touchdown && f.touchdown.at !== lastTd) { lastTd = f.touchdown.at; audio.play(f.touchdown.crash ? 'crash' : 'thump', { hard: f.touchdown.hard ? 0.6 : 0 }); }
 }
 
@@ -2038,7 +2046,7 @@ window.skyCrew = {
   ready: true,
   shouldRotate: shouldShowRotateHint,
   rotate: () => rotateHint.debug(),
-  state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, ramp: !!ship.doors.ramp?.open, rearT: +ship.doors.rear.t.toFixed(3), cargoT: +ship.doors.cargo.t.toFixed(3), rampT: +((ship.doors.ramp?.t) || 0).toFixed(3), rearPassable: ship.doors.rear.passable, rampPassable: !!ship.doors.ramp?.passable }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, pilotCid: net.room.pilotCid ?? null, hidden: !!net.room.hidden, locked: !!net.room.locked, airport: net.room.airport, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
+  state: () => ({ playing, paused, phase: sim.phase, host: sim.host, doors: { rear: ship.doors.rear.open, cargo: ship.doors.cargo.open, ramp: !!ship.doors.ramp?.open, aft: !!ship.doors.aft?.open, rearT: +ship.doors.rear.t.toFixed(3), cargoT: +ship.doors.cargo.t.toFixed(3), rampT: +((ship.doors.ramp?.t) || 0).toFixed(3), aftT: +((ship.doors.aft?.t) || 0).toFixed(3), rearPassable: ship.doors.rear.passable, rampPassable: !!ship.doors.ramp?.passable, aftPassable: !!ship.doors.aft?.passable }, seed: sim.seed, dest: DEST.code, lobby: !$('#lobby').classList.contains('hidden'), me: { x: me.pos.x, y: me.pos.y, z: me.pos.z, mode: me.mode, onGround: me.onGround }, held: heldItem()?.type || null, counts: sim.counts, flight: { ...sim.planeState() }, room: net.room && { code: net.room.code, pilotCid: net.room.pilotCid ?? null, hidden: !!net.room.hidden, locked: !!net.room.locked, airport: net.room.airport, players: net.room.players.map((p) => ({ username: p.username, role: p.role })) }, remotes: [...remotes.values()].map((r) => ({ username: r.info.username, x: r.mesh.position.x, z: r.mesh.position.z })), results: sim.results }),
   teleport: (x, y, z) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); },
   look: (yaw, pitch) => { me.yaw = yaw; me.pitch = pitch; },
   lookAt: (x, y, z) => { const e = eyePos(); const d = new THREE.Vector3(x, y, z).sub(e); me.yaw = Math.atan2(-d.x, -d.z); me.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); },
@@ -2100,7 +2108,7 @@ window.skyCrew = {
     bird: () => fx.bird(),
     celebrate: () => fx.celebrate(),
     weather: (w, hour) => { if (w) sim.weather = w; if (hour != null) sim.hour = hour; },
-    door: (name, open) => { if (sim.host) sim.setDoor(name, open); return { open: ship.doors[name].open, t: ship.doors[name].t }; },
+    door: (name, open, instant = false) => { if (sim.host) sim.setDoor(name, open, !!instant); return { open: ship.doors[name].open, t: ship.doors[name].t }; },
     setPos: (x, y, z, yaw) => { me.pos.set(x, y, z); me.vel.set(0, 0, 0); if (yaw != null) me.yaw = yaw; },
     trigger: (id) => sim.trigger(id),
     forceShift: (kind) => { if (!sim.shift) return null; const made = sim.shift.force(kind); syncShiftView(sim.shift.snapshot()); return made && { id: made.id, kind: made.kind }; },
