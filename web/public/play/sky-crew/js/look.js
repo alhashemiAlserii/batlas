@@ -47,21 +47,37 @@ export function stylize(mat) {
   return mat;
 }
 
-/** Gentle sea chop. The uniform lives on material.userData.uTime. */
-export function waveSea(mat) {
+/**
+ * Local sea chop. Displacement is in world XZ (uOrigin) so a mesh that follows
+ * the aircraft does not swim, and the amplitude stays under the islands.
+ * A flat distant sea (no displacement) is a separate mesh in world.js — this
+ * shader must not tilt one giant quad up over the land.
+ */
+export function waveSea(mat, amp = 0.42) {
   stylize(mat);
   const uTime = { value: 0 };
+  const uAmp = { value: amp };
+  const uOrigin = { value: new THREE.Vector2() };
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = function onBeforeCompile(shader, renderer) {
     prev.call(this, shader, renderer);
     shader.uniforms.uTime = uTime;
-    if (!shader.vertexShader.includes('uniform float uTime')) {
+    shader.uniforms.uAmp = uAmp;
+    shader.uniforms.uOrigin = uOrigin;
+    if (!shader.vertexShader.includes('uniform float uAmp')) {
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float uTime;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.z += sin(position.x * 0.0028 + uTime) * cos(position.y * 0.0028 + uTime * 0.75) * 2.4;');
+        .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uAmp;\nuniform vec2 uOrigin;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+float wx = position.x + uOrigin.x;
+float wz = uOrigin.y - position.y;
+float chop = sin(wx * 0.045 + uTime * 0.7) * cos(wz * 0.04 - uTime * 0.5);
+chop += sin(wx * 0.09 + wz * 0.07 + uTime * 1.1) * 0.35;
+transformed.z += chop * uAmp;`);
     }
   };
   mat.userData.uTime = uTime;
+  mat.userData.uAmp = uAmp;
+  mat.userData.uOrigin = uOrigin;
   return mat;
 }
 
@@ -186,8 +202,9 @@ const FEATHER = [0xfff8ee, 0xf3e2c4, 0xd8c2a0, 0xffffff];
  * in the world). Low quality keeps the windscreen crack, the fire cones and
  * one puddle, and skips the particle pools.
  */
-export function createFlightFx({ plane, camera, scene, quality, gearH }) {
+export function createFlightFx({ plane, camera, scene, quality, gearH, exhaust = [], tires = [] }) {
   const particles = quality !== 'low';
+  const rich = quality === 'high';
   const group = new THREE.Group();
   group.name = 'flightFx';
   plane.add(group);
@@ -197,9 +214,9 @@ export function createFlightFx({ plane, camera, scene, quality, gearH }) {
     grd.addColorStop(0, 'rgba(20,28,40,0.42)'); grd.addColorStop(1, 'rgba(20,28,40,0)');
     g.fillStyle = grd; g.fillRect(0, 0, w, h);
   });
-  const contact = new THREE.Mesh(new THREE.PlaneGeometry(18, 42), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
+  const contact = new THREE.Mesh(new THREE.PlaneGeometry(22, 56), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
   contact.rotation.x = -Math.PI / 2;
-  contact.position.set(0, -gearH + 0.1, -1);
+  contact.position.set(0, -gearH + 0.08, 1);
   contact.renderOrder = 1;
   plane.add(contact);
 
@@ -295,6 +312,53 @@ export function createFlightFx({ plane, camera, scene, quality, gearH }) {
   const bolt = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, -1, 0)]), boltMat);
   bolt.visible = false; bolt.frustumCulled = false; scene.add(bolt);
 
+  // Engine heat haze and exhaust. Pooled at startup so a takeoff roll does not allocate.
+  const jets = (exhaust.length ? exhaust : [[-7.8, -2.15, 0.55], [7.8, -2.15, 0.55]]).map(([x, y, z]) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const hazeMat = new THREE.MeshBasicMaterial({ color: 0xffb078, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+    hazeMat.toneMapped = false;
+    const haze = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 2.6), hazeMat);
+    haze.position.z = 1.35;
+    haze.visible = particles;
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.35, 10), new THREE.MeshBasicMaterial({ color: 0xffb15a, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    flame.material.toneMapped = false;
+    flame.rotation.x = Math.PI / 2;
+    flame.position.z = 0.55;
+    g.add(haze, flame);
+    plane.add(g);
+    return { g, haze, hazeMat, flame };
+  });
+  const sootMat = new THREE.MeshBasicMaterial({ color: 0x8a8178, transparent: true, opacity: 0.35, depthWrite: false });
+  const sootN = particles ? (rich ? 10 : 6) : 0;
+  const soot = [];
+  for (let i = 0; i < sootN; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 5), sootMat.clone());
+    m.visible = false; m.frustumCulled = false; plane.add(m); soot.push(m);
+  }
+  const puffGeo = new THREE.PlaneGeometry(0.9, 0.9);
+  const puffN = particles ? (rich ? 18 : 10) : 4;
+  const puffs = [];
+  for (let i = 0; i < puffN; i++) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xd9d3c8, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const m = new THREE.Mesh(puffGeo, mat);
+    m.visible = false; m.frustumCulled = false; m.userData.life = 0;
+    plane.add(m); puffs.push(m);
+  }
+  const trailN = particles ? (rich ? 28 : 14) : 0;
+  const trails = [];
+  for (let i = 0; i < trailN; i++) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xf7fbff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.7), mat);
+    m.visible = false; m.frustumCulled = false; m.userData.life = 0;
+    scene.add(m); trails.push(m);
+  }
+  const wheels = tires.length ? tires : [[-3.2, -gearH + 0.15, 2.2], [3.2, -gearH + 0.15, 2.2], [0, -gearH + 0.15, -12.8]];
+  let wasGround = true;
+  let puffCursor = 0;
+  let trailCursor = 0;
+  const worldTmp = new THREE.Vector3();
+
   let crackAmt = 0, birdCool = 8, struck = false;
   const tmp = new THREE.Vector3();
 
@@ -368,6 +432,81 @@ export function createFlightFx({ plane, camera, scene, quality, gearH }) {
       }
       stepList(feathers, dt, 1.2);
       stepList(confetti, dt, 2.4);
+      const thr = Math.max(0, Math.min(1, s.throttle || 0));
+      const spd = Math.max(0, s.speed || 0);
+      const nowFx = performance.now() / 1000;
+      for (const jet of jets) {
+        jet.hazeMat.opacity = particles ? thr * (0.18 + 0.12 * Math.sin(nowFx * 17 + jet.g.position.x)) : 0;
+        jet.haze.scale.y = 0.7 + thr * 0.8;
+        jet.haze.visible = particles && thr > 0.05;
+        const len = 0.35 + thr * 1.7;
+        jet.flame.scale.set(0.45 + thr * 0.7, len, 0.45 + thr * 0.7);
+        jet.flame.material.opacity = thr * 0.55;
+        jet.flame.material.color.setHex(thr > 0.75 ? 0xfff1c2 : 0xff9a45);
+      }
+      if (soot.length && thr > 0.2) {
+        const slot = soot[Math.floor(nowFx * 8) % soot.length];
+        const side = Math.floor(nowFx * 8) % 2;
+        const ex = jets[side] ? jets[side].g.position : null;
+        if (ex) {
+          slot.visible = true;
+          slot.position.set(ex.x + (Math.random() - 0.5) * 0.15, ex.y + (Math.random() - 0.5) * 0.1, ex.z + 1.2 + (nowFx % 1) * (0.8 + thr));
+          slot.scale.setScalar(0.4 + thr + (nowFx % 1) * 0.8);
+          slot.material.opacity = 0.22 * thr * (1 - (nowFx % 1));
+        }
+      } else for (const m of soot) m.visible = false;
+      const touch = !!s.onGround && !wasGround && spd > 12;
+      wasGround = !!s.onGround;
+      const rolling = !!s.onGround && spd > 18 && particles;
+      if (touch || rolling) {
+        const wet = !!s.wet;
+        const n = touch ? Math.min(puffs.length, rich ? 8 : 4) : 1;
+        for (let k = 0; k < n; k++) {
+          const wheel = wheels[(puffCursor + k) % wheels.length];
+          const m = puffs[puffCursor % puffs.length];
+          puffCursor++;
+          m.visible = true;
+          m.userData.life = touch ? 1.3 : 0.45;
+          m.userData.v = new THREE.Vector3((Math.random() - 0.5) * (touch ? 2.2 : 0.4), touch ? 1.4 + Math.random() : 0.3, 1.2 + Math.random());
+          m.position.set(wheel[0] + (Math.random() - 0.5) * 0.4, wheel[1], wheel[2] + Math.random() * 0.3);
+          m.material.color.setHex(wet ? 0xd5e4ee : 0xd2c6b0);
+          m.material.opacity = touch ? 0.7 : 0.35;
+          m.rotation.x = -Math.PI / 2;
+        }
+      }
+      for (const m of puffs) {
+        if (m.userData.life <= 0) continue;
+        m.userData.life -= dt;
+        if (m.userData.life <= 0) { m.visible = false; continue; }
+        m.position.addScaledVector(m.userData.v, dt);
+        m.userData.v.y -= 1.5 * dt;
+        m.scale.setScalar(1 + (1.3 - m.userData.life) * (touch ? 1.4 : 0.6));
+        m.material.opacity = Math.max(0, m.userData.life * 0.55);
+      }
+      const alt = (s.alt || 0);
+      if (trailN && alt > 85 && spd > 50 && thr > 0.25) {
+        const m = trails[trailCursor % trails.length];
+        trailCursor++;
+        const side = trailCursor % 2;
+        const ex = jets[side];
+        if (ex) {
+          ex.g.getWorldPosition(worldTmp);
+          m.visible = true;
+          m.userData.life = rich ? 6 : 3.5;
+          m.position.copy(worldTmp);
+          m.position.y += 0.2;
+          m.lookAt(worldTmp.x, worldTmp.y + 1, worldTmp.z);
+          m.material.opacity = 0.45;
+          m.scale.set(1, 1, 1);
+        }
+      }
+      for (const m of trails) {
+        if (m.userData.life <= 0) continue;
+        m.userData.life -= dt;
+        if (m.userData.life <= 0) { m.visible = false; continue; }
+        m.scale.x += dt * 1.4;
+        m.material.opacity = Math.min(0.45, m.userData.life * 0.12);
+      }
       if (s.flash) {
         if (!bolt.visible) {
           const pts = [];

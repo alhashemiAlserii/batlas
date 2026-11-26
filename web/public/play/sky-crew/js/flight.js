@@ -32,14 +32,19 @@ export function stepFlight(f, inp, dt, turb = 0) {
   if (f.onGround) {
     const steer = (inp.roll || 0) * 0.35 * Math.min(1, f.speed / 8) * (f.speed > 40 ? 0.35 : 1);
     f.yaw -= steer * dt;
-    const want = f.speed > VR * 0.9 && (inp.pitch || 0) > 0 ? Math.min(0.22, f.pitch + 0.35 * dt) : Math.max(0, f.pitch - 0.5 * dt);
-    f.pitch = want;
+    const pull = Math.max(0, inp.pitch || 0);
+    const rotating = f.speed > VR * 0.88 && pull > 0.12;
+    const targetPitch = rotating ? Math.min(0.2, (0.045 + pull * 0.15) * Math.min(1, (f.speed - VR * 0.82) / 14)) : 0;
+    f.pitch += (targetPitch - f.pitch) * Math.min(1, dt * (rotating ? 2.6 : 4));
     f.bank *= Math.max(0, 1 - 4 * dt);
-    if (f.speed > VR && f.pitch > 0.07) { f.onGround = false; f.airborneOnce = true; }
+    if (f.speed > VR && f.pitch > 0.09 && pull > 0.08) { f.onGround = false; f.airborneOnce = true; }
     f.y = f.onGround ? GEAR_H : GEAR_H + 0.05;
     f.vs = 0;
   } else {
-    f.pitch += (inp.pitch || 0) * 0.45 * dt;
+    let pitchIn = inp.pitch || 0;
+    const agl = f.y - GEAR_H;
+    if (agl > 0.3 && agl < 28 && pitchIn > 0.05 && f.vs < -0.25) pitchIn += pitchIn * 0.5 * (1 - agl / 28);
+    f.pitch += pitchIn * 0.45 * dt;
     if (!inp.pitch) f.pitch *= Math.max(0, 1 - 0.15 * dt);
     f.pitch = Math.max(-0.45, Math.min(0.42, f.pitch));
     f.bank += (inp.roll || 0) * 0.9 * dt;
