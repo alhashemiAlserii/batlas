@@ -2,7 +2,7 @@
 import { api } from '/js/common.js';
 import * as THREE from '../../vendor/three.module.js';
 import { NeutralToneMapping, PCFShadowMap, PMREMGenerator } from '../../vendor/three.module.js';
-import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, setRoute, Z_TAIL, Z_NOSE, PILOT_LIFT, PILOT_EYE_Y } from './world.js';
+import { buildPlane, buildWorld, GEAR_H, HALF_W, CEIL, ORIGIN, DEST, ROUTES, setRoute, Z_TAIL, Z_NOSE, PILOT_LIFT, PILOT_EYE_Y, PILOT_EYE_Z } from './world.js';
 import { createPresenter, createFlightFx } from './look.js';
 import { Sim, ITEM_DEFS } from './sim.js';
 import { stepFlight, KT, FT, distTo, relBearing, glidePath } from './flight.js';
@@ -721,7 +721,7 @@ async function takeSeat() {
     if (net.room.pilotCid && net.room.pilotCid !== myId()) return UI.toast('Someone else is flying.');
     net.send({ t: 'pilot', on: true });
   }
-  me.mode = 'pilot'; me.yaw = 0; me.pitch = -0.06;
+  me.mode = 'pilot'; me.yaw = 0; me.pitch = -0.28;
   UI.toast(isTouch ? 'Helm · drag the yoke · throttle dial · G gear · C flaps · E leave' : 'Helm · drag the yoke · W/S pitch · A/D steer · R/F throttle · G gear · C flaps · E leave', 'keys', 7000);
 }
 function systemAct(w) { act({ k: 'sys', w, seat: me.mode }); }
@@ -729,7 +729,7 @@ const copilotTaken = () => [...remotes.values()].some((r) => r.mode === 'copilot
 function takeCopilot() {
   if (heldItem() || heldPax()) return UI.toast('Put down what you are carrying first.');
   if (copilotTaken()) return UI.toast('Someone is already in the co-pilot seat.');
-  me.mode = 'copilot'; me.yaw = 0; me.pitch = -0.06;
+  me.mode = 'copilot'; me.yaw = 0; me.pitch = -0.28;
   UI.toast('Right seat · L lights · B belt · N call · G gear · C flaps · E leave', 'keys', 7000);
 }
 function leaveSeat() {
@@ -1058,7 +1058,7 @@ function updateCamera() {
     camera.position.set(12, 7.5, Z_TAIL + 18); camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(0, 1.2, -6)));
     return;
   }
-  const eye = me.mode === 'pilot' ? new THREE.Vector3(-0.6, PILOT_EYE_Y, -14.42) : me.mode === 'copilot' ? new THREE.Vector3(0.6, PILOT_EYE_Y, -14.42) : eyePos();
+  const eye = me.mode === 'pilot' ? new THREE.Vector3(-0.58, PILOT_EYE_Y, PILOT_EYE_Z) : me.mode === 'copilot' ? new THREE.Vector3(0.58, PILOT_EYE_Y, PILOT_EYE_Z) : eyePos();
   if (me.third && !seated) {
     const back = lookDir();
     back.y = Math.max(-0.35, Math.min(0.45, back.y));

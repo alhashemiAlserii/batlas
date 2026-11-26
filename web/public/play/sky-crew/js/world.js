@@ -22,7 +22,9 @@ export const REAR_DOOR = { z: Z_TAIL, x0: -0.6, x1: 0.6, h: 2.1 };
 export const RAMP = { x0: 1.28, x1: 2.18, h: 2.16, z: Z_TAIL };
 /** How far a seated pilot is lifted onto the raised seat, and where their eyes sit (over the glareshield). */
 export const PILOT_LIFT = 0.4;
-export const PILOT_EYE_Y = 1.68;
+export const PILOT_EYE_Y = 1.74;
+/** Forward of the seat back, so the cushion never fills the pilot view. Nose is -z. */
+export const PILOT_EYE_Z = -14.72;
 export const ROW_Z0 = -6.9, ROW_PITCH = 1.25, ROWS = 16;
 export const SEAT_X = [-1.62, -1.0, 1.0, 1.62];
 export const ORIGIN = { code: 'HBF', name: 'Harbor Field', x: 0, z: 0, len: 3000, w: 50, style: 'harbor' };
@@ -303,7 +305,14 @@ export function buildPlane({ quality = 'high' } = {}) {
     const holdSegs = side > 0 ? [[Z_HOLD0, CARGO_DOOR.z0], [CARGO_DOOR.z1, Z_HOLD1]] : [[Z_HOLD0, Z_HOLD1]];
     for (const [a, b] of holdSegs) B(int, T, CEIL, b - a, C.cargo, x + side * T / 2, CEIL / 2, (a + b) / 2);
     B(int, T, CEIL, Z_COCKPIT - Z_NOSE, C.panel2, x + side * T / 2, CEIL / 2, (Z_NOSE + Z_COCKPIT) / 2);
-    for (const wz of [-15.3, -14.4]) { const hz = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.42), glassMat); hz.position.set(x - side * 0.01, 1.55, wz); hz.rotation.y = -side * Math.PI / 2; plane.add(hz); }
+    for (const wz of [-15.35, -14.45]) {
+      const hz = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.34), glassMat);
+      hz.position.set(x - side * 0.015, 1.5, wz); hz.rotation.y = -side * Math.PI / 2; plane.add(hz);
+      B(int, 0.016, 0.38, 0.012, 0x3c4454, x - side * 0.03, 1.5, wz - 0.24);
+      B(int, 0.016, 0.38, 0.012, 0x3c4454, x - side * 0.03, 1.5, wz + 0.24);
+      B(int, 0.016, 0.012, 0.5, 0x3c4454, x - side * 0.03, 1.68, wz);
+      B(int, 0.016, 0.012, 0.5, 0x3c4454, x - side * 0.03, 1.32, wz);
+    }
   }
   sideWall(-1); sideWall(1);
   // cargo door frame (inside)
@@ -365,15 +374,17 @@ export function buildPlane({ quality = 'high' } = {}) {
   // ---- end walls / bulkheads / partitions
   B(int, HALF_W * 2, 1.05, T, C.dark, 0, 0.525, Z_NOSE - T / 2);
   colliders.push(aabb(-HALF_W, 0, Z_NOSE - T, HALF_W, CEIL, Z_NOSE));
-  for (const px of [-1.3, 0, 1.3]) B(int, 0.1, 1.45, 0.08, C.dark, px, 1.75, Z_NOSE - 0.05);
-  B(int, HALF_W * 2, 0.12, 0.1, C.dark, 0, 2.44, Z_NOSE - 0.05);
-  const wsGlass = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, 1.4), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.12, depthWrite: false }));
-  wsGlass.position.set(0, 1.75, Z_NOSE - 0.07); plane.add(wsGlass);
-  B(int, 0.07, 1.22, 0.08, 0x141820, -1.62, 1.72, Z_NOSE + 0.28);
-  B(int, 0.07, 1.22, 0.08, 0x141820, 1.62, 1.72, Z_NOSE + 0.28);
-  B(int, 0.05, 1.12, 0.07, 0x141820, 0, 1.82, Z_NOSE + 0.18);
-  B(int, 3.35, 0.07, 0.08, 0x141820, 0, 2.4, Z_NOSE + 0.14);
-  B(int, 3.05, 0.055, 0.1, 0x141820, 0, 1.14, Z_NOSE + 0.4);
+  const wsGlass = new THREE.Mesh(new THREE.PlaneGeometry(3.15, 1.05), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.1, depthWrite: false }));
+  wsGlass.position.set(0, 1.62, Z_NOSE - 0.04); plane.add(wsGlass);
+  // Thin posts. The old 10 cm mullions and the high sill read as a bar across the runway.
+  for (const px of [-1.05, 1.05]) B(int, 0.022, 0.92, 0.025, 0x2a3140, px, 1.58, Z_NOSE + 0.02);
+  B(int, 0.018, 0.88, 0.022, 0x2a3140, 0, 1.6, Z_NOSE + 0.015);
+  B(int, 3.05, 0.02, 0.022, 0x2a3140, 0, 2.08, Z_NOSE + 0.015);
+  B(int, 3.05, 0.022, 0.025, 0x2a3140, 0, 1.12, Z_NOSE + 0.04);
+  // Dark shroud just outside the glass, so the white nose skin cannot show as a ribbon.
+  B(int, 3.5, 0.22, 0.55, 0x1c2430, 0, 2.32, Z_NOSE - 0.28);
+  B(int, 0.32, 0.9, 0.55, 0x1c2430, 1.82, 1.58, Z_NOSE - 0.28);
+  B(int, 0.32, 0.9, 0.55, 0x1c2430, -1.82, 1.58, Z_NOSE - 0.28);
   // rear wall (inside face) with the door opening
   {
     const sh = new THREE.Shape(); sh.moveTo(-HALF_W, 0); sh.lineTo(HALF_W, 0); sh.lineTo(HALF_W, CEIL); sh.lineTo(-HALF_W, CEIL); sh.closePath();
