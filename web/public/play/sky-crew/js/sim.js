@@ -708,7 +708,7 @@ export class Sim {
     const it = [...this.items.values()].map((i) => [i.id, i.type, r(i.mesh.position.x), r(i.mesh.position.y), r(i.mesh.position.z), r(i.mesh.quaternion.x), r(i.mesh.quaternion.y), r(i.mesh.quaternion.z), r(i.mesh.quaternion.w), i.heldBy || '', i.manifest ? 1 : 0]);
     const px = this.pax.map((p) => [p.id, r(p.mesh.position.x), r(p.mesh.position.y), r(p.mesh.position.z), r(p.mesh.rotation.y), p.state, p.request || '', Math.round(p.mood), (p.panicT > 0 ? 1 : 0) | (p.sleep ? 2 : 0) | (p.dance > 0 ? 4 : 0) | (p.frozenT > 0 ? 8 : 0) | (p.cheerT > 0 ? 16 : 0) | (p.birthdayT > 0 ? 32 : 0) | (p.downT > 0.08 ? 64 : 0), p.flashT > 0 ? p.bubbleKind : '', p.carriedBy || '', p.sizeK || 1]);
     return {
-      seed: this.seed, ph: this.phase, doors: { rear: this.ship.doors.rear.open, cargo: this.ship.doors.cargo.open, ramp: this.ship.doors.ramp.open }, ground: this.groundOn,
+      seed: this.seed, ph: this.phase, doors: { rear: this.ship.doors.rear.open, cargo: this.ship.doors.cargo.open, ramp: this.ship.doors.ramp.open }, bins: (this.ship.bins || []).map((b) => (b.open ? '1' : '0')).join(''), ground: this.groundOn,
       it, px, ev: this.events.filter((e) => !e.done).map((e) => [e.id, Math.round(e.t), e.deadline || 0]), turb: r(this.turb), weather: this.weather, hour: this.hour, cfg: this.config || null,
       masks: this.ship.masks.visible, ef: this.flight.engineFail, el: this.emergencyLanding, counts: this.counts, res: this.results,
       plane: includePlane ? this.planeState() : null,
@@ -739,6 +739,14 @@ export class Sim {
     this.flight.engineFail = w.ef;
     this.ship.masks.visible = w.masks;
     for (const n of ['rear', 'cargo', 'ramp']) if (w.doors?.[n] != null && this.ship.doors[n] && this.ship.doors[n].open !== w.doors[n]) this.setDoor(n, w.doors[n]);
+    if (typeof w.bins === 'string' && this.ship.bins) {
+      const now = performance.now();
+      this.ship.bins.forEach((b, i) => {
+        if (b.holdUntil > now) return;
+        const open = w.bins[i] === '1';
+        if (b.open !== open) b.set(open);
+      });
+    }
     if (this.groundOn !== w.ground) this.setGround(w.ground);
     this.activeEvents = w.ev;
     const seen = new Set();

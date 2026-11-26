@@ -417,8 +417,9 @@ function buildClips(d) {
     p['foot.L'] = [Math.max(0, -s) * 0.3 * amp, 0, 0]; p['foot.R'] = [Math.max(0, s) * 0.3 * amp, 0, 0];
     arms(p, [-s * 0.6 * amp, 0, 0.12], [s * 0.6 * amp, 0, -0.12]);
     p['forearm.L'] = [0.3 + Math.max(0, -s) * 0.4 * amp, 0, 0]; p['forearm.R'] = [0.3 + Math.max(0, s) * 0.4 * amp, 0, 0];
-    p.hips = [0, s * 0.12 * amp, S(ph * TAU) * 0.05];
-    p.chest = [0.04 * amp, -s * 0.18 * amp, 0]; p.head = [0, s * 0.08, 0];
+    p.hips = [0, s * 0.04 * amp, S(ph * TAU) * 0.02];
+    p.spine = [0.02 * amp, 0, 0];
+    p.chest = [0.03 * amp, -s * 0.04 * amp, 0]; p.head = [0, s * 0.04, 0];
     p.hipsPos = [0, Math.abs(C(ph * TAU)) * bounce * amp - bounce * 0.3, 0];
     return p;
   };
@@ -428,13 +429,13 @@ function buildClips(d) {
     p['shin.L'] = p['shin.R'] = [-PI / 2 + 0.1, 0, 0];
     p['thigh.L'][2] = 0.06; p['thigh.R'] = [PI / 2, 0, -0.06];
     arms(p, [0.55, 0, 0.18], [0.55, 0, -0.18]); p['forearm.L'] = p['forearm.R'] = [0.75, 0, 0];
-    p.spine = [-0.05, 0, 0]; p.chest = [-0.04 + S(t * 1.8) * 0.015, 0, 0];
-    p.head = [S(t * 0.7) * 0.05, S(t * 0.4) * 0.35, 0];
+    p.spine = [-0.04, 0, 0]; p.chest = [-0.03 + S(t * 1.8) * 0.012, 0, 0];
+    p.head = [S(t * 0.7) * 0.04, S(t * 0.4) * 0.08, 0];
     p.hipsPos = [0, sitDY, sitDZ];
     return p;
   };
   const lerpPose = (a, b, k) => { const p = {}; for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) { const va = a[key] || [0, 0, 0], vb = b[key] || [0, 0, 0]; p[key] = [0, 1, 2].map((i) => va[i] + (vb[i] - va[i]) * k); } return p; };
-  const idlePose = (t) => { const p = base(); p.chest = [S(t * 2.2) * 0.025, 0, 0]; p.head = [S(t * 0.9) * 0.05, S(t * 0.55) * 0.25, S(t * 0.7) * 0.04]; arms(p, [S(t * 2.2) * 0.04, 0, 0.1], [S(t * 2.2) * 0.04, 0, -0.1]); p['forearm.L'] = p['forearm.R'] = [0.2, 0, 0]; p.hipsPos = [0, S(t * 2.2) * 0.006, 0]; return p; };
+  const idlePose = (t) => { const p = base(); p.chest = [S(t * 2.2) * 0.02, 0, 0]; p.spine = [S(t * 2.2) * 0.008, 0, 0]; p.head = [S(t * 0.9) * 0.04, S(t * 0.55) * 0.06, S(t * 0.7) * 0.015]; arms(p, [S(t * 2.2) * 0.03, 0, 0.08], [S(t * 2.2) * 0.03, 0, -0.08]); p['forearm.L'] = p['forearm.R'] = [0.18, 0, 0]; p.hipsPos = [0, S(t * 2.2) * 0.004, 0]; return p; };
   const clips = {};
   clips.idle = sampleClip('idle', 2 * PI / 0.55 / 2, 10, (t) => idlePose(t), rest);
   clips.walk = sampleClip('walk', 0.9, 24, (t, k) => walk(k, 1), rest);
@@ -540,8 +541,9 @@ export function animateCharacter(ch, dt, f = {}) {
 }
 
 // ---------------------------------------------------------------- local active ragdoll
-// Springs on top of the clip. No extra physics bodies: a handful of floats per character,
-// driven by the motion every client already has (position + the falling flag).
+// Springs on top of the clip. Twist limits, an upright balance torque and angular
+// damping keep the spine straight while idle, walking and sitting. A knockdown
+// (downK) is the only time the torso is allowed to fold.
 const _wv = new THREE.Vector3();
 const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
 function jelly(ch, dt, f) {
@@ -554,36 +556,40 @@ function jelly(ch, dt, f) {
   w.v.copy(_wv); w.last.copy(p);
   const ry = ch.rotation.y, c = Math.cos(ry), s = Math.sin(ry);
   const lx = ax * c - az * s, lz = ax * s + az * c; // acceleration in the character's frame (front = -z)
-  const K = 38, C = 4.6, G = 0.011 * (w.k || 1);
+  const K = 72, C = 14, G = 0.0035 * (w.k || 1), BAL = 36;
   for (const [i, a] of [[0, lx], [1, lz]]) {
-    const acc = -K * w.s[i] - C * w.sv[i] - clampN(a, -70, 70) * G;
-    w.sv[i] += acc * dt; w.s[i] = clampN(w.s[i] + w.sv[i] * dt, -0.7, 0.7);
+    const acc = -K * w.s[i] - C * w.sv[i] - w.s[i] * BAL - clampN(a, -40, 40) * G;
+    w.sv[i] = (w.sv[i] + acc * dt) * Math.max(0, 1 - dt * 3.5);
+    w.s[i] = clampN(w.s[i] + w.sv[i] * dt, -0.18, 0.18);
   }
   const moving = !!f.moving && !f.sitting;
-  const spd = Math.hypot(w.v.x, w.v.z);
-  w.step += dt * (moving ? (f.running ? 12.5 : 8.2) : 2.1);
+  w.step += dt * (moving ? (f.running ? 12.5 : 8.2) : 1.4);
   const step = Math.sin(w.step), step2 = Math.sin(w.step * 2);
-  const amp = (moving ? (f.running ? 1.35 : 1) : 0.28) * (w.k || 1);
+  const amp = (moving ? (f.running ? 0.7 : 0.45) : 0.08) * (w.k || 1);
   const hold = !!(f.carrying || f.sitting || f.parachute); // hands stay on the bag / armrests
-  const flop = hold ? 0.18 : 1;
+  const flop = hold ? 0.12 : 0.72;
   const downK = rag && (rag.phase === 'down' || rag.phase === 'rise') ? rag.k : 0;
-  const stumble = rag?.phase === 'stumble' ? rag.k : 0;
-  // footfalls feed the same spring so a steady walk still jiggles
-  if (moving) { w.sv[1] += step2 * dt * 7 * amp; w.sv[0] += step * dt * 4 * amp; }
-  const leanX = w.s[1], leanZ = w.s[0];
-  const squash = (1 - downK) * clampN((moving ? Math.abs(step2) * 0.07 * amp : Math.sin(u.t * 2.4) * 0.025) + Math.max(0, -w.v.y) * 0.012, -0.04, 0.12);
+  const stumble = rag?.phase === 'stumble' ? rag.k * 0.45 : 0;
+  const upright = f.sitting || (!f.flail && !f.parachute && downK < 0.02);
+  if (moving && !upright) { w.sv[1] += step2 * dt * 2 * amp; w.sv[0] += step * dt * 1.2 * amp; }
+  else if (moving) { w.sv[1] += step2 * dt * 1.1 * amp; }
+  const leanX = upright ? clampN(w.s[1], -0.06, 0.06) : w.s[1];
+  const leanZ = upright ? clampN(w.s[0], -0.04, 0.04) : w.s[0];
+  const twist = upright ? 0.035 : 0.16;
+  const squash = (1 - downK) * clampN((moving ? Math.abs(step2) * 0.035 * amp : Math.sin(u.t * 2.4) * 0.012) + Math.max(0, -w.v.y) * 0.008, -0.02, 0.06);
   if (B.hips) {
-    B.hips.scale.set(1 + squash, 1 - squash * 0.8, 1 + squash * 0.55);
-    B.hips.position.y += (moving ? Math.abs(step2) * 0.03 * amp : Math.sin(u.t * 2.4) * 0.008) - (u.dims?.hipY || 0.3) * 0.72 * downK;
-    B.hips.rotateZ(step * 0.1 * amp * (1 - downK) + leanZ * 0.4 + stumble * 0.28);
-    B.hips.rotateX(leanX * 0.28 + stumble * 0.45 + downK * 1.15);
+    B.hips.scale.set(1 + squash, 1 - squash * 0.8, 1 + squash * 0.4);
+    B.hips.position.y += (moving ? Math.abs(step2) * 0.018 * amp : Math.sin(u.t * 2.4) * 0.004) - (u.dims?.hipY || 0.3) * 0.72 * downK;
+    B.hips.rotateZ(clampN(step * 0.03 * amp * (1 - downK) + leanZ * 0.15, -twist, twist) + (upright ? 0 : stumble * 0.2));
+    B.hips.rotateX(clampN(leanX * 0.12, upright ? -0.05 : -0.3, upright ? 0.08 : 0.3) + stumble * 0.2 + downK * 1.15);
   }
-  B.spine?.rotateX(leanX * 0.4 + stumble * 0.3 + downK * 0.35);
-  B.spine?.rotateZ(leanZ * 0.5 + step * 0.05 * amp);
-  B.chest?.rotateX(-leanX * 0.3 * (1 - downK));
-  B.chest?.rotateZ(leanZ * 0.4 + Math.sin(u.t * 2.1) * 0.02 * (w.k || 1));
-  B.head?.rotateX(-leanX * 1.15 + step2 * 0.05 * amp - downK * 0.45);
-  B.head?.rotateZ(-leanZ * 0.95 + Math.sin(u.t * 1.7) * 0.03 * (w.k || 1));
+  const spineZ = clampN(leanZ * 0.2, -twist, twist);
+  B.spine?.rotateX(clampN(leanX * 0.12, upright ? -0.05 : -0.25, upright ? 0.06 : 0.25) + (upright ? 0 : stumble * 0.15) + downK * 0.35);
+  B.spine?.rotateZ(upright ? clampN(spineZ, -0.03, 0.03) : spineZ);
+  B.chest?.rotateX(clampN(-leanX * 0.08, -0.04, 0.04));
+  B.chest?.rotateZ(upright ? clampN(-spineZ * 0.6, -0.02, 0.02) : clampN(leanZ * 0.15, -0.1, 0.1));
+  B.head?.rotateX(clampN(-leanX * 0.35 + step2 * 0.02 * amp, -0.12, 0.1) - downK * 0.45);
+  B.head?.rotateZ(clampN(-leanZ * 0.2, upright ? -0.04 : -0.2, upright ? 0.04 : 0.2));
   // arms lag the body: a slow follow toward a loose target, so they overshoot and dangle
   if (!w.arm) w.arm = [0, 0, 0, 0];
   const follow = Math.min(1, dt * (hold ? 16 : 5.5));

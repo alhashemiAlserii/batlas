@@ -24,15 +24,16 @@ const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoi
 if (isTouch) document.body.classList.add('touch');
 
 // ---------------- quality / renderer / scene ----------------
-// auto: iPads and phones get "medium" (small soft shadow map, no MSAA), desktops "high".
+// auto: phones "medium" without MSAA, iPad "medium" with MSAA at a lower pixel ratio, desktops "high".
 const QKEY = 'skycrew.quality';
 const qualityPref = ['auto', 'low', 'medium', 'high'].includes(localStorage.getItem(QKEY)) ? localStorage.getItem(QKEY) : 'auto';
 const lowEnd = isTouch && (navigator.hardwareConcurrency || 4) <= 2;
+const tablet = isTouch && Math.min(screen.width || 0, screen.height || 0) >= 744;
 const quality = qualityPref !== 'auto' ? qualityPref : lowEnd ? 'low' : isTouch ? 'medium' : 'high';
 const Q = {
-  low: { aa: false, pr: 1, shadow: 0, soft: false, bloom: false, particles: false },
-  medium: { aa: !isTouch, pr: isTouch ? 1.5 : 1.5, shadow: 1024, soft: true, bloom: false, particles: true },
-  high: { aa: true, pr: 1.75, shadow: 2048, soft: true, bloom: !isTouch, particles: true },
+  low: { aa: false, pr: 1, shadow: 0, soft: false, bloom: false, particles: false, aniso: 1, shadowR: 0 },
+  medium: { aa: tablet || !isTouch, pr: isTouch ? (tablet ? 1.25 : 1.15) : 1.5, shadow: 1024, soft: true, bloom: false, particles: true, aniso: 4, shadowR: 2 },
+  high: { aa: true, pr: isTouch ? 1.5 : 1.75, shadow: isTouch ? 1024 : 2048, soft: true, bloom: !isTouch, particles: true, aniso: 8, shadowR: isTouch ? 2 : 4 },
 }[quality];
 const shotMode = new URLSearchParams(location.search).has('shot');
 const renderer = new THREE.WebGLRenderer({ antialias: Q.aa, powerPreference: 'high-performance', preserveDrawingBuffer: shotMode });
@@ -50,18 +51,36 @@ const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 4
 const env = buildWorld(scene, { quality });
 if (Q.shadow) {
   env.sun.castShadow = true; env.sun.shadow.mapSize.set(Q.shadow, Q.shadow);
-  env.sun.shadow.radius = quality === 'high' ? 4 : 2;
+  env.sun.shadow.radius = Q.shadowR || 2;
 }
 const SUN_OFF = new THREE.Vector3(350, 550, 250).normalize().multiplyScalar(600);
 const ship = buildPlane({ quality });
 const presenter = createPresenter(renderer, { bloom: Q.bloom });
-const fx = createFlightFx({ plane: ship.plane, camera, scene, quality, gearH: GEAR_H });
+const fx = createFlightFx({ plane: ship.plane, camera, scene, quality, gearH: GEAR_H, exhaust: ship.exhaust, tires: ship.tires });
 const terminal = buildTerminal(ship); // pre-flight airport behind the parked plane (before the physics world is built)
 // cabin key light: soft shadows from seats/bins/people (1024 map on iPad 'medium', 2048 on desktop 'high')
-if (Q.shadow) { const k = ship.cabin.key; k.castShadow = true; k.shadow.mapSize.set(Q.shadow, Q.shadow / 2); k.shadow.radius = quality === 'high' ? 5 : 3; if (quality !== 'high') k.shadow.autoUpdate = false; }
+if (Q.shadow) { const k = ship.cabin.key; k.castShadow = true; k.shadow.mapSize.set(Q.shadow, Q.shadow / 2); k.shadow.radius = quality === 'high' && !isTouch ? 5 : 2; if (quality !== 'high' || isTouch) k.shadow.autoUpdate = false; }
 let keyShadowT = 0; // medium (iPad): the cabin shadow map is refreshed at ~12 Hz instead of every frame
 const audio = new Audio();
 scene.add(ship.plane);
+tuneTextures(scene);
+function tuneTextures(root) {
+  const maxA = renderer.capabilities.getMaxAnisotropy?.() || 1;
+  const aniso = Math.min(Q.aniso || 1, maxA);
+  root.traverse((o) => {
+    const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    for (const m of mats) {
+      for (const key of ['map', 'emissiveMap']) {
+        const tex = m[key];
+        if (!tex || !tex.isTexture || tex.userData?.dynamic) continue;
+        tex.anisotropy = aniso;
+        if (tex.generateMipmaps !== false) tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.needsUpdate = true;
+      }
+    }
+  });
+}
 ship.plane.add(camera);
 const fireFx = new THREE.Group();
 for (let i = 0; i < 3; i++) {
@@ -110,7 +129,7 @@ sim.onRoute = () => refreshRouteUi();
 
 // ---------------- player ----------------
 const R = 0.3, H = 1.7, EYE = 1.58, STEP = 0.45;
-const SPAWN = new THREE.Vector3(7.5, -GEAR_H, 17.5); // on the apron, behind and right of the aircraft, facing the rear door
+const SPAWN = new THREE.Vector3(7.5, -GEAR_H, Z_TAIL + 6); // on the apron, behind and right of the aircraft, facing the rear door
 const me = { pos: SPAWN.clone(), vel: new THREE.Vector3(), yaw: 0.45, pitch: -0.05, onGround: false, mode: 'walk', third: false, moving: false, frozen: false, flying: false, downT: 0 };
 const DEFAULT_OUTFIT = { outfit: 'captain', hat: 'captain', color: 0, skin: 1 };
 let myOutfit = (() => { try { return { ...DEFAULT_OUTFIT, ...JSON.parse(localStorage.getItem('skycrew.outfit') || 'null') }; } catch { return { ...DEFAULT_OUTFIT }; } })();
@@ -512,6 +531,7 @@ function findTarget() {
     if (ip.term) { const tt = termTarget(ip, held); if (tt) consider(ip.pos, 2.4, tt); continue; }
     const t = { ...ip };
     if (ip.kind === 'door') t.label = `${ship.doors[ip.door].open ? 'Close' : 'Open'} the ${ip.label}`;
+    if (ip.kind === 'bin') { const b = ship.bins.find((x) => x.id === ip.bin); t.label = `${b?.open ? 'Close' : 'Open'} the overhead bin`; }
     if (ip.kind === 'dispense' && held) continue;
     if (ip.kind === 'pilot') { const pc = net.room?.pilotCid; if (pc && pc !== myId()) t.label = 'Someone is flying'; }
     if (ip.kind === 'copilot' && copilotTaken()) t.label = 'The co-pilot seat is taken';
@@ -545,6 +565,7 @@ function interact() {
     if (!sim.flight.onGround && !ship.doors[t.door].open) UI.toast('You opened a door mid-flight. Everyone is screaming. Hold on to something!', 'warn');
     return act({ k: 'door', d: t.door });
   }
+  if (t.kind === 'bin') { audio.play('click'); return act({ k: 'bin', id: t.bin }); }
   if (t.kind === 'dispense') { audio.play('pickup'); return act({ k: 'disp', item: t.item }); }
   if (t.kind === 'panel') return act({ k: 'fix' });
   if (t.kind === 'pilot') return takeSeat();
@@ -625,6 +646,7 @@ function act(a) {
     if (a.k === 'grabPax') { const p = sim.pax.find((q) => q.id === a.id); if (p && !p.carriedBy && !heldPax() && !heldItem()) { p.carriedBy = myId(); p.state = 'carried'; p.predictT = 0.6; p.predictMine = true; p.predictUntil = performance.now() + PREDICT_MS; } }
     if (a.k === 'dropPax') { const p = sim.pax.find((q) => q.id === a.id); if (p) { p.carriedBy = null; p.state = 'thrown'; p.mesh.position.set(...a.p); p.target = p.mesh.position.clone(); p.predictT = 0.3; p.predictMine = true; p.predictUntil = performance.now() + PREDICT_MS / 2; } }
     if (a.k === 'drop') { const it = sim.items.get(a.id); if (it) { it.heldBy = null; it.mesh.position.set(...a.p); it.target = { p: it.mesh.position.clone(), q: it.mesh.quaternion.clone() }; } }
+    if (a.k === 'bin') { const b = ship.bins.find((x) => x.id === a.id); if (b) { b.set(!b.open); b.holdUntil = performance.now() + 500; } }
     return;
   }
   applyAct(myId(), a);
@@ -666,6 +688,7 @@ function applyAct(cid, a) {
       break;
     }
     case 'door': if (['rear', 'cargo', 'ramp'].includes(a.d) && ship.doors[a.d] && sim.phase !== 'taxi') sim.setDoor(a.d, !ship.doors[a.d].open); break;
+    case 'bin': { const b = ship.bins.find((x) => x.id === a.id); if (b) b.set(!b.open); break; }
     case 'fix': sim.fixPanel(); break;
     case 'disp': {
       if (!['water', 'snack', 'blanket'].includes(a.item) || holderOf(cid)) break;
@@ -980,12 +1003,17 @@ function updateFlight(dt) {
   }
   // place the aircraft
   ship.plane.position.set(f.x, f.y, f.z);
-  const shake = sim.turb ? sim.turb * 0.012 : 0;
+  const shake = sim.turb ? sim.turb * 0.008 : 0;
   ship.plane.rotation.set(f.pitch + (Math.random() - 0.5) * shake, f.yaw, -f.bank + (Math.random() - 0.5) * shake, 'YXZ');
+  const tdAge = f.touchdown ? (Date.now() - f.touchdown.at) / 1000 : 9;
+  const tdShake = tdAge < 0.7 ? Math.min(1, Math.abs(f.touchdown.vs) / 7) * (1 - tdAge / 0.7) : 0;
+  const rollShake = f.onGround ? f.throttle * Math.min(1, f.speed / 45) * 0.012 : Math.abs(f.bank) * 0.004 + Math.abs(f.pitch) * 0.003;
+  ship.shake = (sim.turb || 0) * 0.02 + tdShake * 0.045 + rollShake;
   // local gravity: items slide aft when climbing
   const g = new THREE.Vector3(0, -9.82, 0).applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(f.pitch, 0, 0, 'YXZ')).invert());
   sim.world.gravity.set(g.x, g.y, g.z);
-  ship.gear.visible = sim.cabin.gearDown;
+  f.gearDown = !!sim.cabin.gearDown;
+  f.flaps = sim.cabin.flaps === 1 || sim.cabin.flaps === 2 ? sim.cabin.flaps : 0;
   if (ship.yokeTarget) { ship.yokeTarget.p = f.stickP || 0; ship.yokeTarget.r = f.stickR || 0; }
   if (ship.throttleLever?.userData) ship.throttleLever.userData.target = -0.55 + f.throttle * 1.15;
 }
@@ -1021,13 +1049,13 @@ function updateCamera() {
   if (menuUp && !shopOpen()) {
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const drift = reduce ? 0 : Math.sin(performance.now() * 0.00015);
-    camera.position.set(-22, 7.2, 16 + drift * 1.4);
-    camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(6, 1.6, -4)));
+    camera.position.set(-28, 9.2, Z_TAIL + 10 + drift * 1.4);
+    camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(8, 2.2, -2)));
     return;
   }
   const seated = me.mode === 'pilot' || me.mode === 'copilot';
   if (seated && me.third) {
-    camera.position.set(9, 6, 34); camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(0, 1, -8)));
+    camera.position.set(12, 7.5, Z_TAIL + 18); camera.lookAt(ship.plane.localToWorld(new THREE.Vector3(0, 1.2, -6)));
     return;
   }
   const eye = me.mode === 'pilot' ? new THREE.Vector3(-0.6, PILOT_EYE_Y, -14.42) : me.mode === 'copilot' ? new THREE.Vector3(0.6, PILOT_EYE_Y, -14.42) : eyePos();
@@ -1068,11 +1096,13 @@ function updateCamera() {
     camera.position.copy(eye);
     camera.rotation.set(me.pitch, me.yaw, 0, 'YXZ');
   }
-  if (sim.turb) {
-    const m = sim.turb * (quality === 'low' ? 0.02 : 0.04);
-    camera.position.x += (Math.random() - 0.5) * m;
-    camera.position.y += (Math.random() - 0.5) * m;
-    if (!me.third) camera.rotation.z = (Math.random() - 0.5) * sim.turb * 0.02;
+  const shakeAmp = ship.shake || 0;
+  if (shakeAmp > 0.0005) {
+    const tt = performance.now() / 1000;
+    const m = shakeAmp * (quality === 'low' ? 0.65 : 1);
+    camera.position.x += Math.sin(tt * 41) * m;
+    camera.position.y += Math.sin(tt * 53 + 1.2) * m * 0.7;
+    if (!me.third) camera.rotation.z += Math.sin(tt * 37) * m * 0.35;
   }
   void f;
 }
@@ -1140,13 +1170,16 @@ function updateWeather(dt) {
     rain.visible = wet;
     const a = rain.geometry.attributes.position.array;
     for (let i = 1; i < a.length; i += 3) { a[i] -= dt * 22; if (a[i] < -8) a[i] += 30; }
-    for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i]) < HALF_W + 0.3 && a[i + 1] > -0.5 && a[i + 1] < CEIL + 0.5 && a[i + 2] > -17 && a[i + 2] < 14) a[i + 1] = CEIL + 1;
+    for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i]) < HALF_W + 0.3 && a[i + 1] > -0.5 && a[i + 1] < CEIL + 0.5 && a[i + 2] > Z_NOSE - 1 && a[i + 2] < Z_TAIL + 1) a[i + 1] = CEIL + 1;
     rain.geometry.attributes.position.needsUpdate = true;
   }
   const warn = (sim.host ? sim.events.filter((e) => !e.done && e.fix).length : (sim.activeEvents || []).filter((e) => e[0] === 'engine_warning' || e[0] === 'cabin_pressure').length) > 0;
   ship.warnLight.intensity = warn ? (Math.sin(performance.now() / 180) > 0 ? 14 : 0) : 0;
   ship.panelLight.material = warn ? warnMat : okMat;
+  env.sea.position.x = ship.plane.position.x;
+  env.sea.position.z = ship.plane.position.z;
   if (env.sea.material.userData.uTime) env.sea.material.userData.uTime.value = performance.now() / 1000;
+  if (env.sea.material.userData.uOrigin) env.sea.material.userData.uOrigin.value.set(env.sea.position.x, env.sea.position.z);
   env.clouds.position.x = Math.sin(performance.now() / 9000) * 90;
   env.clouds.position.z = Math.cos(performance.now() / 12000) * 70;
   env.clouds.material.color.setScalar(storm ? 0.45 : wet ? 0.72 : 1);
@@ -1155,6 +1188,7 @@ function updateWeather(dt) {
   const hit = fx.update(dt, {
     wet, storm, seated: me.mode === 'pilot' || me.mode === 'copilot', fire: !!sim.fireOn, spill: !!sim.spillOn,
     warn, turb: sim.turb, onGround: sim.flight.onGround, flying: !sim.flight.onGround && (sim.flight.speed || 0) > 15, flash: flashT > 0,
+    throttle: sim.flight.throttle, speed: sim.flight.speed, alt: sim.flight.y - GEAR_H,
   });
   if (hit.bird && playing) UI.toast('Birds off the nose. Feathers on the windscreen.', 'warn');
 }
@@ -1614,7 +1648,7 @@ let settingsFrom = null;
 function openSettings(from) {
   settingsFrom = from;
   $('#setQuality').value = qualityPref;
-  const qNote = { low: 'Fastest: no shadows, no bloom, light particles, 1× resolution.', medium: 'Soft shadows and particles. The auto choice on iPad and iPhone. Bloom stays off so the cabin can hold 60fps.', high: 'Soft shadows, fuller clouds, and bloom on lights and gauges when the browser can keep an extra color target.' }[quality];
+  const qNote = { low: 'Fastest: no shadows, no bloom, light particles, 1× resolution.', medium: 'Soft shadows and particles. Auto picks this on iPhone and iPad, with a lower pixel ratio on phones so Safari stays smooth.', high: 'Softer shadows, fuller clouds, and bloom on lights and gauges when the browser can keep an extra color target.' }[quality];
   $('#setQualityNote').textContent = `Now using: ${quality}${qualityPref === 'auto' ? ' (auto)' : ''}. ${qNote}`;
   $('#volMaster').value = audio.vol.master; $('#volMusic').value = audio.vol.music; $('#volSfx').value = audio.vol.sfx;
   UI.show('#settings', true);
@@ -1971,7 +2005,7 @@ function frameBody() {
   if (playing && !paused) senseBumps(dt);
   else sim.follow(dt);
   tickLocalShift(dt);
-  ship.update(dt); // eased door animation (both directions) + cabin details
+  ship.update(dt, sim.flight); // doors, bins, gear, flaps and the flight-deck screens
   if (Q.shadow && quality !== 'high' && (keyShadowT += dt) > 0.083) { keyShadowT = 0; ship.cabin.key.shadow.needsUpdate = true; }
   sim.animate(dt);
   placeHeld();
@@ -2060,7 +2094,9 @@ window.skyCrew = {
     tris: () => { const out = []; scene.traverse((o) => { if (o.isMesh && o.geometry) { const g = o.geometry, n = (g.index ? g.index.count : g.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1); let k = o, path = []; while (k && k !== scene) { path.push(k.name || k.type); k = k.parent; } out.push([path.reverse().join('/'), Math.round(n)]); } }); const agg = {}; for (const [p, n] of out) { const key = p.split('/').slice(0, 3).join('/'); agg[key] = (agg[key] || 0) + n; } return Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 25); },
     planeTris: () => ship.plane.children.filter((o) => o.isMesh).map((o) => [o.name || '?', o.material?.type, Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3)]).sort((a, b) => b[2] - a[2]).slice(0, 12),
     perf: () => ({ fps: Math.round(perfStat.fps * 10) / 10, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, quality, shadows: renderer.shadowMap.enabled, bloom: presenter.enabled }),
-    gear: (down) => { sim.cabin.gearDown = !!down; ship.gear.visible = !!down; },
+    gear: (down) => { sim.cabin.gearDown = !!down; sim.flight.gearDown = !!down; },
+    bin: (id, open) => { const b = ship.bins.find((x) => x.id === (id || ship.bins[0]?.id)); if (!b) return null; if (open != null) b.set(!!open); else b.set(!b.open); return { id: b.id, open: b.open, t: b.t }; },
+    bins: () => ship.bins.map((b) => ({ id: b.id, open: b.open, z: +b.z.toFixed(2), side: b.side })),
     bird: () => fx.bird(),
     celebrate: () => fx.celebrate(),
     weather: (w, hour) => { if (w) sim.weather = w; if (hour != null) sim.hour = hour; },

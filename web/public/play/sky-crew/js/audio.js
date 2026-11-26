@@ -59,8 +59,12 @@ export class Audio {
   update(s) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, L = this.loops, k = 0.12;
+    const dt = Math.min(0.1, Math.max(0, t - (this._t || t)));
+    this._t = t;
     const run = s.engines ? 1 : 0;
-    const thr = s.throttle * run, spd = Math.min(1, s.speed / 90);
+    const want = (s.throttle || 0) * run;
+    this.spool = (this.spool || 0) + (want - (this.spool || 0)) * Math.min(1, dt * (want > (this.spool || 0) ? 0.85 : 1.4));
+    const thr = this.spool, spd = Math.min(1, s.speed / 90);
     const inside = s.inside ? 0.55 : 1;
     L.hum1.g.gain.setTargetAtTime((0.03 + thr * 0.09) * run * inside, t, k);
     L.hum1.src.frequency.setTargetAtTime(48 + thr * 40, t, k);
@@ -73,7 +77,8 @@ export class Audio {
     L.roar.f.frequency.setTargetAtTime(400 + thr * 1400, t, k);
     L.air.g.gain.setTargetAtTime(s.inside ? 0.035 + spd * 0.02 : 0, t, 0.3);
     L.rain.g.gain.setTargetAtTime(s.storm ? (s.inside ? 0.03 : 0.08) : 0, t, 0.4);
-    L.wind.g.gain.setTargetAtTime((s.inside ? 0 : spd * 0.05) + (s.turb || 0) * 0.04, t, 0.3);
+    L.wind.g.gain.setTargetAtTime((s.inside ? 0.01 : 0.02) + spd * (s.inside ? 0.035 : 0.1) + (s.turb || 0) * 0.05 + (s.onGround && spd > 0.25 ? spd * 0.03 : 0), t, 0.28);
+    L.wind.f.frequency.setTargetAtTime(380 + spd * 1100 + (1 - (s.inside ? 1 : 0)) * 200, t, 0.3);
     if (s.storm && Math.random() < 0.002) this.thunder();
   }
   env(g, t0, a, peak, dec) { g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + a); g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + dec); }
