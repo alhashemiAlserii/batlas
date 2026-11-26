@@ -127,10 +127,11 @@ function paintNav(ctx, w, h, f) {
 
 function makeYoke(parent, x) {
   const root = new THREE.Group();
-  root.position.set(x, 1.28, -15.22);
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.78, 12), metal());
-  column.position.set(0, -0.42, 0.06);
-  column.rotation.x = 0.35;
+  // Below the sight line. A polished column here used to catch a white highlight across the glass.
+  root.position.set(x, 1.0, -15.12);
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.048, 0.42, 12), plastic(0x2a303c, 0.84));
+  column.position.set(0, -0.22, 0.04);
+  column.rotation.x = 0.55;
   column.castShadow = true;
   root.add(column);
   const boot = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), plastic(0x242a38, 0.7));
@@ -143,7 +144,7 @@ function makeYoke(parent, x) {
   wheel.add(ring);
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
-    const sp = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 0.028), metal());
+    const sp = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.026, 0.024), plastic(0x3a4250, 0.7));
     sp.position.set(Math.cos(a) * 0.08, Math.sin(a) * 0.08, 0);
     sp.rotation.z = a;
     wheel.add(sp);
@@ -166,10 +167,10 @@ function makeYoke(parent, x) {
   return root;
 }
 
-/** Two thrust levers, a flap lever and a trim wheel on the centre pedestal. */
+/** Two thrust levers, a flap lever and a trim wheel on the centre pedestal. Forward of the seats. */
 function makeQuadrant(parent) {
   const base = new THREE.Group();
-  base.position.set(0, 0.78, -14.55);
+  base.position.set(0, 0.72, -15.05);
   const shell = new THREE.Mesh(rbox(0.42, 0.22, 0.72, 0.04), plastic(0x1c2433, 0.48));
   shell.position.y = 0.08;
   shell.castShadow = true;
@@ -258,133 +259,181 @@ function overhead(parent) {
   parent.add(g);
 }
 
+/** Centre engine screen. Two columns, original layout, not a copy of a type-certificate display. */
+function paintEng(ctx, w, h, f) {
+  const thr = f ? Math.round((f.throttle || 0) * 100) : 0;
+  ctx.fillStyle = '#0c1218';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#7d8ea3';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(8, 8, w - 16, h - 16);
+  ctx.fillStyle = '#c5d0dc';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('POWER', 18, 36);
+  for (const [name, cx] of [['L', 0.3], ['R', 0.7]]) {
+    const x = w * cx;
+    ctx.fillStyle = '#9aa8b8';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(name, x, 64);
+    ctx.fillStyle = '#1a2430';
+    ctx.fillRect(x - 26, 78, 52, 120);
+    ctx.fillStyle = thr > 88 ? '#ffb15a' : '#3ddc97';
+    const bh = Math.max(4, (thr / 100) * 112);
+    ctx.fillRect(x - 20, 192 - bh, 40, bh);
+    ctx.fillStyle = '#e7eef6';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText(String(thr), x, 230);
+  }
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = '#8ea0b4';
+  ctx.textAlign = 'left';
+  ctx.fillText('FAN', 18, h - 16);
+}
+
+function paintGuide(ctx, w, h, f) {
+  const spd = f ? Math.round((f.speed || 0) * 1.94384) : 0;
+  const alt = f ? Math.max(0, Math.round(((f.y || 2.4) - 2.4) * 3.28084)) : 0;
+  const hdg = f ? Math.round((((f.yaw || 0) * 180 / Math.PI) % 360 + 360) % 360) : 0;
+  ctx.fillStyle = '#2c3440';
+  ctx.fillRect(0, 0, w, h);
+  const cells = [['SPD', String(spd)], ['HDG', String(hdg).padStart(3, '0')], ['ALT', String(alt)], ['VS', '0']];
+  cells.forEach(([k, v], i) => {
+    const x = 12 + i * (w / 4);
+    ctx.fillStyle = '#10161c';
+    ctx.fillRect(x, 10, w / 4 - 24, h - 20);
+    ctx.fillStyle = '#8ea0b4';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(k, x + 8, 32);
+    ctx.fillStyle = '#d7ffe9';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText(v, x + 8, 62);
+  });
+}
+
+function wornGrey() {
+  const map = canvasTexture(128, 128, (g, w, h) => {
+    g.fillStyle = '#4a5362';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 480; i++) {
+      const a = Math.random() * 0.07;
+      g.fillStyle = Math.random() > 0.55 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a + 0.02})`;
+      g.fillRect(Math.random() * w, Math.random() * h, 2, 1);
+    }
+  }, { repeat: [2, 2] });
+  return stylize(new THREE.MeshStandardMaterial({ map, color: 0x9aa3b0, roughness: 0.88, metalness: 0.02, envMapIntensity: 0.12 }));
+}
+
 /**
  * Visual flight deck parented to the aircraft. Colliders and seat interact points stay in world.js.
  * Returns the yoke and throttle handles the flight model already drives.
  */
 export function buildDeck(plane) {
-  const shell = plastic(0x141a28, 0.72);
-  const glare = new THREE.Mesh(rbox(3.5, 0.1, 0.85, 0.04), plastic(0x1a120c, 0.4));
-  glare.position.set(0, 1.16, -15.55);
-  glare.rotation.x = -0.42;
-  glare.castShadow = true;
+  const shell = wornGrey();
+  // Low, thin glareshield. A deep tilted slab here used to fill the middle of the windshield.
+  const glare = new THREE.Mesh(new THREE.BoxGeometry(3.05, 0.028, 0.22), shell);
+  glare.position.set(0, 1.34, -15.62);
+  glare.rotation.x = -0.12;
   plane.add(glare);
-  const lip = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.035, 0.08), plastic(0x0e1218, 0.5));
-  lip.position.set(0, 1.28, -15.95);
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(2.95, 0.012, 0.03), plastic(0x1a2028, 0.92));
+  lip.position.set(0, 1.37, -15.74);
   plane.add(lip);
-  const main = new THREE.Mesh(rbox(3.55, 0.72, 0.12, 0.03), shell);
-  main.position.set(0, 0.95, -15.72);
-  main.castShadow = true;
-  plane.add(main);
-  const pedestal = new THREE.Mesh(rbox(0.55, 0.7, 1.15, 0.04), plastic(0x222838, 0.5));
-  pedestal.position.set(0, 0.38, -14.35);
-  pedestal.castShadow = true;
+  const mainPanel = new THREE.Mesh(new THREE.BoxGeometry(3.05, 0.72, 0.04), shell);
+  mainPanel.position.set(0, 1.05, -15.42);
+  mainPanel.rotation.x = -0.35;
+  plane.add(mainPanel);
+  const pedestal = new THREE.Mesh(rbox(0.46, 0.16, 0.55, 0.03), shell);
+  pedestal.position.set(0, 0.78, -15.02);
   plane.add(pedestal);
 
-  const attCanvas = document.createElement('canvas');
-  attCanvas.width = 512;
-  attCanvas.height = 320;
-  const navCanvas = document.createElement('canvas');
-  navCanvas.width = 512;
-  navCanvas.height = 320;
-  const attCtx = attCanvas.getContext('2d');
-  const navCtx = navCanvas.getContext('2d');
-  paintAtt(attCtx, 512, 320, null);
-  paintNav(navCtx, 512, 320, null);
-  const attTex = new THREE.CanvasTexture(attCanvas);
-  const navTex = new THREE.CanvasTexture(navCanvas);
-  attTex.colorSpace = navTex.colorSpace = THREE.SRGBColorSpace;
-  attTex.userData.dynamic = navTex.userData.dynamic = true;
-  attTex.generateMipmaps = navTex.generateMipmaps = false;
-  attTex.minFilter = navTex.minFilter = THREE.LinearFilter;
-  const attMat = new THREE.MeshBasicMaterial({ map: attTex });
-  const navMat = new THREE.MeshBasicMaterial({ map: navTex });
-  attMat.toneMapped = navMat.toneMapped = false;
-  for (const sx of [-0.72, 0.72]) {
-    const att = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.26), attMat);
-    att.position.set(sx - 0.02, 1.02, -15.64);
-    att.rotation.x = -0.18;
-    const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.3, 0.02), plastic(0x0c1016, 0.35));
-    bezel.position.copy(att.position);
-    bezel.position.z -= 0.012;
-    bezel.rotation.x = -0.18;
-    plane.add(bezel, att);
-    const nav = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.22), navMat);
-    nav.position.set(sx + 0.02, 0.74, -15.66);
-    nav.rotation.x = -0.12;
-    const bezel2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.26, 0.02), plastic(0x0c1016, 0.35));
-    bezel2.position.copy(nav.position);
-    bezel2.position.z -= 0.012;
-    bezel2.rotation.x = -0.12;
-    plane.add(bezel2, nav);
+  function liveCanvas(w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.userData.dynamic = true;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    const mat = new THREE.MeshBasicMaterial({ map: tex });
+    mat.toneMapped = false;
+    return { canvas: c, ctx: c.getContext('2d'), tex, mat };
   }
-  const standby = screenTex(128, 128, (g, w, h) => {
-    g.fillStyle = '#061018';
-    g.fillRect(0, 0, w, h);
-    g.strokeStyle = '#9fd8ff';
-    g.lineWidth = 4;
-    g.beginPath();
-    g.arc(64, 64, 40, 0.4, Math.PI * 2 - 0.2);
-    g.stroke();
-    g.strokeStyle = '#ff5a6a';
-    g.beginPath();
-    g.moveTo(64, 64);
-    g.lineTo(86, 40);
-    g.stroke();
-    g.fillStyle = '#9fd8ff';
-    g.font = 'bold 16px sans-serif';
-    g.textAlign = 'center';
-    g.fillText('STBY', 64, 112);
-  });
-  const st = new THREE.Mesh(new THREE.CircleGeometry(0.055, 20), new THREE.MeshBasicMaterial({ map: standby }));
-  st.material.toneMapped = false;
-  st.position.set(0, 1.05, -15.6);
-  const stBezel = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 6, 18), metal());
-  stBezel.position.copy(st.position);
-  plane.add(st, stBezel);
+  const att = liveCanvas(512, 320);
+  const nav = liveCanvas(512, 320);
+  const eng = liveCanvas(512, 300);
+  const guide = liveCanvas(640, 96);
+  paintAtt(att.ctx, 512, 320, null);
+  paintNav(nav.ctx, 512, 320, null);
+  paintEng(eng.ctx, 512, 300, null);
+  paintGuide(guide.ctx, 640, 96, null);
+  const bezelMat = plastic(0x1a2028, 0.75);
+  function display(mat, w, h, x, y, z, tilt) {
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    screen.position.set(x, y, z);
+    screen.rotation.x = tilt;
+    const bezel = new THREE.Mesh(new THREE.BoxGeometry(w + 0.03, h + 0.03, 0.012), bezelMat);
+    bezel.position.set(x, y, z - 0.01);
+    bezel.rotation.x = tilt;
+    plane.add(bezel, screen);
+  }
+  // Each seat: attitude above, map below. Centre: engine screen. All sit under the glareshield.
+  for (const sx of [-0.82, 0.82]) {
+    display(att.mat, 0.4, 0.22, sx, 1.2, -15.26, -0.48);
+    display(nav.mat, 0.4, 0.18, sx, 0.98, -15.2, -0.46);
+  }
+  display(eng.mat, 0.48, 0.32, 0, 1.08, -15.26, -0.4);
+  const guideMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.055), guide.mat);
+  guideMesh.position.set(0, 1.36, -15.5);
+  guideMesh.rotation.x = -0.85;
+  plane.add(guideMesh);
 
-  const yokes = [makeYoke(plane, -0.62), makeYoke(plane, 0.62)];
+  const yokes = [makeYoke(plane, -0.58), makeYoke(plane, 0.58)];
   const quad = makeQuadrant(plane);
   overhead(plane);
 
+  // Seats sit behind the eye point. The old backrest reached into the camera and filled the frame.
   for (const sx of [-0.62, 0.62]) {
     const seat = new THREE.Group();
-    seat.position.set(sx, 0, -14.6);
-    const cushion = new THREE.Mesh(rbox(0.52, 0.12, 0.5, 0.05), plastic(0x2c3344, 0.7));
-    cushion.position.set(0, 0.86, 0);
-    cushion.castShadow = true;
-    const back = new THREE.Mesh(rbox(0.5, 0.72, 0.12, 0.05), plastic(0x2c3344, 0.7));
-    back.position.set(0, 1.22, 0.22);
-    back.rotation.x = -0.12;
-    back.castShadow = true;
-    const head = new THREE.Mesh(rbox(0.32, 0.16, 0.1, 0.04), plastic(0x1e2433, 0.65));
-    head.position.set(0, 1.62, 0.28);
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.78, 10), metal());
-    post.position.y = 0.42;
+    seat.position.set(sx, 0, -14.35);
+    const cushion = new THREE.Mesh(rbox(0.48, 0.1, 0.46, 0.04), plastic(0x2c3344, 0.82));
+    cushion.position.set(0, 0.78, 0.05);
+    const back = new THREE.Mesh(rbox(0.46, 0.55, 0.08, 0.04), plastic(0x2c3344, 0.82));
+    back.position.set(0, 1.08, 0.28);
+    back.rotation.x = -0.08;
+    const head = new THREE.Mesh(rbox(0.28, 0.12, 0.07, 0.03), plastic(0x232a36, 0.8));
+    head.position.set(0, 1.4, 0.32);
     for (const s of [-1, 1]) {
-      const arm = new THREE.Mesh(rbox(0.06, 0.05, 0.36, 0.02), plastic(0x1a2030, 0.6));
-      arm.position.set(s * 0.28, 1.02, 0.02);
+      const arm = new THREE.Mesh(rbox(0.05, 0.04, 0.32, 0.015), plastic(0x1a2030, 0.75));
+      arm.position.set(s * 0.26, 0.92, 0.08);
       seat.add(arm);
     }
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.012, 0.04), plastic(0xf5c542, 0.45));
-    belt.position.set(0, 0.94, 0.12);
-    seat.add(cushion, back, head, post, belt);
+    seat.add(cushion, back, head);
     plane.add(seat);
   }
+  // Stowed sun visors, up against the brow, one each side. They do not cross the centre pane.
+  for (const sx of [-1.15, 1.15]) {
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.008, 0.16), plastic(0x2a3038, 0.75));
+    visor.position.set(sx, 2.22, -15.7);
+    visor.rotation.x = -1.35;
+    plane.add(visor);
+  }
 
-  const flood = new THREE.PointLight(0xfff4e2, 1.4, 3.2, 1.6);
-  flood.position.set(0, 2.05, -14.9);
+  const flood = new THREE.PointLight(0xfff1dc, 0.55, 4.2, 1.8);
+  flood.position.set(0, 2.15, -14.6);
   plane.add(flood);
-  const chart = new THREE.PointLight(0x9fd8ff, 0.35, 1.6, 2);
-  chart.position.set(0, 1.35, -15.3);
+  const chart = new THREE.PointLight(0xc5d4e4, 0.22, 2.2, 2);
+  chart.position.set(0, 1.45, -15.1);
   plane.add(chart);
 
   let acc = 0;
   function paint(flight) {
-    paintAtt(attCtx, 512, 320, flight);
-    paintNav(navCtx, 512, 320, flight);
-    attTex.needsUpdate = true;
-    navTex.needsUpdate = true;
+    paintAtt(att.ctx, 512, 320, flight);
+    paintNav(nav.ctx, 512, 320, flight);
+    paintEng(eng.ctx, 512, 300, flight);
+    paintGuide(guide.ctx, 640, 96, flight);
+    att.tex.needsUpdate = nav.tex.needsUpdate = eng.tex.needsUpdate = guide.tex.needsUpdate = true;
   }
   return {
     yokes,
