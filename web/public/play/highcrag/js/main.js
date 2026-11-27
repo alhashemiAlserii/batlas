@@ -2244,7 +2244,7 @@ function drawClimbGraph(cv, pts) {
   g.fillStyle = '#4a4038'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'right';
   for (const a of [0, Math.round(top / 2), Math.round(top)]) g.fillText(`${a} m`, pad.l - 6, Y(a) + 4);
   g.textAlign = 'center';
-  for (let k = 0; k <= 4; k++) g.fillText(fmtTime((t1 * k) / 4), X((t1 * k) / 4), H - 7);
+  for (let k = 0; k <= 4; k++) { g.textAlign = k === 4 ? 'right' : 'center'; g.fillText(fmtTime((t1 * k) / 4), k === 4 ? W - pad.r : X((t1 * k) / 4), H - 7); }
 }
 function lightBeacon(by = null) {
   if (world.beacon.lit) return;
