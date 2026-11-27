@@ -2425,7 +2425,7 @@ const fpHands = (() => {
   const skin = new THREE.MeshToonMaterial({ color: 0xe8b997, gradientMap: toonRamp });
   const sleeve = new THREE.MeshToonMaterial({ color: 0xe0453a, gradientMap: toonRamp });
   const cuffM = new THREE.MeshToonMaterial({ color: 0xf2ece0, gradientMap: toonRamp });
-  const fingerGeo = new THREE.CapsuleGeometry(0.035, 0.06, 10, 18);
+  const fingerGeo = new THREE.CapsuleGeometry(0.035, 0.08, 10, 18);
   const hands = [-1, 1].map((sx) => {
     const h = new THREE.Group();
     const palm = new THREE.Mesh(new THREE.SphereGeometry(0.1, 28, 20), skin);
@@ -2439,15 +2439,15 @@ const fpHands = (() => {
       const f = new THREE.Mesh(fingerGeo, skin);
       // Fingers touch each other (no gaps); index and middle are a touch longer than the pinky.
       f.scale.y = [0.95, 1.05, 1.0, 0.82][i];
-      f.position.y = 0.045;
+      f.position.y = 0.055;
       k.add(f);
       h.add(k);
       fingers.push(k);
     }
     const thumbK = new THREE.Group();
-    thumbK.position.set(-sx * 0.078, -0.015, 0.02);
-    thumbK.rotation.z = sx * 0.55;
-    thumbK.rotation.x = 0.25;
+    thumbK.position.set(-sx * 0.08, -0.01, -0.012);
+    thumbK.rotation.z = sx * 0.75;
+    thumbK.rotation.x = -0.15;
     const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.038, 0.05, 10, 18), skin);
     thumb.position.y = 0.045;
     thumbK.add(thumb);
@@ -2484,8 +2484,8 @@ function updateFpHands(dt, show) {
     const up = Math.max(0, s), dn = Math.max(0, -s);
     L.position.set(-0.38 - up * 0.03, -0.04 + up * 0.2, -0.7);
     Rh.position.set(0.38 + dn * 0.03, -0.04 + dn * 0.2, -0.7);
-    L.rotation.set(0.35, 0, 0.3 + up * 0.1);
-    Rh.rotation.set(0.35, 0, -0.3 - dn * 0.1);
+    L.rotation.set(0.05, 0, 0.3 + up * 0.1);
+    Rh.rotation.set(0.05, 0, -0.3 - dn * 0.1);
     curlHand(L, s > 0.2 ? 0 : -0.15);
     curlHand(Rh, s < -0.2 ? 0 : -0.15);
     for (const h of U.hands) h.userData.spread(0.02);
