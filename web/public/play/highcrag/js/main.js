@@ -2217,7 +2217,7 @@ function drawClimbGraph(cv, pts) {
   g.clearRect(0, 0, W, H);
   const pad = { l: 44, r: 12, t: 12, b: 24 };
   const top = Math.max(50, world.beacon.pos.y);
-  const t1 = Math.max(60, pts.length ? pts[pts.length - 1][0] : 60);
+  const t1 = pts.reduce((m, q) => Math.max(m, q[0]), 60);
   const X = (t) => pad.l + (t / t1) * (W - pad.l - pad.r);
   const Y = (a) => H - pad.b - (Math.min(top, a) / top) * (H - pad.t - pad.b);
   // Zone bands, low to high.
@@ -2287,7 +2287,7 @@ function lightBeacon(by = null) {
     row('Difficulty', D().name);
     if (runBadges.earned.length) row('Badges this climb', runBadges.earned.map((b) => `${b.icon} ${b.name}`).join(', '), 'best');
     if (isBest) row('', '★ New personal best!', 'best');
-    drawClimbGraph($('#resGraph'), [...stats.alt, [elapsed, world.beacon.pos.y]]);
+    drawClimbGraph($('#resGraph'), [...stats.alt, [Math.max(elapsed, stats.alt.length ? stats.alt[stats.alt.length - 1][0] : 0), world.beacon.pos.y]]);
     const team = [...coop.remotes.values()].map((r) => r.name);
     $('#resTeam').textContent = coop.on ? `${by ? `${by} lit the beacon. ` : ''}${team.length ? `Climbed with ${team.join(', ')}.` : ''}` : '';
     $('#btnAgain').textContent = coop.on ? 'Back to the menu' : 'Fly again';
