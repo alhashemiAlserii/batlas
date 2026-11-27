@@ -2446,8 +2446,8 @@ const fpHands = (() => {
     thumbK.add(thumb);
     const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.07, 14), cuffM);
     cuff.position.y = -0.12;
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.11, 0.6, 14), sleeve);
-    arm.position.y = -0.45;
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.13, 1.4, 14), sleeve);
+    arm.position.y = -0.85;
     h.add(thumbK, cuff, arm);
     h.userData.fingers = fingers;
     h.userData.spread = (a) => fingers.forEach((k, i) => { k.rotation.z = (i - 1.5) * a * -sx; });
