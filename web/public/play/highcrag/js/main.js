@@ -516,7 +516,24 @@ function buildWorld(seed) {
     lid.add(lidMesh, handle);
     const strap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.49, 0.62), trim);
     strap.position.y = 0.245;
+    // Chunky details: dark corner bumpers, brass latches and a pale luggage tag.
+    const brass = new THREE.MeshStandardMaterial({ color: 0xd9a63a, roughness: 0.4, metalness: 0.5 });
+    for (const cx of [-0.42, 0.42]) for (const cz of [-0.27, 0.27]) {
+      const bump = new THREE.Mesh(new RoundedBoxGeometry(0.12, 0.44, 0.12, 2, 0.04), trim);
+      bump.position.set(cx, 0.22, cz);
+      g.add(bump);
+    }
+    for (const lx of [-0.26, 0.26]) {
+      const latch = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.08, 0.04, 2, 0.015), brass);
+      latch.position.set(lx, 0.31, 0.305);
+      g.add(latch);
+    }
+    const tag = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.14, 0.015, 1, 0.01), new THREE.MeshStandardMaterial({ color: 0xf4ead2, roughness: 0.9 }));
+    tag.position.set(0.12, 0.08, 0.62);
+    tag.rotation.z = 0.25;
+    lid.add(tag);
     g.add(base, lid, strap);
+    g.scale.setScalar(1.35);
     g.position.set(it.pos.x, it.pos.y, it.pos.z);
     g.rotation.y = rng() * 6.28;
     g.traverse((o) => { if (o.isMesh) { o.castShadow = Q.shadows; o.receiveShadow = Q.shadows; } });
@@ -618,7 +635,7 @@ function resetRun(sameSeed, forceSeed) {
   runBadges.earned = [];
   setZoom(false);
   elapsed = 0;
-  stats = { falls: 0, blackouts: 0, eaten: 0, pitons: 0, ropes: 0, maxAlt: 0 };
+  stats = { falls: 0, blackouts: 0, eaten: 0, pitons: 0, ropes: 0, maxAlt: 0, alt: [], altT: 0, marks: [] };
   checkpoint = world.spawn.clone();
   blizzard = { t: 45, on: false, k: 0 };
   rain = { t: 40, on: false, k: 0 };
@@ -1946,6 +1963,9 @@ function updateSurvival(dt) {
     lastBand = band;
   }
   stats.maxAlt = Math.max(stats.maxAlt, y);
+  // Altitude log for the climb report graph: a sample every 4 s of climbing.
+  stats.altT -= dt;
+  if (stats.altT <= 0) { stats.altT = 4; stats.alt.push([elapsed, Math.max(0, y)]); if (stats.alt.length > 1500) stats.alt.splice(0, 2); }
   S.hunger = Math.min(1, S.hunger + (D().hunger * dt) / (band.id === 'crown' ? 620 : 800));
   S.poison = Math.max(0, S.poison - 0.004 * dt);
   S.chalkT = Math.max(0, S.chalkT - dt);
@@ -2028,6 +2048,7 @@ function updateSurvival(dt) {
 function blackout(msg) {
   if (state !== 'play' || P.isDown) return;
   stats.blackouts++;
+  stats.marks.push([elapsed, P.pos.y]);
   if (coop.on && coop.remotes.size > 0) {
     P.isDown = true;
     P.downT = D().downT;
@@ -2185,6 +2206,46 @@ function respawnAtCamp(msg) {
   setTimeout(() => f.classList.add('hidden'), 2600);
 }
 
+/** The climb report: altitude over time, with the zones shaded behind and a dot for every blackout. */
+function drawClimbGraph(cv, pts) {
+  if (!cv || !cv.getContext) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = 560, H = 170;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const pad = { l: 44, r: 12, t: 12, b: 24 };
+  const top = Math.max(50, world.beacon.pos.y);
+  const t1 = Math.max(60, pts.length ? pts[pts.length - 1][0] : 60);
+  const X = (t) => pad.l + (t / t1) * (W - pad.l - pad.r);
+  const Y = (a) => H - pad.b - (Math.min(top, a) / top) * (H - pad.t - pad.b);
+  // Zone bands, low to high.
+  const bandCols = { shore: '#f3e3bf', moss: '#cfe5c2', fungal: '#e3d3ec', frost: '#e2eef8', canyon: '#f1d2bd', crown: '#f0c9c0' };
+  for (const b of BANDS) {
+    const lo = Math.max(0, b.y0), hi = Math.min(top, b.y1);
+    if (hi <= lo) continue;
+    g.fillStyle = bandCols[b.id] || '#eee';
+    g.fillRect(pad.l, Y(hi), W - pad.l - pad.r, Y(lo) - Y(hi));
+  }
+  // Campfire heights as dashed lines.
+  g.strokeStyle = 'rgba(224,69,58,.55)'; g.setLineDash([4, 4]); g.lineWidth = 1;
+  for (const c of world.camps) { g.beginPath(); g.moveTo(pad.l, Y(c.pos.y)); g.lineTo(W - pad.r, Y(c.pos.y)); g.stroke(); }
+  g.setLineDash([]);
+  // The climb itself: a thick dark line.
+  g.strokeStyle = '#1d1a17'; g.lineWidth = 3.5; g.lineJoin = 'round';
+  g.beginPath();
+  pts.forEach(([t, a], i) => (i ? g.lineTo(X(t), Y(a)) : g.moveTo(X(t), Y(a))));
+  g.stroke();
+  for (const m of stats.marks) { g.fillStyle = '#e0453a'; g.beginPath(); g.arc(X(m[0]), Y(m[1]), 4.5, 0, 6.29); g.fill(); }
+  g.fillStyle = '#f2c33b'; g.strokeStyle = '#1d1a17'; g.lineWidth = 2;
+  if (pts.length) { const [t, a] = pts[pts.length - 1]; g.beginPath(); g.arc(X(t), Y(a), 6, 0, 6.29); g.fill(); g.stroke(); }
+  // Axes.
+  g.fillStyle = '#4a4038'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'right';
+  for (const a of [0, Math.round(top / 2), Math.round(top)]) g.fillText(`${a} m`, pad.l - 6, Y(a) + 4);
+  g.textAlign = 'center';
+  for (let k = 0; k <= 4; k++) g.fillText(fmtTime((t1 * k) / 4), X((t1 * k) / 4), H - 7);
+}
 function lightBeacon(by = null) {
   if (world.beacon.lit) return;
   world.beacon.lit = true;
@@ -2226,6 +2287,7 @@ function lightBeacon(by = null) {
     row('Difficulty', D().name);
     if (runBadges.earned.length) row('Badges this climb', runBadges.earned.map((b) => `${b.icon} ${b.name}`).join(', '), 'best');
     if (isBest) row('', '★ New personal best!', 'best');
+    drawClimbGraph($('#resGraph'), [...stats.alt, [elapsed, world.beacon.pos.y]]);
     const team = [...coop.remotes.values()].map((r) => r.name);
     $('#resTeam').textContent = coop.on ? `${by ? `${by} lit the beacon. ` : ''}${team.length ? `Climbed with ${team.join(', ')}.` : ''}` : '';
     $('#btnAgain').textContent = coop.on ? 'Back to the menu' : 'Fly again';
@@ -2345,29 +2407,48 @@ function wakeOnBeach() {
 // ---------------- camera ----------------
 const camTarget = new V3();
 // First-person view (P, or the 👁 button): see through your climber's eyes, hands gripping the rock in front.
-let firstPerson = !!store.get('fp', false);
+let firstPerson = !!store.get('fp2', true);
 function setFirstPerson(on) {
   firstPerson = on;
-  store.set('fp', on);
+  store.set('fp2', on);
   $('#btnView').classList.toggle('on', on);
   if (!on && climber.userData.head) climber.userData.head.visible = true;
 }
-// First-person hands: two mittens with sleeve cuffs that live on the camera.
+// First-person hands: two big cartoon hands (palm, four fingers, thumb) with chunky sleeves, on the camera.
 const fpHands = (() => {
   const g = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xe8b997, roughness: 0.6 });
-  const sleeve = new THREE.MeshStandardMaterial({ color: 0xe0453a, roughness: 0.8 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe8b997, roughness: 0.7 });
+  const sleeve = new THREE.MeshStandardMaterial({ color: 0xe0453a, roughness: 0.85 });
+  const cuffM = new THREE.MeshStandardMaterial({ color: 0xf2ece0, roughness: 0.9 });
+  const fingerGeo = new THREE.CapsuleGeometry(0.026, 0.07, 4, 10);
   const hands = [-1, 1].map((sx) => {
     const h = new THREE.Group();
-    const palm = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.15, 0.06, 3, 0.03), skin);
-    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.05, 4, 8), skin);
-    thumb.position.set(-sx * 0.065, -0.02, 0.01);
-    thumb.rotation.z = sx * 0.7;
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.07, 0.12, 12), sleeve);
-    cuff.position.y = -0.13;
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.5, 12), sleeve);
-    arm.position.y = -0.42;
-    h.add(palm, thumb, cuff, arm);
+    const palm = new THREE.Mesh(new RoundedBoxGeometry(0.17, 0.17, 0.08, 3, 0.035), skin);
+    h.add(palm);
+    const fingers = [];
+    for (let i = 0; i < 4; i++) {
+      // Each finger hangs off a knuckle pivot so it can curl around a hold.
+      const k = new THREE.Group();
+      k.position.set((i - 1.5) * 0.041 * sx, 0.085, 0);
+      const f = new THREE.Mesh(fingerGeo, skin);
+      f.scale.y = i === 0 || i === 3 ? 0.85 : 1;
+      f.position.y = 0.05;
+      k.add(f);
+      h.add(k);
+      fingers.push(k);
+    }
+    const thumbK = new THREE.Group();
+    thumbK.position.set(-sx * 0.085, -0.01, 0.015);
+    thumbK.rotation.z = sx * 0.9;
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.06, 4, 10), skin);
+    thumb.position.y = 0.045;
+    thumbK.add(thumb);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.07, 14), cuffM);
+    cuff.position.y = -0.12;
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.11, 0.6, 14), sleeve);
+    arm.position.y = -0.45;
+    h.add(thumbK, cuff, arm);
+    h.userData.fingers = fingers;
     g.add(h);
     return h;
   });
@@ -2375,6 +2456,7 @@ const fpHands = (() => {
   g.userData = { hands, skin, sleeve, t: 0 };
   return g;
 })();
+const curlHand = (h, c) => { for (const k of h.userData.fingers) k.rotation.x = -c; };
 camera.add(fpHands);
 scene.add(camera);
 function updateFpHands(dt, show) {
@@ -2388,17 +2470,22 @@ function updateFpHands(dt, show) {
   if (P.mode === 'climb' || P.mode === 'rope' || P.mode === 'zip') {
     // Reaching up the rock, one hand then the other.
     const s = Math.sin(P.anim);
-    L.position.set(-0.26, 0.05 + Math.max(0, s) * 0.16, -0.5);
-    Rh.position.set(0.26, 0.05 + Math.max(0, -s) * 0.16, -0.5);
-    L.rotation.set(-0.25, 0, -0.15);
-    Rh.rotation.set(-0.25, 0, 0.15);
+    L.position.set(-0.3, 0.0 + Math.max(0, s) * 0.18, -0.55);
+    Rh.position.set(0.3, 0.0 + Math.max(0, -s) * 0.18, -0.55);
+    L.rotation.set(-0.2, 0, -0.18);
+    Rh.rotation.set(-0.2, 0, 0.18);
+    // The reaching hand opens, the gripping hand curls around the hold.
+    curlHand(L, s > 0.2 ? 0.2 : 1.1);
+    curlHand(Rh, s < -0.2 ? 0.2 : 1.1);
   } else {
     // Low at your sides, swinging gently as you walk.
     const b = Math.sin(P.anim) * 0.04 * Math.min(1, P.moveAmt);
-    L.position.set(-0.32, -0.36 + b, -0.55);
-    Rh.position.set(0.32, -0.36 - b, -0.55);
-    L.rotation.set(-1.1, 0, -0.2);
-    Rh.rotation.set(-1.1, 0, 0.2);
+    L.position.set(-0.36, -0.4 + b, -0.6);
+    Rh.position.set(0.36, -0.4 - b, -0.6);
+    L.rotation.set(-1.0, 0, -0.25);
+    Rh.rotation.set(-1.0, 0, 0.25);
+    curlHand(L, 0.55);
+    curlHand(Rh, heldOther ? 1.3 : 0.55);
   }
 }
 function updateFirstPerson() {
@@ -2535,7 +2622,7 @@ function updateScene(dt, now) {
       // Still packed in a suitcase: hidden. Unpacked: resting in the open case, not floating.
       if (inCase(it)) { it.mesh.visible = false; continue; }
       it.mesh.visible = true;
-      if (it.unpacked) { it.mesh.position.y = it.pos.y + 0.36; continue; }
+      if (it.unpacked) { it.mesh.position.y = it.pos.y + 0.48; continue; }
       it.mesh.position.y = it.pos.y + 0.45 + Math.sin(now * 2 + it.phase) * 0.08;
       it.mesh.rotation.y += dt * 1.2;
     }
@@ -3395,6 +3482,8 @@ requestAnimationFrame(frame);
 // Test/debug hook (read-only snapshot + teleport), used by the e2e smoke tests.
 window.__highcrag = {
   get state() { return state; },
+  get stats() { return stats; },
+  lightBeacon: () => lightBeacon(),
   get player() { return { mode: P.mode, x: P.pos.x, y: P.mode === 'climb' ? world.T.height(P.cx, P.cz) : P.pos.y, z: P.pos.z }; },
   get vitals() { return { ...S }; },
   get inv() { return [...inv]; },

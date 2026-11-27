@@ -474,3 +474,11 @@ body.touch #chatPanel kbd{display:none}
 #loading.ld-scene.live .ld-pan{opacity:0;transition:opacity 1.2s ease}
 #loading.ld-scene.live .ld-shade{background:linear-gradient(0deg,rgba(8,10,24,.5),transparent 45%)}
 body.booting #title{visibility:hidden}
+
+/* Desktop: a chunky outlined stamina bar in the bottom-left corner (touch keeps its own layout). */
+body:not(.touch) #vitals{left:calc(20px + env(safe-area-inset-left));transform:none;width:min(440px,36vw);bottom:calc(20px + env(safe-area-inset-bottom))}
+body:not(.touch) #legend{justify-content:flex-start;flex-wrap:wrap}
+body:not(.touch) #bar{height:28px;border:4px solid #1d1a17;border-radius:9px;box-shadow:0 0 0 2px rgba(255,246,228,.85),0 5px 0 rgba(0,0,0,.35)}
+body:not(.touch) #bar .ticks{background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 3px),rgba(29,26,23,.55) calc(10% - 3px) 10%)}
+body:not(.touch) #inv .slot{border-width:4px;border-color:#1d1a17;box-shadow:0 0 0 2px rgba(255,246,228,.85),0 5px 0 rgba(0,0,0,.35)}
+#resGraph{display:block;width:100%;max-width:560px;aspect-ratio:560/170;margin:6px auto 10px;border-radius:12px;border:3px solid #1d1a17;background:#fff8ea}
