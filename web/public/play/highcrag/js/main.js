@@ -2439,7 +2439,8 @@ const fpHands = (() => {
     }
     const thumbK = new THREE.Group();
     thumbK.position.set(-sx * 0.085, -0.01, 0.015);
-    thumbK.rotation.z = sx * 0.9;
+    thumbK.rotation.z = sx * 0.55;
+    thumbK.rotation.x = 0.25;
     const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.06, 4, 10), skin);
     thumb.position.y = 0.045;
     thumbK.add(thumb);
@@ -2449,6 +2450,7 @@ const fpHands = (() => {
     arm.position.y = -0.45;
     h.add(thumbK, cuff, arm);
     h.userData.fingers = fingers;
+    h.userData.spread = (a) => fingers.forEach((k, i) => { k.rotation.z = (i - 1.5) * a * -sx; });
     g.add(h);
     return h;
   });
@@ -2470,13 +2472,16 @@ function updateFpHands(dt, show) {
   if (P.mode === 'climb' || P.mode === 'rope' || P.mode === 'zip') {
     // Reaching up the rock, one hand then the other.
     const s = Math.sin(P.anim);
-    L.position.set(-0.3, 0.0 + Math.max(0, s) * 0.18, -0.55);
-    Rh.position.set(0.3, 0.0 + Math.max(0, -s) * 0.18, -0.55);
-    L.rotation.set(-0.2, 0, -0.18);
-    Rh.rotation.set(-0.2, 0, 0.18);
-    // The reaching hand opens, the gripping hand curls around the hold.
-    curlHand(L, s > 0.2 ? 0.2 : 1.1);
-    curlHand(Rh, s < -0.2 ? 0.2 : 1.1);
+    // Open hands pressed flat on the rock, fingers splayed up and out; the fingertips bend into the wall
+    // (away from you). The reaching hand stretches up with fingers straight, the holding one digs in.
+    const up = Math.max(0, s), dn = Math.max(0, -s);
+    L.position.set(-0.36 - up * 0.03, -0.02 + up * 0.2, -0.62);
+    Rh.position.set(0.36 + dn * 0.03, -0.02 + dn * 0.2, -0.62);
+    L.rotation.set(0.12, 0, 0.32 + up * 0.12);
+    Rh.rotation.set(0.12, 0, -0.32 - dn * 0.12);
+    curlHand(L, s > 0.2 ? -0.05 : -0.55);
+    curlHand(Rh, s < -0.2 ? -0.05 : -0.55);
+    for (const h of U.hands) h.userData.spread(0.14);
   } else {
     // Low at your sides, swinging gently as you walk.
     const b = Math.sin(P.anim) * 0.04 * Math.min(1, P.moveAmt);
@@ -2484,6 +2489,7 @@ function updateFpHands(dt, show) {
     Rh.position.set(0.36, -0.4 - b, -0.6);
     L.rotation.set(-1.0, 0, -0.25);
     Rh.rotation.set(-1.0, 0, 0.25);
+    for (const h of U.hands) h.userData.spread(0);
     curlHand(L, 0.55);
     curlHand(Rh, heldOther ? 1.3 : 0.55);
   }
