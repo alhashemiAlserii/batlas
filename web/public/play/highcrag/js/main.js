@@ -2475,10 +2475,10 @@ function updateFpHands(dt, show) {
     // Open hands pressed flat on the rock, fingers splayed up and out; the fingertips bend into the wall
     // (away from you). The reaching hand stretches up with fingers straight, the holding one digs in.
     const up = Math.max(0, s), dn = Math.max(0, -s);
-    L.position.set(-0.36 - up * 0.03, -0.02 + up * 0.2, -0.62);
-    Rh.position.set(0.36 + dn * 0.03, -0.02 + dn * 0.2, -0.62);
-    L.rotation.set(0.12, 0, 0.32 + up * 0.12);
-    Rh.rotation.set(0.12, 0, -0.32 - dn * 0.12);
+    L.position.set(-0.38 - up * 0.03, -0.04 + up * 0.2, -0.7);
+    Rh.position.set(0.38 + dn * 0.03, -0.04 + dn * 0.2, -0.7);
+    L.rotation.set(0.35, 0, 0.3 + up * 0.1);
+    Rh.rotation.set(0.35, 0, -0.3 - dn * 0.1);
     curlHand(L, s > 0.2 ? -0.05 : -0.55);
     curlHand(Rh, s < -0.2 ? -0.05 : -0.55);
     for (const h of U.hands) h.userData.spread(0.14);
