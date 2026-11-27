@@ -2419,7 +2419,7 @@ const fpHands = (() => {
   const g = new THREE.Group();
   // Flat cartoon shading (two soft tones, no shiny gradients), so the overlapping palm, fingers and thumb
   // melt into one smooth hand instead of looking like carved wooden pieces.
-  const toonRamp = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 255, 255, 255, 255]), 2, 1);
+  const toonRamp = new THREE.DataTexture(new Uint8Array([84, 84, 84, 255, 150, 150, 150, 255]), 2, 1);
   toonRamp.minFilter = toonRamp.magFilter = THREE.NearestFilter;
   toonRamp.needsUpdate = true;
   const skin = new THREE.MeshToonMaterial({ color: 0xe8b997, gradientMap: toonRamp });
@@ -2486,8 +2486,8 @@ function updateFpHands(dt, show) {
     Rh.position.set(0.38 + dn * 0.03, -0.04 + dn * 0.2, -0.7);
     L.rotation.set(0.35, 0, 0.3 + up * 0.1);
     Rh.rotation.set(0.35, 0, -0.3 - dn * 0.1);
-    curlHand(L, s > 0.2 ? -0.1 : -0.4);
-    curlHand(Rh, s < -0.2 ? -0.1 : -0.4);
+    curlHand(L, s > 0.2 ? 0 : -0.15);
+    curlHand(Rh, s < -0.2 ? 0 : -0.15);
     for (const h of U.hands) h.userData.spread(0.02);
   } else {
     // Low at your sides, swinging gently as you walk.
