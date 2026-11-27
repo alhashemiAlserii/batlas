@@ -357,8 +357,10 @@ export function terrainMaterial(q) {
       diffuseColor.rgb *= 0.96 + hc_noise(floor(vWP.xz * 0.6) + floor(vWP.y * 0.6)) * 0.08;
       // Cartoon rock: dark ink blotches on steep faces, hard-edged like a painted pattern.
       vec3 hcN = normalize(cross(dFdx(vWP), dFdy(vWP)));
-      float hcSteep = smoothstep(0.5, 0.72, 1.0 - abs(hcN.y));
-      float hcB = hc_noise3(vWP * vec3(0.16, 0.24, 0.16)) * 0.68 + hc_noise3(vWP * 0.62 + 4.0) * 0.32;
+      float hcSl = 1.0 - abs(hcN.y);
+      float hcGrey = 1.0 - smoothstep(0.035, 0.07, max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)) - min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b)));
+      float hcSteep = max(smoothstep(0.62, 0.8, hcSl), hcGrey * smoothstep(0.12, 0.28, hcSl));
+      float hcB = hc_noise3(vWP * vec3(0.24, 0.34, 0.24)) * 0.68 + hc_noise3(vWP * 0.9 + 4.0) * 0.32;
       float hcInk = smoothstep(0.585, 0.605, hcB) * hcSteep;
       float hcRim = smoothstep(0.555, 0.57, hcB) * (1.0 - smoothstep(0.585, 0.6, hcB)) * hcSteep;
       diffuseColor.rgb *= 1.0 - hcInk * 0.5 - hcRim * 0.18;`);
