@@ -354,12 +354,29 @@ export function terrainMaterial(q) {
     sh.vertexShader = 'attribute float glow;\nvarying float vGlow;\nvarying vec3 vWP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;\nvWP = transformed;');
     let frag = 'uniform float uTime;\nvarying float vGlow;\nvarying vec3 vWP;\n' + NOISE_GLSL + sh.fragmentShader;
     frag = frag.replace('#include <color_fragment>', `#include <color_fragment>
-      diffuseColor.rgb *= 0.96 + hc_noise(floor(vWP.xz * 0.6) + floor(vWP.y * 0.6)) * 0.08;`);
+      diffuseColor.rgb *= 0.96 + hc_noise(floor(vWP.xz * 0.6) + floor(vWP.y * 0.6)) * 0.08;
+      // Cartoon rock: dark ink blotches on steep faces, hard-edged like a painted pattern.
+      vec3 hcN = normalize(cross(dFdx(vWP), dFdy(vWP)));
+      float hcSl = 1.0 - abs(hcN.y);
+      float hcGrey = 1.0 - smoothstep(0.035, 0.07, max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)) - min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b)));
+      float hcSteep = max(smoothstep(0.62, 0.8, hcSl), hcGrey * smoothstep(0.12, 0.28, hcSl));
+      float hcB = hc_noise3(vWP * vec3(0.24, 0.34, 0.24)) * 0.68 + hc_noise3(vWP * 0.9 + 4.0) * 0.32;
+      float hcInk = smoothstep(0.585, 0.605, hcB) * hcSteep;
+      float hcRim = smoothstep(0.555, 0.57, hcB) * (1.0 - smoothstep(0.585, 0.6, hcB)) * hcSteep;
+      diffuseColor.rgb *= 1.0 - hcInk * 0.5 - hcRim * 0.18;`);
+    // Toon light: sunlight falls into a few soft bands instead of a smooth gradient.
+    frag = frag.replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+      {
+        float hcR = dot(reflectedLight.directDiffuse, vec3(0.3333)) / max(dot(diffuseColor.rgb, vec3(0.3333)), 0.001);
+        float hcF = hcR / 0.95;
+        float hcQ = 0.12 * smoothstep(0.02, 0.07, hcF) + 0.38 * smoothstep(0.22, 0.3, hcF) + 0.5 * smoothstep(0.55, 0.63, hcF) + 0.15 * smoothstep(0.95, 1.05, hcF);
+        reflectedLight.directDiffuse *= (hcQ * 0.95) / max(hcR, 0.0001);
+      }`);
     frag = frag.replace('#include <emissivemap_fragment>',
       '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.32, 0.05) * vGlow * (0.9 + 0.35 * sin(uTime * 1.7 + vGlow * 6.0));');
     sh.fragmentShader = frag;
   };
-  mat.customProgramCacheKey = () => 'terrain-faceted';
+  mat.customProgramCacheKey = () => 'terrain-toon';
   return mat;
 }
 
